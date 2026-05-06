@@ -1333,24 +1333,27 @@ app.on('before-quit', async (event) => {
       logToFile('2s wait complete');
     }
 
-    // Phase 2: Save terminal states and mark Claude terminals as interrupted
+    // Phase 2: Save terminal states and mark CLI agent terminals as interrupted
     logToFile('Phase 2: saving terminal states');
     console.log('[Main] Saving terminal states...');
     await terminalPanelManager.saveAllTerminalStates();
 
     const interruptedPanels = new Map<string, string[]>(); // sessionId → panelIds
 
-    // Find all terminal panels running Claude and mark them as interrupted
+    // Find all terminal panels running supported CLI agents and mark them as interrupted
     const allTerminalPanelIds = terminalPanelManager.getAllPanelIds();
     for (const panelId of allTerminalPanelIds) {
       const panel = panelManager.getPanel(panelId);
       if (!panel) continue;
 
       const customState = (panel.state?.customState || {}) as TerminalPanelState;
-      const hadClaude = customState.initialCommand && customState.initialCommand.toLowerCase().includes('claude');
+      const initialCommand = customState.initialCommand?.toLowerCase() ?? '';
+      const agentType = customState.agentType ??
+        (initialCommand.includes('claude') ? 'claude' : initialCommand.includes('codex') ? 'codex' : undefined);
 
-      if (hadClaude) {
+      if (agentType === 'claude' || agentType === 'codex') {
         customState.wasInterrupted = true;
+        customState.agentType = agentType;
         panel.state.customState = customState;
         await panelManager.updatePanel(panelId, { state: panel.state });
 
@@ -1361,7 +1364,7 @@ app.on('before-quit', async (event) => {
           interruptedPanels.set(panel.sessionId, [panelId]);
         }
         logToFile(`Marked terminal panel ${panelId} as interrupted`);
-        console.log(`[Main] Marked terminal panel ${panelId} as interrupted (Claude CLI, session-id = panel ID)`);
+        console.log(`[Main] Marked terminal panel ${panelId} as interrupted (${agentType} CLI)`);
       }
     }
 

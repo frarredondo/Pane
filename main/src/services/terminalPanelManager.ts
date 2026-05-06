@@ -27,6 +27,8 @@ const IDLE_THRESHOLD_MS = 30_000; // 30s — mark panel idle after no PTY output
 const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
 const MAX_ALTERNATE_SCREEN_BUFFER_SIZE = 100_000; // 100KB of recent TUI redraw state
 
+type CliAgentType = NonNullable<TerminalPanelState['agentType']>;
+
 /**
  * IPty-compatible shim over a ptyHost `PtyHandle`.
  *
@@ -149,6 +151,8 @@ interface TerminalProcess {
   idleTimer: ReturnType<typeof setTimeout> | null;
   // DEC Mode 2026 synchronized-output block tracking — persists across chunks
   inSyncBlock: boolean;
+  codexAgentSessionId?: string;
+  codexResumeOutputBuffer: string;
 }
 
 export class TerminalPanelManager {
@@ -160,6 +164,54 @@ export class TerminalPanelManager {
   // Spawn concurrency limiter — prevents CPU spikes when many terminals init at once
   private activeSpawns = 0;
   private spawnQueue: Array<{ resolve: () => void; priority: number }> = [];
+
+  private getCliAgentType(command?: string): CliAgentType | undefined {
+    const lower = command?.toLowerCase() ?? '';
+    if (lower.includes('claude')) return 'claude';
+    if (lower.includes('codex')) return 'codex';
+    return undefined;
+  }
+
+  private stripAnsiSequences(output: string): string {
+    // eslint-disable-next-line no-control-regex
+    return output.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g, '');
+  }
+
+  private extractCodexResumeId(output: string): string | undefined {
+    const clean = this.stripAnsiSequences(output);
+    const match = clean.match(/\bcodex\s+resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i);
+    return match?.[1];
+  }
+
+  private captureCodexSessionId(terminal: TerminalProcess, output: string): void {
+    terminal.codexResumeOutputBuffer = this.trimAnsiSafe(
+      terminal.codexResumeOutputBuffer + output,
+      2000
+    );
+
+    const agentSessionId = this.extractCodexResumeId(terminal.codexResumeOutputBuffer);
+    if (!agentSessionId) return;
+
+    const panel = panelManager.getPanel(terminal.panelId);
+    if (!panel) return;
+
+    const customState = (panel.state.customState || {}) as TerminalPanelState;
+    const agentType = customState.agentType ?? this.getCliAgentType(customState.initialCommand);
+    if (agentType !== 'codex' || customState.agentSessionId === agentSessionId) return;
+
+    terminal.codexAgentSessionId = agentSessionId;
+
+    panel.state.customState = {
+      ...customState,
+      agentType: 'codex',
+      agentSessionId
+    } as TerminalPanelState;
+
+    void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
+      console.warn(`[TerminalPanelManager] Failed to persist Codex session id for panel ${terminal.panelId}:`, error);
+    });
+    console.log(`[TerminalPanelManager] Captured Codex session id for panel ${terminal.panelId}: ${agentSessionId}`);
+  }
 
   setAnalyticsManager(analyticsManager: AnalyticsManager): void {
     this.analyticsManager = analyticsManager;
@@ -557,7 +609,8 @@ export class TerminalPanelManager {
       isAlternateScreen: false,
       activityStatus: 'idle',
       idleTimer: null,
-      inSyncBlock: false
+      inSyncBlock: false,
+      codexResumeOutputBuffer: ''
     };
 
     // Store in map (ptyHost path: pid is already populated on the shim).
@@ -584,22 +637,23 @@ export class TerminalPanelManager {
     let commandToRun: string | undefined;
     if (initialCommand) {
       commandToRun = initialCommand;
+      const cliAgentType = this.getCliAgentType(initialCommand);
 
       // Mark CLI tool panels so the frontend can show an init overlay
-      const isCliCommand = initialCommand.toLowerCase().includes('claude') ||
-        initialCommand.toLowerCase().includes('codex');
+      const isCliCommand = cliAgentType !== undefined;
       if (isCliCommand) {
         const cliState = panel.state;
         const cliCs = (cliState.customState || {}) as TerminalPanelState;
         cliCs.isCliPanel = true;
         cliCs.isCliReady = false; // Reset on (re-)launch so the overlay shows for fresh CLI processes
+        cliCs.agentType = cliAgentType;
         cliState.customState = cliCs;
         // Will be persisted below — either by the claude-specific block or the explicit call after it
       }
 
       // If this is a Claude CLI command, inject --session-id or --resume
       if (
-        initialCommand.toLowerCase().includes('claude') &&
+        cliAgentType === 'claude' &&
         !initialCommand.includes('--session-id') &&
         !initialCommand.includes('--resume')
       ) {
@@ -801,6 +855,7 @@ export class TerminalPanelManager {
 
       // Strip \x1b[2J inside DEC 2026 sync blocks before xterm.js sees the data
       const filtered = this.filterSyncBlockClears(terminal, data);
+      this.captureCodexSessionId(terminal, filtered);
 
       // Keep TUI redraw traffic separate from durable shell scrollback. Full-screen
       // apps emit high-volume cursor/clear sequences that are useful only as a
@@ -1020,7 +1075,10 @@ export class TerminalPanelManager {
       commandHistory: terminal.commandHistory.slice(-100), // Keep last 100 commands
       lastActivityTime: terminal.lastActivity.toISOString(),
       lastActiveCommand: terminal.currentCommand,
-      serializedBuffer: this.serializedBuffers.get(panelId)
+      serializedBuffer: this.serializedBuffers.get(panelId),
+      ...(terminal.codexAgentSessionId
+        ? { agentType: 'codex' as const, agentSessionId: terminal.codexAgentSessionId }
+        : {})
     } as TerminalPanelState;
     
     await panelManager.updatePanel(panelId, { state });

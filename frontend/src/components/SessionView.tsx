@@ -334,7 +334,7 @@ export const SessionView = memo(() => {
     category: 'tools',
     enabled: () => isInSessionView,
     action: () => handlePanelCreate('terminal', {
-      initialCommand: 'codex',
+      initialCommand: 'codex --yolo',
       title: 'Codex'
     }),
   });
@@ -1034,7 +1034,7 @@ export const SessionView = memo(() => {
                         <button
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium text-text-tertiary border border-border-primary hover:bg-surface-hover hover:text-text-secondary transition-colors whitespace-nowrap flex-shrink-0"
                           onClick={() => handlePanelCreate('terminal', {
-                            initialCommand: 'codex',
+                            initialCommand: 'codex --yolo',
                             title: 'Codex'
                           })}
                         >
@@ -1190,7 +1190,7 @@ export const SessionView = memo(() => {
                           <button
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium text-text-tertiary border border-border-primary hover:bg-surface-hover hover:text-text-secondary transition-colors whitespace-nowrap flex-shrink-0"
                             onClick={() => handlePanelCreate('terminal', {
-                              initialCommand: 'codex',
+                              initialCommand: 'codex --yolo',
                               title: 'Codex'
                             })}
                           >

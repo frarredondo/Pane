@@ -51,6 +51,8 @@ export interface TerminalPanelState {
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
+  agentType?: 'claude' | 'codex';    // CLI agent type for panel-local resume behavior
+  agentSessionId?: string;           // Agent-generated session ID for resuming conversations
 
   // CLI tool init state
   isCliPanel?: boolean;              // True if this terminal runs a CLI tool (claude/codex)
