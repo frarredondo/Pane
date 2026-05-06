@@ -1790,8 +1790,17 @@ export class SessionManager extends EventEmitter {
         if (panel.type === 'terminal') {
           const termState = panel.state?.customState as TerminalPanelState | undefined;
           if (termState?.wasInterrupted && termState?.initialCommand) {
-            // Panel ID was used as --session-id when launching Claude, so it IS the resume ID
-            resumablePanels.push({ panelId: panel.id, panelType: 'terminal', resumeId: panel.id });
+            const agentType = termState.agentType ?? this.getTerminalAgentType(termState.initialCommand);
+            if (agentType === 'claude') {
+              // Panel ID was used as --session-id when launching Claude, so it IS the resume ID.
+              resumablePanels.push({ panelId: panel.id, panelType: 'terminal', resumeId: panel.id });
+            } else if (agentType === 'codex') {
+              resumablePanels.push({
+                panelId: panel.id,
+                panelType: 'terminal',
+                resumeId: termState.agentSessionId ?? 'interactive'
+              });
+            }
           }
         }
       }
@@ -1830,10 +1839,27 @@ export class SessionManager extends EventEmitter {
           const termState = panel.state?.customState as TerminalPanelState | undefined;
 
           if (termState?.wasInterrupted && termState?.initialCommand) {
-            // Panel ID was passed as --session-id on original launch, so use it as resume ID
             const state = panel.state;
             const customState = (state.customState || {}) as TerminalPanelState;
-            customState.initialCommand = `claude --resume ${panel.id} --dangerously-skip-permissions`;
+            const agentType = customState.agentType ?? this.getTerminalAgentType(customState.initialCommand);
+
+            if (agentType === 'claude') {
+              // Panel ID was passed as --session-id on original launch, so use it as resume ID.
+              customState.initialCommand = `claude --resume ${panel.id} --dangerously-skip-permissions`;
+            } else if (agentType === 'codex') {
+              customState.initialCommand = customState.agentSessionId
+                ? `codex resume --yolo ${customState.agentSessionId}`
+                : 'codex resume --yolo';
+              customState.agentType = 'codex';
+              if (customState.agentSessionId) {
+                console.log(`[SessionManager] Resuming Codex panel ${panel.id} with captured session ${customState.agentSessionId}`);
+              } else {
+                console.warn(`[SessionManager] Codex panel ${panel.id} has no captured session id; opening interactive resume picker`);
+              }
+            } else {
+              continue;
+            }
+
             customState.wasInterrupted = undefined;
             state.customState = customState;
 
@@ -1844,7 +1870,7 @@ export class SessionManager extends EventEmitter {
             const reloadedPanel = this.db.getPanel(panel.id);
             if (reloadedPanel) {
               await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
-              console.log(`[SessionManager] Resumed terminal panel ${panel.id} with claude --resume ${panel.id}`);
+              console.log(`[SessionManager] Resumed terminal panel ${panel.id} with ${customState.initialCommand}`);
               resumedPanelCount++;
             }
           }
@@ -1862,5 +1888,12 @@ export class SessionManager extends EventEmitter {
       this.db.updateSession(sessionId, { status: 'stopped' });
     }
     console.log(`[SessionManager] Dismissed ${sessionIds.length} interrupted sessions`);
+  }
+
+  private getTerminalAgentType(command?: string): TerminalPanelState['agentType'] | undefined {
+    const lower = command?.toLowerCase() ?? '';
+    if (lower.includes('claude')) return 'claude';
+    if (lower.includes('codex')) return 'codex';
+    return undefined;
   }
 }

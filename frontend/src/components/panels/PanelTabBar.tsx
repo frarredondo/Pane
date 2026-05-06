@@ -719,7 +719,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('terminal', {
-                    initialCommand: 'codex',
+                    initialCommand: 'codex --yolo',
                     title: 'Codex'
                   })}
                 >
