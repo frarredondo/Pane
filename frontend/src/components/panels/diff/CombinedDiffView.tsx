@@ -99,8 +99,6 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   const [isResizing, setIsResizing] = useState(false);
 
   const diffViewerRef = useRef<DiffViewerHandle>(null);
-  // Track diff-relevant git state to avoid spurious prefetches on no-op status events
-  const lastGitFingerprintRef = useRef<string>('');
 
   // Expose refresh() to parent (DiffPanel) via ref
   // Keeps current diff visible while new data loads (no flash),
@@ -186,7 +184,6 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
       setExecutions([]);
       setHistorySource(isMainRepo ? 'remote' : 'branch');
       diffCacheRef.current.clear();
-      lastGitFingerprintRef.current = '';
     }
   }, [sessionId, lastSessionId, isMainRepo]);
 
@@ -314,46 +311,9 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedExecutions read inside closure to check if auto-select needed; must not re-trigger on selection change
   }, [sessionId, isMainRepo, forceRefresh, isVisible, processExecutions]);
 
-  // Background prefetch: when git status changes, fetch executions + diff even when not visible
-  // This ensures the diff tab has data ready before the user opens it
-  useEffect(() => {
-    if (!isVisible) return;
-    let cancelled = false;
-
-    const handleGitStatusUpdated = (event: Event) => {
-      const { sessionId: eventSessionId, gitStatus } = (event as CustomEvent).detail || {};
-      if (eventSessionId !== sessionId) return;
-
-      // Fingerprint diff-relevant fields — ignore no-op status refreshes
-      const fingerprint = `${gitStatus?.state}-${gitStatus?.ahead}-${gitStatus?.behind}-${gitStatus?.uncommittedChanges}`;
-      if (fingerprint === lastGitFingerprintRef.current) return;
-      lastGitFingerprintRef.current = fingerprint;
-
-      // Clear stale cache and force diff re-fetch for existing selection
-      diffCacheRef.current.clear();
-      setForceRefresh(prev => prev + 1);
-
-      // Prefetch executions and let the diff loading effect chain handle the rest
-      // Only auto-select if user hasn't made a custom selection (preserves their commit range)
-      API.sessions.getExecutions(sessionId).then(response => {
-        if (cancelled || !response.success) return;
-        const data: ExecutionDiff[] = response.data || [];
-        processExecutions(data, selectedExecutionsRef.current.length === 0);
-      }).catch(() => { /* silent — prefetch is best-effort */ });
-    };
-
-    window.addEventListener('git-status-updated', handleGitStatusUpdated);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('git-status-updated', handleGitStatusUpdated);
-    };
-  }, [sessionId, isVisible, processExecutions]);
-
   // Keep refs to avoid stale closures in event handlers
   const executionsLengthRef = useRef(executions.length);
   executionsLengthRef.current = executions.length;
-  const selectedExecutionsRef = useRef(selectedExecutions);
-  selectedExecutionsRef.current = selectedExecutions;
   const viewingCommitHashRef = useRef(viewingCommitHash);
   viewingCommitHashRef.current = viewingCommitHash;
 
@@ -428,7 +388,6 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
       cancelled = true;
       clearTimeout(timeoutId);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- executions.length read via ref to avoid re-triggering when executions reload
   }, [selectedExecutions, sessionId, forceRefresh]);
 
   const handleSelectionChange = (newSelection: number[]) => {
