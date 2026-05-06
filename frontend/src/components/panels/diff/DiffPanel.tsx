@@ -3,9 +3,6 @@ import CombinedDiffView from './CombinedDiffView';
 import type { CombinedDiffViewHandle } from './CombinedDiffView';
 import type { ToolPanel, DiffPanelState } from '../../../../../shared/types/panels';
 import { AlertCircle } from 'lucide-react';
-import { useSession } from '../../../contexts/SessionContext';
-
-const DIFF_PRELOAD_DELAY_MS = 10000;
 
 interface DiffPanelProps {
   panel: ToolPanel;
@@ -20,32 +17,12 @@ export const DiffPanel: React.FC<DiffPanelProps> = ({
   sessionId,
   isMainRepo = false
 }) => {
-  const sessionContext = useSession();
   const [isStale, setIsStale] = useState(false);
-  const [backgroundPreloadReady, setBackgroundPreloadReady] = useState(isActive);
   const diffState = panel.state?.customState as DiffPanelState | undefined;
   const lastRefreshRef = useRef<number>(Date.now());
   const combinedDiffRef = useRef<CombinedDiffViewHandle>(null);
   // Track diff-relevant git state to avoid spurious refreshes on no-op status events
   const lastGitFingerprintRef = useRef<string>('');
-  const sessionStatus = sessionContext?.session.status;
-  const isSessionBusy = sessionStatus === 'running' || sessionStatus === 'initializing';
-  const shouldLoadDiff = isActive || (backgroundPreloadReady && !isSessionBusy);
-
-  useEffect(() => {
-    if (isActive) {
-      setBackgroundPreloadReady(true);
-      return;
-    }
-
-    if (backgroundPreloadReady || isSessionBusy) return;
-
-    const timer = window.setTimeout(() => {
-      setBackgroundPreloadReady(true);
-    }, DIFF_PRELOAD_DELAY_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [isActive, backgroundPreloadReady, isSessionBusy]);
 
   // Listen for file change events from other panels
   useEffect(() => {
@@ -152,7 +129,7 @@ export const DiffPanel: React.FC<DiffPanelProps> = ({
           selectedExecutions={[]}
           isGitOperationRunning={false}
           isMainRepo={isMainRepo}
-          isVisible={shouldLoadDiff}
+          isVisible={isActive}
         />
       </div>
     </div>
