@@ -20,12 +20,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/commits/main)
 [![Commit Activity](https://img.shields.io/github/commit-activity/m/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/graphs/commit-activity)
 [![Active Users](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/installs&labelColor=333333)](https://runpane.com)
-<br>
-[![Contributors](https://img.shields.io/github/contributors/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/graphs/contributors)
-[![Issues](https://img.shields.io/github/issues/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/issues)
-[![PRs](https://img.shields.io/github/issues-pr/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/pulls)
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
-[![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-333333?labelColor=333333)](https://github.com/dcouple/Pane/releases/latest)
 
 <br />
 
