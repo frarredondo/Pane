@@ -1,0 +1,65 @@
+name: GitHub traffic → PostHog
+
+# Snapshots GitHub repo traffic data to PostHog weekly. GitHub only retains
+# 14 days of traffic data via the API, so this captures it before it rolls off.
+#
+# Setup before first run:
+#   1. Create a Personal Access Token at github.com/settings/tokens (classic)
+#      with `repo` scope. Set expiration to 1 year or none.
+#      (GITHUB_TOKEN won't work — public repos only get `public_repo` scope
+#      on the auto-issued token, and the traffic API requires `repo`.)
+#   2. Pane repo → Settings → Secrets and variables → Actions → New repo secret
+#      Name: TRAFFIC_TOKEN
+#      Value: <the PAT>
+#   3. Run once manually via the Actions tab to verify auth works before
+#      the first scheduled Monday run.
+#
+# The hardcoded phc_ key below is the public PostHog ingest key — already
+# shipped in the website JS bundle and the desktop app, so not a secret.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull traffic data and post to PostHog
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          REPO="Dcouple-Inc/Pane"
+          PH_KEY="phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1"
+          PH_URL="https://us.i.posthog.com/capture/"
+
+          # Views — scalar metrics only (the daily breakdown array is dropped)
+          views=$(gh api "repos/$REPO/traffic/views")
+          curl -fsSL "$PH_URL" -H "Content-Type: application/json" -d "$(jq -n \
+            --arg api_key "$PH_KEY" \
+            --argjson count "$(echo "$views" | jq .count)" \
+            --argjson uniques "$(echo "$views" | jq .uniques)" \
+            '{api_key:$api_key,event:"gh_traffic_views",distinct_id:"github-traffic-bot",properties:{count:$count,uniques:$uniques}}')"
+
+          # Clones — scalar metrics only
+          clones=$(gh api "repos/$REPO/traffic/clones")
+          curl -fsSL "$PH_URL" -H "Content-Type: application/json" -d "$(jq -n \
+            --arg api_key "$PH_KEY" \
+            --argjson count "$(echo "$clones" | jq .count)" \
+            --argjson uniques "$(echo "$clones" | jq .uniques)" \
+            '{api_key:$api_key,event:"gh_traffic_clones",distinct_id:"github-traffic-bot",properties:{count:$count,uniques:$uniques}}')"
+
+          # Referrers — one event per referrer (flatten the array so each is queryable)
+          gh api "repos/$REPO/traffic/popular/referrers" | jq -c '.[]' | while read -r row; do
+            curl -fsSL "$PH_URL" -H "Content-Type: application/json" -d "$(echo "$row" | jq \
+              --arg api_key "$PH_KEY" \
+              '{api_key:$api_key,event:"gh_traffic_referrer",distinct_id:"github-traffic-bot",properties:{referrer:.referrer,count:.count,uniques:.uniques}}')"
+          done
+
+          # Paths — one event per path
+          gh api "repos/$REPO/traffic/popular/paths" | jq -c '.[]' | while read -r row; do
+            curl -fsSL "$PH_URL" -H "Content-Type: application/json" -d "$(echo "$row" | jq \
+              --arg api_key "$PH_KEY" \
+              '{api_key:$api_key,event:"gh_traffic_path",distinct_id:"github-traffic-bot",properties:{path:.path,title:.title,count:.count,uniques:.uniques}}')"
+          done

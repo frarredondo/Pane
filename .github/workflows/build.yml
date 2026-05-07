@@ -94,6 +94,37 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  checksums:
+    if: github.ref_type == 'tag'
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download release assets
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${GITHUB_REF_NAME#v}"
+        mkdir -p assets && cd assets
+        gh release download "v${VERSION}" --repo Dcouple-Inc/Pane \
+          --pattern '*.exe' --pattern '*.dmg' --pattern '*.zip' \
+          --pattern '*.deb' --pattern '*.AppImage'
+
+    - name: Compute SHA256
+      run: |
+        cd assets
+        sha256sum * > ../SHA256SUMS.txt
+        cat ../SHA256SUMS.txt
+
+    - name: Upload SHA256SUMS.txt to release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${GITHUB_REF_NAME#v}"
+        gh release upload "v${VERSION}" SHA256SUMS.txt \
+          --repo Dcouple-Inc/Pane --clobber
+
   build-windows:
     strategy:
       fail-fast: false
