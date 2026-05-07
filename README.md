@@ -18,6 +18,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane)
 [![Latest Release](https://img.shields.io/github/v/release/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases/latest)
 [![Last Commit](https://img.shields.io/github/last-commit/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/commits/main)
+[![Active Users](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/installs&labelColor=333333)](https://runpane.com)
 <br>
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
 [![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-333333?labelColor=333333)](https://github.com/dcouple/Pane/releases/latest)
