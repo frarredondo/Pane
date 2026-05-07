@@ -1,0 +1,17 @@
+name: Notify website on release
+on:
+  push:
+    tags: ["v*"]
+  # Manual trigger for validation
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to foozol-website
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.SITE_REPO_DISPATCH_TOKEN }}
+          repository: parsakhaz/foozol-website
+          event-type: pane-release
