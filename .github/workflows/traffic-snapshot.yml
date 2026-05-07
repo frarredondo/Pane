@@ -30,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
         run: |
-          REPO="Dcouple-Inc/Pane"
+          REPO="dcouple/Pane"
           PH_KEY="phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1"
           PH_URL="https://us.i.posthog.com/capture/"
 

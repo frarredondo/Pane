@@ -107,7 +107,7 @@ jobs:
       run: |
         VERSION="${GITHUB_REF_NAME#v}"
         mkdir -p assets && cd assets
-        gh release download "v${VERSION}" --repo Dcouple-Inc/Pane \
+        gh release download "v${VERSION}" --repo dcouple/Pane \
           --pattern '*.exe' --pattern '*.dmg' --pattern '*.zip' \
           --pattern '*.deb' --pattern '*.AppImage'
 
@@ -123,7 +123,7 @@ jobs:
       run: |
         VERSION="${GITHUB_REF_NAME#v}"
         gh release upload "v${VERSION}" SHA256SUMS.txt \
-          --repo Dcouple-Inc/Pane --clobber
+          --repo dcouple/Pane --clobber
 
   build-windows:
     strategy:

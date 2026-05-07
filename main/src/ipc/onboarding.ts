@@ -13,7 +13,7 @@ function shellExecOpts(extra?: Record<string, unknown>): Record<string, unknown>
   return { ...extra, env: { ...process.env, PATH: getShellPath() } };
 }
 
-const PANE_REPO = 'Dcouple-Inc/Pane';
+const PANE_REPO = 'dcouple/Pane';
 const PANE_REPO_URL = `https://github.com/${PANE_REPO}.git`;
 
 interface EnvironmentInfo {
@@ -52,7 +52,7 @@ function detectEnvironment(): EnvironmentInfo {
   return result;
 }
 
-/** Checks that the path is a git repo related to Dcouple-Inc/Pane (canonical or a fork cloned via `gh repo clone`). */
+/** Checks that the path is a git repo related to dcouple/Pane (canonical or a fork cloned via `gh repo clone`). */
 function isPaneRepo(repoPath: string): boolean {
   if (!existsSync(join(repoPath, '.git'))) return false;
   try {

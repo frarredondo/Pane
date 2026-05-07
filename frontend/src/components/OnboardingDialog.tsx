@@ -90,11 +90,11 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
         setHasStarred(true);
       } else {
         // Fall back to opening in browser
-        window.electronAPI.openExternal('https://github.com/Dcouple-Inc/Pane');
+        window.electronAPI.openExternal('https://github.com/dcouple/Pane');
         setHasStarred(true);
       }
     } catch {
-      window.electronAPI.openExternal('https://github.com/Dcouple-Inc/Pane');
+      window.electronAPI.openExternal('https://github.com/dcouple/Pane');
       setHasStarred(true);
     }
   };

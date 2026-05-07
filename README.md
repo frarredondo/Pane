@@ -14,13 +14,13 @@
 </a>
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/Dcouple-Inc/Pane/total?labelColor=333333&color=666666)](https://github.com/Dcouple-Inc/Pane/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/Dcouple-Inc/Pane?labelColor=333333&color=666666)](https://github.com/Dcouple-Inc/Pane)
-[![Latest Release](https://img.shields.io/github/v/release/Dcouple-Inc/Pane?labelColor=333333&color=666666)](https://github.com/Dcouple-Inc/Pane/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/Dcouple-Inc/Pane?labelColor=333333&color=666666)](https://github.com/Dcouple-Inc/Pane/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/dcouple/Pane/total?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane)
+[![Latest Release](https://img.shields.io/github/v/release/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/commits/main)
 <br>
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
-[![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-333333?labelColor=333333)](https://github.com/Dcouple-Inc/Pane/releases/latest)
+[![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-333333?labelColor=333333)](https://github.com/dcouple/Pane/releases/latest)
 
 <br />
 
@@ -113,7 +113,7 @@ irm https://runpane.com/install.ps1 | iex
 
 ### Direct Download
 
-> **[Download the Latest Release](https://github.com/Dcouple-Inc/Pane/releases/latest)**
+> **[Download the Latest Release](https://github.com/dcouple/Pane/releases/latest)**
 
 | Platform | File |
 |----------|------|
@@ -222,7 +222,7 @@ Pane uses xterm.js, the same terminal engine that powers VS Code's integrated te
 ## Building from Source
 
 ```bash
-git clone https://github.com/Dcouple-Inc/Pane.git
+git clone https://github.com/dcouple/Pane.git
 cd Pane
 pnpm run setup
 pnpm run electron-dev
@@ -245,7 +245,7 @@ pnpm run release minor   # 0.0.2 -> 0.1.0
 pnpm run release major   # 0.0.2 -> 1.0.0
 ```
 
-Tags and pushes automatically. GitHub Actions builds and publishes installers for all platforms to [Releases](https://github.com/Dcouple-Inc/Pane/releases).
+Tags and pushes automatically. GitHub Actions builds and publishes installers for all platforms to [Releases](https://github.com/dcouple/Pane/releases).
 
 ---
 

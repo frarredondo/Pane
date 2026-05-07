@@ -89,7 +89,7 @@ Once you push the tag, GitHub Actions will automatically:
 
 ### 7. Verify Release
 
-1. Go to https://github.com/Dcouple-Inc/Pane/releases
+1. Go to https://github.com/dcouple/Pane/releases
 2. Verify the new release is created with:
    - Proper version tag
    - Release notes from the commit history

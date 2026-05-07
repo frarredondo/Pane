@@ -134,7 +134,7 @@ echo "[5/9] Installing Pane..."
 ARCH=$(dpkg --print-architecture)
 if [ ! -f /usr/bin/Pane ]; then
   # Download the latest Pane AppImage from GitHub Releases
-  RELEASE_URL=$(curl -fsSL https://api.github.com/repos/Dcouple-Inc/Pane/releases/latest \
+  RELEASE_URL=$(curl -fsSL https://api.github.com/repos/dcouple/Pane/releases/latest \
     | jq -r ".assets[] | select(.name | test(\"Pane.*${ARCH}.*\\\\.AppImage$\")) | .browser_download_url" \
     | head -1)
 
@@ -144,7 +144,7 @@ if [ ! -f /usr/bin/Pane ]; then
     chmod +x /usr/bin/Pane
   else
     # Fallback: try .deb package
-    DEB_URL=$(curl -fsSL https://api.github.com/repos/Dcouple-Inc/Pane/releases/latest \
+    DEB_URL=$(curl -fsSL https://api.github.com/repos/dcouple/Pane/releases/latest \
       | jq -r ".assets[] | select(.name | test(\"Pane.*${ARCH}.*\\\\.deb$\")) | .browser_download_url" \
       | head -1)
 
