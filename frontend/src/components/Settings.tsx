@@ -1208,16 +1208,16 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
 
               <SettingsSection
                 title="Analytics"
-                description="Help improve Pane by sharing anonymous usage data"
+                description="Help improve Pane by sharing usage data"
                 icon={<BarChart3 className="w-4 h-4" />}
               >
                 <Checkbox
-                  label="Enable anonymous analytics tracking"
+                  label="Enable analytics tracking"
                   checked={analyticsEnabled}
                   onChange={(e) => setAnalyticsEnabled(e.target.checked)}
                 />
                 <p className="text-xs text-text-tertiary mt-1">
-                  Pane collects anonymous usage analytics (feature usage, performance metrics) to improve the product. No prompts, code, file paths, or personal data is ever collected. You can opt-out at any time.
+                  Pane collects usage analytics to improve the product. No prompts, code, or file paths are collected. You can opt out at any time.
                 </p>
               </SettingsSection>
             </CollapsibleCard>

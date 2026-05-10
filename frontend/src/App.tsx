@@ -37,7 +37,7 @@ import { AddProjectDialog } from './components/AddProjectDialog';
 import { useNavigationStore } from './stores/navigationStore';
 import { initPostHog, capture, posthog } from './services/posthog';
 import type { VersionUpdateInfo, PermissionInput } from './types/session';
-import type { TerminalShortcut } from './types/config';
+import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
 import type { Project } from './types/project';
 import { isMac } from './utils/platformUtils';
@@ -265,23 +265,54 @@ function App() {
   // Both must live in the same effect so buffered events aren't replayed before init.
   useEffect(() => {
     if (!appConfig) return;
-    initPostHog({
-      enabled: appConfig.analytics?.enabled ?? false,
-      posthogApiKey: appConfig.analytics?.posthogApiKey,
-      posthogHost: appConfig.analytics?.posthogHost,
-    });
-    // Sync distinct ID to main process so shutdown analytics use the same identity
-    const distinctId = posthog.get_distinct_id();
-    if (distinctId) {
-      window.electronAPI?.analytics?.syncDistinctId(distinctId);
-    }
-    // Now that PostHog is initialized, register the IPC listener.
-    // The preload buffers any events that arrived before this point and replays them.
-    if (!window.electronAPI?.analytics?.onMainEvent) return;
-    const cleanup = window.electronAPI.analytics.onMainEvent((event) => {
-      capture(event.eventName, event.properties);
-    });
-    return cleanup;
+
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+
+    const initializeAnalytics = async () => {
+      let identity: AnalyticsIdentity | undefined;
+      const analyticsEnabled = appConfig.analytics?.enabled ?? false;
+
+      if (analyticsEnabled) {
+        try {
+          const identityResult = await window.electronAPI?.analytics?.getIdentity?.();
+          if (identityResult?.success) {
+            identity = identityResult.data;
+          }
+        } catch (error) {
+          console.error('[App] Error resolving analytics identity:', error);
+        }
+      }
+
+      if (cancelled) return;
+
+      initPostHog({
+        enabled: analyticsEnabled,
+        posthogApiKey: appConfig.analytics?.posthogApiKey,
+        posthogHost: appConfig.analytics?.posthogHost,
+        identity,
+      });
+
+      // Sync distinct ID to main process so shutdown analytics use the same identity
+      const distinctId = identity?.distinctId || posthog.get_distinct_id();
+      if (distinctId) {
+        window.electronAPI?.analytics?.syncDistinctId(distinctId);
+      }
+
+      // Now that PostHog is initialized, register the IPC listener.
+      // The preload buffers any events that arrived before this point and replays them.
+      if (!window.electronAPI?.analytics?.onMainEvent) return;
+      cleanup = window.electronAPI.analytics.onMainEvent((event) => {
+        capture(event.eventName, event.properties);
+      });
+    };
+
+    void initializeAnalytics();
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
   }, [appConfig]);
 
   // CRITICAL PERFORMANCE FIX: Cleanup to prevent V8 array iteration issues

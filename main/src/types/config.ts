@@ -11,6 +11,29 @@ export interface CustomCommand {
   command: string;
 }
 
+export interface AnalyticsIdentity {
+  distinctId: string;
+  identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
+  githubUsername?: string;
+  githubEmail?: string;
+  gitEmail?: string;
+  gitEmailHash?: string;
+  gitUserName?: string;
+}
+
+export interface AnalyticsConfig {
+  enabled: boolean;
+  posthogApiKey?: string;
+  posthogHost?: string;
+  distinctId?: string;
+  identitySource?: AnalyticsIdentity['identitySource'];
+  githubUsername?: string;
+  githubEmail?: string;
+  gitEmail?: string;
+  gitEmailHash?: string;
+  gitUserName?: string;
+}
+
 import type { CloudVmConfig } from '../../../shared/types/cloud';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 
@@ -69,12 +92,7 @@ export interface AppConfig {
   // Off by default. Requires app restart; the supervisor is forked once at `app.whenReady`.
   usePtyHost?: boolean;
   // PostHog analytics settings
-  analytics?: {
-    enabled: boolean;
-    posthogApiKey?: string;
-    posthogHost?: string;
-    distinctId?: string; // Random UUID for anonymous user identification
-  };
+  analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
@@ -129,12 +147,7 @@ export interface UpdateConfigRequest {
   // Off by default. Requires app restart to take effect.
   usePtyHost?: boolean;
   // PostHog analytics settings
-  analytics?: {
-    enabled: boolean;
-    posthogApiKey?: string;
-    posthogHost?: string;
-    distinctId?: string; // Random UUID for anonymous user identification
-  };
+  analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets

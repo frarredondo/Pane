@@ -829,6 +829,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Analytics tracking
   analytics: {
+    getIdentity: () => ipcRenderer.invoke('analytics:get-identity'),
     onMainEvent: (callback: (event: { eventName: string; properties: Record<string, unknown> }) => void) => {
       // Replay any events that arrived before this callback was registered
       for (const buffered of analyticsEventBuffer) {

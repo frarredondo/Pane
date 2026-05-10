@@ -14,6 +14,16 @@ export interface CustomCommand {
   command: string;
 }
 
+export interface AnalyticsIdentity {
+  distinctId: string;
+  identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
+  githubUsername?: string;
+  githubEmail?: string;
+  gitEmail?: string;
+  gitEmailHash?: string;
+  gitUserName?: string;
+}
+
 export interface AppConfig {
   gitRepoPath: string;
   verbose?: boolean;
@@ -54,6 +64,13 @@ export interface AppConfig {
     enabled: boolean;
     posthogApiKey?: string;
     posthogHost?: string;
+    distinctId?: string;
+    identitySource?: AnalyticsIdentity['identitySource'];
+    githubUsername?: string;
+    githubEmail?: string;
+    gitEmail?: string;
+    gitEmailHash?: string;
+    gitUserName?: string;
   };
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];

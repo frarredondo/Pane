@@ -36,6 +36,7 @@ import { VersionChecker } from './services/versionChecker';
 import { Logger } from './utils/logger';
 import { ArchiveProgressManager } from './services/archiveProgressManager';
 import { AnalyticsManager } from './services/analyticsManager';
+import { resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { SpotlightManager } from './services/spotlightManager';
 import { startupRetentionResult } from './services/database';
 import { resourceMonitorService } from './services/resourceMonitorService';
@@ -919,7 +920,18 @@ async function initializeServices() {
   // Initialize analytics manager early so it can be used by SessionManager
   analyticsManager = new AnalyticsManager(configManager);
 
-  // Receive the renderer's posthog-js distinct ID so shutdown analytics use the same identity
+  ipcMain.handle('analytics:get-identity', async () => {
+    try {
+      const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId());
+      await configManager.setAnalyticsIdentity(identity);
+      return { success: true, data: identity };
+    } catch (error) {
+      console.error('[Analytics] Failed to resolve identity:', error);
+      return { success: false, error: 'Failed to resolve analytics identity' };
+    }
+  });
+
+  // Receive the renderer's PostHog distinct ID so shutdown analytics use the same identity
   ipcMain.on('analytics:sync-distinct-id', async (_event: Electron.IpcMainEvent, distinctId: string) => {
     try {
       await configManager.setAnalyticsDistinctId(distinctId);
@@ -1476,6 +1488,12 @@ app.on('before-quit', async (event) => {
               session_duration_seconds: sessionDurationSeconds,
               app_version: app.getVersion(),
               platform: os.platform(),
+              identity_source: settings.identitySource,
+              github_username: settings.githubUsername,
+              github_email: settings.githubEmail,
+              git_email: settings.gitEmail,
+              git_email_sha256: settings.gitEmailHash,
+              git_user_name: settings.gitUserName,
               $lib: 'posthog-node',
             },
             timestamp: new Date().toISOString(),

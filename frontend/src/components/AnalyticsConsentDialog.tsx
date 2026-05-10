@@ -90,7 +90,7 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
             <BarChart3 className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
             <div className="space-y-3">
               <p className="text-text-primary">
-                We do not collect any code, prompts, or identifying information.
+                We do not collect any code, prompts, or file paths.
               </p>
               <p className="text-text-secondary">
                 Your data helps us make Pane better. You can change this anytime in Settings.
