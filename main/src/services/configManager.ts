@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import type { AppConfig } from '../types/config';
+import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
 import fs from 'fs/promises';
@@ -335,12 +335,30 @@ export class ConfigManager extends EventEmitter {
   async setAnalyticsDistinctId(distinctId: string): Promise<void> {
     if (!this.config.analytics) {
       this.config.analytics = {
-        enabled: true,
+        enabled: false,
         posthogApiKey: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
         posthogHost: 'https://us.i.posthog.com'
       };
     }
     this.config.analytics.distinctId = distinctId;
+    await this.saveConfig();
+  }
+
+  async setAnalyticsIdentity(identity: AnalyticsIdentity): Promise<void> {
+    if (!this.config.analytics) {
+      this.config.analytics = {
+        enabled: false,
+        posthogApiKey: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
+        posthogHost: 'https://us.i.posthog.com'
+      };
+    }
+    this.config.analytics.distinctId = identity.distinctId;
+    this.config.analytics.identitySource = identity.identitySource;
+    this.config.analytics.githubUsername = identity.githubUsername;
+    this.config.analytics.githubEmail = identity.githubEmail;
+    this.config.analytics.gitEmail = identity.gitEmail;
+    this.config.analytics.gitEmailHash = identity.gitEmailHash;
+    this.config.analytics.gitUserName = identity.gitUserName;
     await this.saveConfig();
   }
 

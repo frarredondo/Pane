@@ -11,6 +11,32 @@ export interface PostHogConfig {
   enabled: boolean;
   posthogApiKey?: string;
   posthogHost?: string;
+  identity?: {
+    distinctId: string;
+    identitySource: string;
+    githubUsername?: string;
+    githubEmail?: string;
+    gitEmail?: string;
+    gitEmailHash?: string;
+    gitUserName?: string;
+  };
+}
+
+function identifyUser(config: PostHogConfig): void {
+  if (!config.enabled || !config.identity) return;
+
+  const properties = {
+    identity_source: config.identity.identitySource,
+    github_username: config.identity.githubUsername,
+    github_email: config.identity.githubEmail,
+    git_email: config.identity.gitEmail,
+    git_email_sha256: config.identity.gitEmailHash,
+    git_user_name: config.identity.gitUserName,
+  };
+
+  posthog.identify(config.identity.distinctId, Object.fromEntries(
+    Object.entries(properties).filter(([, value]) => value !== undefined)
+  ));
 }
 
 export function initPostHog(config: PostHogConfig): void {
@@ -39,20 +65,13 @@ export function initPostHog(config: PostHogConfig): void {
       capture_pageview: true,
       persistence: 'localStorage',
       opt_out_capturing_by_default: true,
-      loaded: (ph) => {
-        if (config.enabled) {
-          ph.opt_in_capturing();
-        }
-      },
     });
 
     currentApiKey = apiKey;
     currentHost = host;
-    currentEnabled = config.enabled;
-    return;
   }
 
-  // SDK already initialized with same key/host — just sync opt-in state
+  // SDK already initialized with same key/host — just sync opt-in state.
   if (currentEnabled !== config.enabled) {
     if (config.enabled) {
       posthog.opt_in_capturing();
@@ -61,6 +80,8 @@ export function initPostHog(config: PostHogConfig): void {
     }
     currentEnabled = config.enabled;
   }
+
+  identifyUser(config);
 }
 
 export function optIn(): void {
