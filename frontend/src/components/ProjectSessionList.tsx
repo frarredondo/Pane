@@ -640,24 +640,17 @@ export function ProjectSessionList({ sessionSortAscending }: ProjectSessionListP
 
 // --- Session row button content ---
 
-function SessionRowContent({ session, gs, iconColor, hasDiff, adds, dels, activityStatus, displayName }: {
+function SessionRowContent({ session, gs, iconColor, hasDiff, adds, dels, displayName }: {
   session: Session;
   gs: GitStatus | undefined;
   iconColor: string;
   hasDiff: boolean;
   adds: number;
   dels: number;
-  activityStatus: 'active' | 'idle';
   displayName?: string;
 }) {
   return (
     <div className="flex items-center gap-2 min-w-0 w-full">
-      <span className={cn(
-        "w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all",
-        activityStatus === 'active'
-          ? 'bg-status-info opacity-100 duration-150'
-          : 'bg-text-muted/20 opacity-40 duration-[3s]'
-      )} />
       {gs?.prNumber ? (
         <GitPullRequest className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       ) : (
@@ -761,6 +754,7 @@ function SessionRow({
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
   const hasDiff = adds > 0 || dels > 0;
+  const showActivityRail = !isActive && sessionActivity === 'active';
 
   return (
     <Tooltip
@@ -785,6 +779,10 @@ function SessionRow({
           }
         }}
       >
+        {showActivityRail && (
+          <span className="pointer-events-none absolute left-0 top-0 h-full w-1 bg-status-info animate-pulse" />
+        )}
+
         {showPinnedToggle && (
           <button
             onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
@@ -807,7 +805,6 @@ function SessionRow({
           hasDiff={hasDiff}
           adds={adds}
           dels={dels}
-          activityStatus={sessionActivity}
           displayName={displayName}
         />
 
