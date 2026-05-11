@@ -10,7 +10,6 @@ import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import type { DropdownItem } from './ui/Dropdown';
 import { API } from '../utils/api';
-import { cycleIndex } from '../utils/arrayUtils';
 import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
 import type { Project } from '../types/project';
@@ -125,33 +124,13 @@ export function ProjectSessionList({ sessionSortAscending }: ProjectSessionListP
     return result;
   }, [projects, expandedProjects, sessionsByProject]);
 
-  // Flat list of ALL active sessions (for cycling - includes collapsed projects)
-  const allActiveSessions = useMemo(() => {
-    const result: Session[] = [];
-    projects.forEach(p => {
-      const list = sessionsByProject.get(p.id) || [];
-      result.push(...list);
-    });
-    return result;
-  }, [projects, sessionsByProject]);
-
   // Register ⌘1-⌘9 hotkeys with dynamic session name labels
   const allVisibleSessionsRef = useRef(allVisibleSessions);
   allVisibleSessionsRef.current = allVisibleSessions;
-  const allActiveSessionsRef = useRef(allActiveSessions);
-  allActiveSessionsRef.current = allActiveSessions;
-  const pinnedSessionsRef = useRef(pinnedSessions);
-  pinnedSessionsRef.current = pinnedSessions;
-  const activeSessionIdRef = useRef(activeSessionId);
-  activeSessionIdRef.current = activeSessionId;
   const setActiveSessionRef = useRef(setActiveSession);
   setActiveSessionRef.current = setActiveSession;
   const navigateToSessionsRef = useRef(navigateToSessions);
   navigateToSessionsRef.current = navigateToSessions;
-  const expandedProjectsRef = useRef(expandedProjects);
-  expandedProjectsRef.current = expandedProjects;
-  const setExpandedProjectsRef = useRef(setExpandedProjects);
-  setExpandedProjectsRef.current = setExpandedProjects;
 
   // Build stable label key so we re-register when session names/projects change
   const sessionLabelKey = allVisibleSessions.slice(0, 9).map(s => `${s.name}:${s.projectId}`).join('|');
@@ -189,112 +168,6 @@ export function ProjectSessionList({ sessionSortAscending }: ProjectSessionListP
     }
     return () => ids.forEach(id => unregister(id));
   }, [register, unregister, sessionLabelKey]);
-
-  // Session cycling: navigates to next/prev session across ALL active sessions
-  // (not just visible ones from expanded projects). Auto-expands collapsed
-  // projects when cycling to their sessions so users can see the selection.
-  const cycleSession = useCallback((direction: 'next' | 'prev') => {
-    const sessions = allActiveSessionsRef.current;
-    if (sessions.length === 0) return;
-
-    const currentId = activeSessionIdRef.current;
-    const currentIndex = sessions.findIndex(s => s.id === currentId);
-    const nextIndex = cycleIndex(currentIndex, sessions.length, direction);
-    if (nextIndex === -1) return;
-
-    const nextSession = sessions[nextIndex];
-
-    // Auto-expand the project if it's collapsed
-    if (nextSession.projectId != null && !expandedProjectsRef.current.has(nextSession.projectId)) {
-      setExpandedProjectsRef.current(prev => {
-        const next = new Set(prev);
-        next.add(nextSession.projectId!);
-        return next;
-      });
-    }
-
-    setActiveSessionRef.current(nextSession.id);
-    navigateToSessionsRef.current();
-  }, []);
-
-  const cyclePinnedOrAllSessions = useCallback((direction: 'next' | 'prev') => {
-    const pinned = pinnedSessionsRef.current.map(item => item.session);
-    const sessions = pinned.length > 0 ? pinned : allActiveSessionsRef.current;
-    if (sessions.length === 0) return;
-
-    const currentId = activeSessionIdRef.current;
-    const currentIndex = sessions.findIndex(s => s.id === currentId);
-    const nextIndex = cycleIndex(currentIndex, sessions.length, direction);
-    if (nextIndex === -1) return;
-
-    setActiveSessionRef.current(sessions[nextIndex].id);
-    navigateToSessionsRef.current();
-  }, []);
-
-  // Register session cycling hotkeys
-  useEffect(() => {
-    const nextKeys = ['mod+Tab'];
-    const prevKeys = ['mod+shift+Tab'];
-    const ids: string[] = [];
-
-    nextKeys.forEach((keys, i) => {
-      const id = `cycle-session-next-${i}`;
-      ids.push(id);
-      register({
-        id,
-        label: 'Next Pane',
-        keys,
-        category: 'session',
-        enabled: () => allActiveSessionsRef.current.length > 1,
-        action: () => cycleSession('next'),
-      });
-    });
-
-    prevKeys.forEach((keys, i) => {
-      const id = `cycle-session-prev-${i}`;
-      ids.push(id);
-      register({
-        id,
-        label: 'Previous Pane',
-        keys,
-        category: 'session',
-        enabled: () => allActiveSessionsRef.current.length > 1,
-        action: () => cycleSession('prev'),
-      });
-    });
-
-    return () => ids.forEach(id => unregister(id));
-  }, [register, unregister, cycleSession]);
-
-  // Register pinned-aware cycling hotkeys. When anything is pinned, Cmd/Ctrl+Up
-  // and Cmd/Ctrl+Down only traverse the pinned section in visible order.
-  useEffect(() => {
-    const ids = ['cycle-pinned-or-all-next', 'cycle-pinned-or-all-prev'];
-    register({
-      id: ids[0],
-      label: 'Next Pinned Pane',
-      keys: 'mod+ArrowDown',
-      category: 'session',
-      enabled: () => {
-        const pinnedCount = pinnedSessionsRef.current.length;
-        return pinnedCount > 1 || (pinnedCount === 0 && allActiveSessionsRef.current.length > 1);
-      },
-      action: () => cyclePinnedOrAllSessions('next'),
-    });
-    register({
-      id: ids[1],
-      label: 'Previous Pinned Pane',
-      keys: 'mod+ArrowUp',
-      category: 'session',
-      enabled: () => {
-        const pinnedCount = pinnedSessionsRef.current.length;
-        return pinnedCount > 1 || (pinnedCount === 0 && allActiveSessionsRef.current.length > 1);
-      },
-      action: () => cyclePinnedOrAllSessions('prev'),
-    });
-
-    return () => ids.forEach(id => unregister(id));
-  }, [register, unregister, cyclePinnedOrAllSessions]);
 
   // Track known project IDs so we only auto-expand newly added ones
   const knownProjectIds = useRef<Set<number>>(new Set());
