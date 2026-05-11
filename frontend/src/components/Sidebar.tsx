@@ -19,6 +19,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { usePanelStore } from '../stores/panelStore';
 import { API } from '../utils/api';
 import type { Project } from '../types/project';
+import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkeys';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -133,6 +134,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const navigateToProject = useNavigationStore((state) => state.navigateToProject);
+  useSessionNavigationHotkeys({ projects, sessionSortAscending });
 
   const handleRefreshGitStatus = async () => {
     try {
@@ -144,21 +146,27 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
     }
   };
 
-  // Fetch projects for collapsed sidebar
-  useEffect(() => {
-    if (!collapsed) return;
-    const fetchProjects = async () => {
-      try {
-        const response = await API.projects.getAll();
-        if (response.success && response.data) {
-          setProjects(response.data);
-        }
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
+  const loadProjects = useCallback(async () => {
+    try {
+      const response = await API.projects.getAll();
+      if (response.success && response.data) {
+        setProjects(response.data);
       }
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+    }
+  }, []);
+
+  // Fetch projects for collapsed sidebar rendering and always-mounted session hotkeys.
+  useEffect(() => {
+    loadProjects();
+    window.addEventListener('project-changed', loadProjects);
+    window.addEventListener('project-sessions-refresh', loadProjects);
+    return () => {
+      window.removeEventListener('project-changed', loadProjects);
+      window.removeEventListener('project-sessions-refresh', loadProjects);
     };
-    fetchProjects();
-  }, [collapsed]);
+  }, [loadProjects]);
 
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
