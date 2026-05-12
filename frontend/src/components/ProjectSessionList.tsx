@@ -352,7 +352,6 @@ export function ProjectSessionList({ sessionSortAscending }: ProjectSessionListP
                   onClick={() => handleSessionClick(session.id)}
                   onArchive={() => handleArchiveSession(session.id)}
                   onTogglePinned={() => handleTogglePinnedSession(session.id)}
-                  showPinnedToggle={false}
                 />
               ))}
             </div>
@@ -554,7 +553,6 @@ interface SessionRowProps {
   onArchive: () => void;
   onTogglePinned: () => void;
   displayName?: string;
-  showPinnedToggle?: boolean;
 }
 
 interface GitStatusIPCResponse {
@@ -564,7 +562,7 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, displayName, showPinnedToggle = true,
+  onArchive, onTogglePinned, displayName,
 }: SessionRowProps) {
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
 
@@ -627,7 +625,7 @@ function SessionRow({
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
   const hasDiff = adds > 0 || dels > 0;
-  const showActivityRail = !isActive && sessionActivity === 'active';
+  const showActivityRail = sessionActivity === 'active';
 
   return (
     <Tooltip
@@ -656,21 +654,6 @@ function SessionRow({
           <span className="pointer-events-none absolute left-0 top-0 h-full w-1 bg-status-info animate-pulse" />
         )}
 
-        {showPinnedToggle && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
-            className={`absolute left-0.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded hover:bg-surface-hover transition-all ${
-              session.isFavorite
-                ? 'text-text-muted opacity-100'
-                : 'text-text-muted hover:text-text-tertiary opacity-0 group-hover/session:opacity-100'
-            }`}
-            title={session.isFavorite ? 'Unpin' : 'Pin'}
-            aria-label={session.isFavorite ? 'Unpin pane' : 'Pin pane'}
-          >
-            <Pin className="w-3 h-3 rotate-45" />
-          </button>
-        )}
-
         <SessionRowContent
           session={session}
           gs={gs}
@@ -682,6 +665,19 @@ function SessionRow({
         />
 
         <div className="flex flex-shrink-0 items-center gap-0.5">
+          <button
+            onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
+            className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-all ${
+              session.isFavorite
+                ? 'text-text-muted hover:text-text-tertiary hover:bg-surface-hover opacity-100'
+                : 'text-text-muted hover:text-text-tertiary hover:bg-surface-hover opacity-0 group-hover/session:opacity-100'
+            }`}
+            title={session.isFavorite ? 'Unpin' : 'Pin'}
+            aria-label={session.isFavorite ? 'Unpin pane' : 'Pin pane'}
+          >
+            <Pin className="w-3.5 h-3.5 rotate-45" />
+          </button>
+
           {/* Archive button - on hover */}
           <button
             onClick={(e) => { e.stopPropagation(); onArchive(); }}
