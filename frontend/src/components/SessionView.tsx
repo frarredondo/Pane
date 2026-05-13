@@ -877,7 +877,7 @@ export const SessionView = memo(() => {
         id: 'push',
         label: 'Push',
         icon: Upload,
-        shortcut: 'mod+shift+p',
+        shortcut: 'mod+shift+u',
         onClick: hook.handleGitPush,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing' || !activeSession.gitStatus?.ahead,
         variant: 'default' as const,

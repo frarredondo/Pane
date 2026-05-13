@@ -500,6 +500,16 @@ export function registerPanelHandlers(ipcMain: IpcMain, services: AppServices) {
     }
   });
 
+  ipcMain.handle('terminal:clearScrollback', async (_event, panelId: string) => {
+    try {
+      await terminalPanelManager.clearTerminalScrollback(panelId);
+      return { success: true };
+    } catch (error) {
+      console.error('[terminal:clearScrollback] Failed:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
   // Renderer tells main when a terminal panel becomes (in)visible so PTY
   // output cadence can drop to OUTPUT_BATCH_INTERVAL_HIDDEN while hidden.
   // No-op when the panel's PTY isn't in the map (pre-init / post-destroy).

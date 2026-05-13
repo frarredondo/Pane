@@ -330,7 +330,7 @@ async function createWindow() {
     // Whitelist of Pane hotkeys that should be forwarded from webviews.
     // mod+key (no extra modifiers):
     const paneHotkeys: ReadonlySet<string> = new Set([
-      'k', 'b', ',', 'n', 'a', 'd', 'w', 't', '`',
+      'b', ',', 'n', 'a', 'd', 'w', 't', '`',
       // mod+1..9 switch session, mod+Tab/ArrowDown cycle next
       '1', '2', '3', '4', '5', '6', '7', '8', '9',
       'tab', 'arrowdown', 'arrowup',
@@ -339,7 +339,7 @@ async function createWindow() {
     // input.key reports the shifted symbol (e.g. '!' for Shift+1) which
     // varies by keyboard layout.
     const paneShiftCodes: ReadonlySet<string> = new Set([
-      'KeyE', 'KeyN', 'KeyK', 'KeyP', 'KeyZ', 'KeyL', 'KeyR', 'KeyM',
+      'KeyE', 'KeyN', 'KeyK', 'KeyP', 'KeyZ', 'KeyL', 'KeyR', 'KeyM', 'KeyU',
       'KeyB', 'KeyW', 'KeyD',
       'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
       'Digit6', 'Digit7', 'Digit8', 'Digit9',
