@@ -1,7 +1,9 @@
 name: GitHub traffic → PostHog
 
-# Snapshots GitHub repo traffic data to PostHog weekly. GitHub only retains
+# Snapshots GitHub repo traffic data to PostHog daily. GitHub only retains
 # 14 days of traffic data via the API, so this captures it before it rolls off.
+# Daily cadence keeps the time series smoother than weekly while staying well
+# under any rate limits.
 #
 # Setup before first run:
 #   1. Create a Personal Access Token at github.com/settings/tokens (classic)
@@ -12,14 +14,14 @@ name: GitHub traffic → PostHog
 #      Name: TRAFFIC_TOKEN
 #      Value: <the PAT>
 #   3. Run once manually via the Actions tab to verify auth works before
-#      the first scheduled Monday run.
+#      the first scheduled run.
 #
 # The hardcoded phc_ key below is the public PostHog ingest key — already
 # shipped in the website JS bundle and the desktop app, so not a secret.
 
 on:
   schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+    - cron: "0 6 * * *" # Daily 06:00 UTC
   workflow_dispatch:
 
 jobs:
