@@ -153,8 +153,8 @@ export class ConfigManager extends EventEmitter {
   }
 
   private async saveConfig(): Promise<void> {
-    const configJson = JSON.stringify(this.config, null, 2);
     const writeConfig = async () => {
+      const configJson = JSON.stringify(this.config, null, 2);
       await fs.mkdir(this.configDir, { recursive: true });
       const tmpPath = `${this.configPath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
 

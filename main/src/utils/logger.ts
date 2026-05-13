@@ -13,7 +13,8 @@ const ORIGINAL_CONSOLE = {
   info: console.info
 };
 
-const MAX_LOG_EVENT_CHARS = 16 * 1024;
+const MAX_CONSOLE_LOG_EVENT_CHARS = 16 * 1024;
+const MAX_FILE_LOG_EVENT_BYTES = 64 * 1024;
 
 function sanitizeLogControls(message: string): string {
   let sanitized = '';
@@ -30,6 +31,26 @@ function sanitizeLogControls(message: string): string {
   }
 
   return sanitized;
+}
+
+function truncateToByteLength(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value) <= maxBytes) {
+    return value;
+  }
+
+  let low = 0;
+  let high = value.length;
+
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(value.slice(0, mid)) <= maxBytes) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return value.slice(0, low);
 }
 
 export class Logger {
@@ -147,7 +168,7 @@ export class Logger {
   }
 
   private writeToFile(logMessage: string) {
-    const messageWithNewline = logMessage + '\n';
+    const messageWithNewline = `${this.truncateForFile(logMessage)}\n`;
     
     // Add to queue
     this.writeQueue.push({
@@ -231,26 +252,43 @@ export class Logger {
     }
   }
 
-  private normalizeLogEvent(message: string): string {
+  private normalizeLogEventForConsole(message: string): string {
     const sanitized = sanitizeLogControls(message);
 
-    if (sanitized.length <= MAX_LOG_EVENT_CHARS) {
+    if (sanitized.length <= MAX_CONSOLE_LOG_EVENT_CHARS) {
       return sanitized;
     }
 
-    const omittedChars = sanitized.length - MAX_LOG_EVENT_CHARS;
-    return `${sanitized.slice(0, MAX_LOG_EVENT_CHARS)} ... [truncated ${omittedChars} chars, original=${sanitized.length}]`;
+    const omittedChars = sanitized.length - MAX_CONSOLE_LOG_EVENT_CHARS;
+    return `${sanitized.slice(0, MAX_CONSOLE_LOG_EVENT_CHARS)} ... [truncated ${omittedChars} chars, original=${sanitized.length}]`;
+  }
+
+  private truncateForFile(message: string): string {
+    const sanitized = sanitizeLogControls(message);
+    const originalBytes = Buffer.byteLength(sanitized);
+
+    if (originalBytes <= MAX_FILE_LOG_EVENT_BYTES) {
+      return sanitized;
+    }
+
+    const suffix = ` ... [truncated file log event from ${originalBytes} bytes to ${MAX_FILE_LOG_EVENT_BYTES} bytes]`;
+    const suffixBytes = Buffer.byteLength(suffix);
+    const targetBytes = Math.max(0, MAX_FILE_LOG_EVENT_BYTES - suffixBytes);
+    const truncated = truncateToByteLength(sanitized, targetBytes);
+
+    return `${truncated}${suffix}`;
   }
 
   private log(level: string, message: string, error?: Error) {
     const timestamp = formatForDatabase();
     const errorInfo = error ? ` Error: ${error.message}\nStack: ${error.stack}` : '';
-    const fullMessage = this.normalizeLogEvent(`[${timestamp}] ${level}: ${message}${errorInfo}`);
+    const fullMessage = `[${timestamp}] ${level}: ${message}${errorInfo}`;
+    const consoleMessage = this.normalizeLogEventForConsole(fullMessage);
     
     // Try to log to console, but handle EPIPE errors gracefully
     try {
       // Always log to console using the original console method to avoid recursion
-      this.originalConsole.log(fullMessage);
+      this.originalConsole.log(consoleMessage);
     } catch (consoleError: unknown) {
       // If console logging fails (e.g., EPIPE), just write to file
       if ((consoleError as NodeJS.ErrnoException)?.code !== 'EPIPE' && !this.isInErrorHandler) {
@@ -259,9 +297,9 @@ export class Logger {
         try {
           // For non-EPIPE errors, try to at least write the error to file
           // Use a direct write to avoid potential recursion through writeToFile
-          const errorMessage = `[${timestamp}] ERROR: Failed to write to console: ${(consoleError as Error)?.message || 'Unknown error'}\n`;
+          const errorMessage = `[${timestamp}] ERROR: Failed to write to console: ${(consoleError as Error)?.message || 'Unknown error'}`;
           if (this.logStream && !this.logStream.destroyed) {
-            this.logStream.write(errorMessage);
+            this.logStream.write(`${this.truncateForFile(errorMessage)}\n`);
           }
         } catch {
           // Silently fail - we've done our best

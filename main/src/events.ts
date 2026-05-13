@@ -15,6 +15,13 @@ import type { Project } from './database/models';
 import type { GitStatus } from './types/session';
 import { resourceMonitorService } from './services/resourceMonitorService';
 
+function isArchivedSessionOutputValidation(validation: { error?: string; sessionId?: string }): boolean {
+  return Boolean(
+    validation.sessionId &&
+    validation.error === `Session ${validation.sessionId} is archived`
+  );
+}
+
 export function setupEventListeners(services: AppServices, getMainWindow: () => BrowserWindow | null): void {
   const {
     sessionManager,
@@ -137,6 +144,11 @@ export function setupEventListeners(services: AppServices, getMainWindow: () => 
     // Validate the output has valid session context
     const validation = validateEventContext(output);
     if (!validation.valid) {
+      if (isArchivedSessionOutputValidation(validation)) {
+        console.log(`[Validation] Dropping late session-output for archived session ${validation.sessionId}`);
+        return;
+      }
+
       logValidationFailure('session-output event', validation);
       return; // Don't broadcast invalid events
     }

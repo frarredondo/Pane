@@ -63,6 +63,51 @@ interface ExecutionDiffRow {
   timestamp: string;
 }
 
+const DEBUG_DB_PANEL_STATE = process.env.PANE_DEBUG_DB_PANEL_STATE === "1";
+const LARGE_PANEL_STATE_FIELDS = new Set([
+  "scrollbackBuffer",
+  "alternateScreenBuffer",
+  "serializedBuffer",
+  "commandHistory",
+  "lastActiveCommand",
+  "outputBuffer",
+]);
+
+function summarizePanelStateField(value: unknown): string {
+  if (typeof value === "string") {
+    return `[string length=${value.length}]`;
+  }
+
+  if (Array.isArray(value)) {
+    return `[array length=${value.length}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return `[object keys=${Object.keys(value).length}]`;
+  }
+
+  return `[${typeof value}]`;
+}
+
+function sanitizePanelStateForLog(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizePanelStateForLog(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+      key,
+      LARGE_PANEL_STATE_FIELDS.has(key)
+        ? summarizePanelStateField(nestedValue)
+        : sanitizePanelStateForLog(nestedValue),
+    ]),
+  );
+}
+
 export class DatabaseService {
   private db: Database.Database;
 
@@ -3967,6 +4012,15 @@ export class DatabaseService {
                 : {}),
             };
           }
+        }
+
+        if (DEBUG_DB_PANEL_STATE) {
+          console.log("[DB-DEBUG] updatePanel state merge:", {
+            panelId,
+            updates: sanitizePanelStateForLog(updates.state),
+            existing: sanitizePanelStateForLog(existingState),
+            merged: sanitizePanelStateForLog(mergedState),
+          });
         }
 
         setClauses.push("state = ?");
