@@ -7,9 +7,40 @@ import './index.css';
 import './styles/markdown-preview.css';
 import './styles/notebook-preview.css';
 
+function getErrorMessage(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function getErrorStack(value: unknown): string | undefined {
+  return value instanceof Error ? value.stack : undefined;
+}
+
+function reportRendererFatal(payload: {
+  kind: 'unhandledrejection' | 'error';
+  message: string;
+  stack?: string;
+  url?: string;
+  line?: number;
+  column?: number;
+}) {
+  window.electronAPI?.diagnostics?.rendererFatal(payload).catch(() => {});
+}
+
 // Global error handlers to catch errors that React error boundaries can't
 window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled promise rejection:', event.reason);
+  reportRendererFatal({
+    kind: 'unhandledrejection',
+    message: getErrorMessage(event.reason),
+    stack: getErrorStack(event.reason),
+    url: window.location.href,
+  });
   // Prevent default browser behavior (showing error in console)
   event.preventDefault();
 
@@ -19,6 +50,14 @@ window.addEventListener('unhandledrejection', (event) => {
 
 window.addEventListener('error', (event) => {
   console.error('Uncaught error:', event.error);
+  reportRendererFatal({
+    kind: 'error',
+    message: getErrorMessage(event.error || event.message),
+    stack: getErrorStack(event.error),
+    url: event.filename || window.location.href,
+    line: event.lineno,
+    column: event.colno,
+  });
   // Note: We don't prevent default here as the error boundary should catch React errors
 });
 

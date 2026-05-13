@@ -18,7 +18,7 @@ if (process.platform === 'win32') {
 }
 
 // Now import the rest of electron
-import { BrowserWindow, Menu, ipcMain, shell, dialog, IpcMainInvokeEvent, session, WebContents, webContents, WebContentsView } from 'electron';
+import { BrowserWindow, Menu, ipcMain, shell, dialog, IpcMainInvokeEvent, session, WebContents, webContents, WebContentsView, powerMonitor } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { TaskQueue } from './services/taskQueue';
@@ -66,6 +66,7 @@ export const webviewContextMap = new Map<number, { panelId: string; sessionId: s
 // Active DevTools WebContentsViews, keyed by the page webContentsId they inspect
 const activeDevToolsViews = new Map<number, Electron.WebContentsView>();
 let devToolsHandlersRegistered = false;
+let powerMonitorDiagnosticsRegistered = false;
 
 // Track partitions that already have the localhost header-stripping hook registered,
 // so we don't add duplicate listeners when multiple webviews share the same partition.
@@ -73,6 +74,57 @@ const registeredPartitions = new Set<string>();
 
 // Module-level shutdown guard to prevent multiple shutdown attempts
 let shutdownInProgress = false;
+
+type RendererDiagnosticPayload = {
+  kind?: string;
+  message?: string;
+  stack?: string;
+  componentStack?: string;
+  url?: string;
+  line?: number;
+  column?: number;
+};
+
+function safeDiagnosticValue(value: unknown, maxLength = 4_000): string {
+  let serialized: string;
+  if (value instanceof Error) {
+    serialized = `${value.name}: ${value.message}\n${value.stack || ''}`;
+  } else if (typeof value === 'string') {
+    serialized = value;
+  } else {
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      serialized = String(value);
+    }
+  }
+
+  return serialized.length > maxLength
+    ? `${serialized.slice(0, maxLength)} ... [truncated ${serialized.length - maxLength} chars]`
+    : serialized;
+}
+
+function formatRendererDiagnostic(payload: RendererDiagnosticPayload): string {
+  return [
+    `kind=${JSON.stringify(payload.kind || 'unknown')}`,
+    `message=${JSON.stringify(safeDiagnosticValue(payload.message || ''))}`,
+    payload.url ? `url=${JSON.stringify(payload.url)}` : undefined,
+    payload.line !== undefined ? `line=${payload.line}` : undefined,
+    payload.column !== undefined ? `column=${payload.column}` : undefined,
+    payload.stack ? `stack=${JSON.stringify(safeDiagnosticValue(payload.stack))}` : undefined,
+    payload.componentStack ? `componentStack=${JSON.stringify(safeDiagnosticValue(payload.componentStack))}` : undefined,
+  ].filter(Boolean).join(' ');
+}
+
+function registerPowerMonitorDiagnostics(): void {
+  if (powerMonitorDiagnosticsRegistered) return;
+  powerMonitorDiagnosticsRegistered = true;
+
+  powerMonitor.on('suspend', () => logger?.info('[Lifecycle] power:suspend'));
+  powerMonitor.on('resume', () => logger?.info('[Lifecycle] power:resume'));
+  powerMonitor.on('lock-screen', () => logger?.info('[Lifecycle] power:lock-screen'));
+  powerMonitor.on('unlock-screen', () => logger?.info('[Lifecycle] power:unlock-screen'));
+}
 
 /**
  * Set the application title based on development mode and worktree
@@ -827,7 +879,7 @@ async function createWindow() {
 
   // Handle renderer process crashes with recovery
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    console.error('[Main] Renderer process crashed:', details.reason, details);
+    console.error('[RendererLifecycle] render-process-gone:', details.reason, details);
     if (details.reason === 'crashed' || details.reason === 'oom' || details.reason === 'killed') {
       // Attempt to reload the renderer
       console.log('[Main] Attempting to recover renderer...');
@@ -837,6 +889,14 @@ async function createWindow() {
         console.error('[Main] Failed to reload renderer after crash:', err);
       }
     }
+  });
+
+  mainWindow.webContents.on('unresponsive', () => {
+    console.warn('[RendererLifecycle] unresponsive');
+  });
+
+  mainWindow.webContents.on('responsive', () => {
+    console.log('[RendererLifecycle] responsive');
   });
 
   // Handle window focus/blur/minimize for smart git status polling and
@@ -896,6 +956,7 @@ async function initializeServices() {
   // Initialize logger early so it can capture all logs
   logger = new Logger(configManager);
   console.log('[Main] Logger initialized with file logging to ~/.pane/logs');
+  registerPowerMonitorDiagnostics();
 
   // Log the scrollback retention result captured at database module load.
   // The sweep itself runs before panelManager's constructor caches rows into
@@ -1081,6 +1142,11 @@ async function initializeServices() {
         logger.info(forwarded);
       }
     }
+  });
+
+  ipcMain.handle('diagnostics:renderer-fatal', (_event, payload: RendererDiagnosticPayload) => {
+    logger.error(`[RendererFatal] ${formatRendererDiagnostic(payload || {})}`);
+    return { success: true };
   });
   
   // Start periodic version checking (only if enabled in settings)

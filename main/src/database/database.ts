@@ -3919,34 +3919,6 @@ export class DatabaseService {
     // Get existing panel first to merge state
     const existingPanel = this.getPanel(panelId);
 
-    // Helper to strip large fields (scrollbackBuffer, outputBuffer) from state for logging
-    const sanitizeForLog = (state: unknown): string => {
-      if (!state || typeof state !== 'object') return JSON.stringify(state);
-      const obj = state as Record<string, unknown>;
-      const clean = { ...obj };
-      if (clean.customState && typeof clean.customState === 'object') {
-        const cs = { ...(clean.customState as Record<string, unknown>) };
-        if ('scrollbackBuffer' in cs) cs.scrollbackBuffer = `[${typeof cs.scrollbackBuffer === 'string' ? cs.scrollbackBuffer.length : 0} chars]`;
-        if ('outputBuffer' in cs && Array.isArray(cs.outputBuffer)) cs.outputBuffer = `[${cs.outputBuffer.length} lines]`;
-        clean.customState = cs;
-      }
-      return JSON.stringify(clean);
-    };
-
-    // Add debug logging to track panel state changes
-    if (updates.state !== undefined) {
-      console.log(
-        `[DB-DEBUG] updatePanel called for ${panelId} with state:`,
-        sanitizeForLog(updates.state),
-      );
-      if (existingPanel) {
-        console.log(
-          `[DB-DEBUG] Existing panel state before update:`,
-          sanitizeForLog(existingPanel.state),
-        );
-      }
-    }
-
     this.transaction(() => {
       const setClauses: string[] = [];
       const values: (string | number | boolean | null)[] = [];
@@ -3997,8 +3969,6 @@ export class DatabaseService {
           }
         }
 
-        console.log(`[DB-DEBUG] Merged state:`, sanitizeForLog(mergedState));
-
         setClauses.push("state = ?");
         values.push(JSON.stringify(mergedState));
       }
@@ -4012,7 +3982,7 @@ export class DatabaseService {
         setClauses.push("updated_at = CURRENT_TIMESTAMP");
         values.push(panelId);
 
-        const result = this.db
+        this.db
           .prepare(
             `
           UPDATE tool_panels
@@ -4021,18 +3991,6 @@ export class DatabaseService {
         `,
           )
           .run(...values);
-
-        console.log(
-          `[DB-DEBUG] Update result for panel ${panelId}: ${result.changes} rows affected`,
-        );
-
-        if (updates.state !== undefined && result.changes > 0) {
-          const afterPanel = this.getPanel(panelId);
-          console.log(
-            `[DB-DEBUG] Panel state after update:`,
-            sanitizeForLog(afterPanel?.state),
-          );
-        }
       }
     });
   }

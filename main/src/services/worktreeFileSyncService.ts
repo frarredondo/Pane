@@ -124,7 +124,7 @@ async function existsAt(
     }
   }
   try {
-    await commandRunner.execAsync(`test -e "${filePath}"`, cwd);
+    await commandRunner.execAsync(`test -e "${filePath}"`, cwd, { silent: true });
     return true;
   } catch {
     return false;
@@ -153,7 +153,7 @@ async function isFilePath(
     }
   }
   try {
-    await commandRunner.execAsync(`test -f "${filePath}"`, cwd);
+    await commandRunner.execAsync(`test -f "${filePath}"`, cwd, { silent: true });
     return true;
   } catch {
     return false;

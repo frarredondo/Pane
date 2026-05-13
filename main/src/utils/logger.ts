@@ -13,6 +13,25 @@ const ORIGINAL_CONSOLE = {
   info: console.info
 };
 
+const MAX_LOG_EVENT_CHARS = 16 * 1024;
+
+function sanitizeLogControls(message: string): string {
+  let sanitized = '';
+
+  for (const char of message) {
+    const code = char.charCodeAt(0);
+    if (code === 0) {
+      sanitized += '\\0';
+    } else if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127) {
+      sanitized += `\\x${code.toString(16).padStart(2, '0')}`;
+    } else {
+      sanitized += char;
+    }
+  }
+
+  return sanitized;
+}
+
 export class Logger {
   private logDir: string;
   private currentLogFile: string;
@@ -212,10 +231,21 @@ export class Logger {
     }
   }
 
+  private normalizeLogEvent(message: string): string {
+    const sanitized = sanitizeLogControls(message);
+
+    if (sanitized.length <= MAX_LOG_EVENT_CHARS) {
+      return sanitized;
+    }
+
+    const omittedChars = sanitized.length - MAX_LOG_EVENT_CHARS;
+    return `${sanitized.slice(0, MAX_LOG_EVENT_CHARS)} ... [truncated ${omittedChars} chars, original=${sanitized.length}]`;
+  }
+
   private log(level: string, message: string, error?: Error) {
     const timestamp = formatForDatabase();
     const errorInfo = error ? ` Error: ${error.message}\nStack: ${error.stack}` : '';
-    const fullMessage = `[${timestamp}] ${level}: ${message}${errorInfo}`;
+    const fullMessage = this.normalizeLogEvent(`[${timestamp}] ${level}: ${message}${errorInfo}`);
     
     // Try to log to console, but handle EPIPE errors gracefully
     try {

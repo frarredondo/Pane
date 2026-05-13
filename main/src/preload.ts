@@ -324,6 +324,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // System utilities
   openExternal: (url: string): Promise<IPCResponse> => ipcRenderer.invoke('openExternal', url),
 
+  diagnostics: {
+    rendererFatal: (payload: {
+      kind: string;
+      message: string;
+      stack?: string;
+      componentStack?: string;
+      url?: string;
+      line?: number;
+      column?: number;
+    }): Promise<IPCResponse> => ipcRenderer.invoke('diagnostics:renderer-fatal', payload),
+  },
+
   // Session management
   sessions: {
     getAll: (): Promise<IPCResponse> => ipcRenderer.invoke('sessions:get-all'),
