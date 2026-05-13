@@ -96,7 +96,8 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘K` / `Ctrl+K` | Open command palette |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open command palette |
+| `⌘K` / `Ctrl+K` | Clear terminal scrollback |
 | `⌘Enter` / `Ctrl+Enter` | Send message to AI agent |
 | `⌘N` / `Ctrl+N` | New pane |
 | `⌘⇧W` / `Ctrl+Shift+W` | Archive pane |

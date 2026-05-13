@@ -479,11 +479,25 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
         // Intercept app-level shortcuts before xterm consumes them
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+          const ctrlOrMeta = e.ctrlKey || e.metaKey;
+
+          // Ctrl/Cmd+K: clear xterm scrollback without writing ^K to the PTY.
+          if (ctrlOrMeta && e.key.toLowerCase() === 'k') {
+            if (e.type === 'keydown') {
+              xtermRef.current?.clear();
+              window.electronAPI
+                .invoke('terminal:clearScrollback', panel.id)
+                .catch((error: unknown) => {
+                  console.warn('[TerminalPanel] Failed to persist scrollback clear:', error);
+                });
+            }
+            return false;
+          }
+
           // When a TUI app is running, pass most keys through to the PTY
           // but still let Ctrl/Cmd+V use the browser's native paste path
           if (tuiActiveRef.current) {
-            const cm = e.ctrlKey || e.metaKey;
-            if (cm && e.key.toLowerCase() === 'v') return false;
+            if (ctrlOrMeta && e.key.toLowerCase() === 'v') return false;
             return true;
           }
 
@@ -497,8 +511,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             }
             return false;
           }
-
-          const ctrlOrMeta = e.ctrlKey || e.metaKey;
 
           // Ctrl/Cmd+1-9: switch sessions
           if (ctrlOrMeta && e.key >= '1' && e.key <= '9') return false;
@@ -522,9 +534,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           if (ctrlOrMeta && (e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'q')) return false;
           // Ctrl/Cmd+T: open Add Tool dropdown
           if (ctrlOrMeta && e.key.toLowerCase() === 't') return false;
-          // Ctrl/Cmd+K: command palette
-          if (ctrlOrMeta && e.key.toLowerCase() === 'k') return false;
-          // Ctrl/Cmd+P: prompt history
+          // Ctrl/Cmd+P: prompt history; Ctrl/Cmd+Shift+P: command palette
           if (ctrlOrMeta && e.key.toLowerCase() === 'p') return false;
           // Ctrl/Cmd+N: new workspace
           if (ctrlOrMeta && e.key.toLowerCase() === 'n') return false;
@@ -534,7 +544,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'r') return false;
           // Git shortcuts - release to DOM for hotkeyStore
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'm') return false;
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'p') return false;
+          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'u') return false;
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'l') return false;
           // Ctrl/Cmd+Shift+N: new project
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'n') return false;

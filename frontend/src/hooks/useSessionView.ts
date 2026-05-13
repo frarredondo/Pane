@@ -687,7 +687,7 @@ export const useSessionView = (
   useHotkey({
     id: 'git-push',
     label: 'Git: Push',
-    keys: 'mod+shift+p',
+    keys: 'mod+shift+u',
     category: 'session',
     action: () => handleGitPush(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,

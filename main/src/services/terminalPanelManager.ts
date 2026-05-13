@@ -1162,6 +1162,26 @@ export class TerminalPanelManager {
       serializedBuffer: this.serializedBuffers.get(panelId)
     };
   }
+
+  async clearTerminalScrollback(panelId: string): Promise<void> {
+    const terminal = this.terminals.get(panelId);
+    if (terminal) {
+      terminal.scrollbackBuffer = '';
+    }
+    this.serializedBuffers.delete(panelId);
+
+    const panel = panelManager.getPanel(panelId);
+    if (!panel) return;
+
+    const state = panel.state;
+    state.customState = {
+      ...(state.customState ?? {}),
+      scrollbackBuffer: '',
+      serializedBuffer: undefined,
+    } as TerminalPanelState;
+
+    await panelManager.updatePanel(panelId, { state });
+  }
   
   private emitActivityStatus(terminal: TerminalProcess): void {
     if (mainWindow) {

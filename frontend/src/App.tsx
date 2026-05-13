@@ -134,7 +134,7 @@ function App() {
   useHotkey({
     id: 'open-command-palette',
     label: 'Open Command Palette',
-    keys: 'mod+k',
+    keys: 'mod+shift+p',
     category: 'navigation',
     action: () => setIsCommandPaletteOpen(true),
   });
