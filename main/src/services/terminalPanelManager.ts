@@ -172,6 +172,66 @@ export class TerminalPanelManager {
     return undefined;
   }
 
+  private resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState): {
+    commandToRun: string;
+    customState: TerminalPanelState;
+    isCliCommand: boolean;
+  } {
+    const agentType = customState.agentType ?? this.getCliAgentType(initialCommand);
+    if (!agentType) {
+      return { commandToRun: initialCommand, customState, isCliCommand: false };
+    }
+
+    const nextState: TerminalPanelState = {
+      ...customState,
+      isCliPanel: true,
+      isCliReady: false,
+      agentType,
+    };
+
+    if (
+      agentType === 'claude' &&
+      !initialCommand.includes('--session-id') &&
+      !initialCommand.includes('--resume')
+    ) {
+      nextState.hasClaudeSessionId = true;
+      nextState.wasInterrupted = undefined;
+      return {
+        commandToRun: customState.hasClaudeSessionId
+          ? `claude --resume ${panelId} --dangerously-skip-permissions`
+          : `${initialCommand} --session-id ${panelId}`,
+        customState: nextState,
+        isCliCommand: true,
+      };
+    }
+
+    if (agentType === 'claude' && customState.wasInterrupted) {
+      nextState.wasInterrupted = undefined;
+      return { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
+    }
+
+    if (agentType === 'codex' && customState.wasInterrupted) {
+      nextState.wasInterrupted = undefined;
+      const commandToRun = customState.agentSessionId
+        ? `codex resume --yolo ${customState.agentSessionId}`
+        : 'codex resume --yolo';
+
+      if (customState.agentSessionId) {
+        console.log(`[TerminalPanelManager] Resolved interrupted Codex panel ${panelId} to direct resume`);
+      } else {
+        console.log(`[TerminalPanelManager] Resolved interrupted Codex panel ${panelId} to interactive resume picker`);
+      }
+
+      return {
+        commandToRun,
+        customState: nextState,
+        isCliCommand: true,
+      };
+    }
+
+    return { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
+  }
+
   private stripAnsiSequences(output: string): string {
     // eslint-disable-next-line no-control-regex
     return output.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g, '');
@@ -636,44 +696,15 @@ export class TerminalPanelManager {
     // setupTerminalHandlers so we don't miss early shell output.
     let commandToRun: string | undefined;
     if (initialCommand) {
-      commandToRun = initialCommand;
-      const cliAgentType = this.getCliAgentType(initialCommand);
+      const launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {});
+      commandToRun = launchResolution.commandToRun;
+      const isCliCommand = launchResolution.isCliCommand;
 
-      // Mark CLI tool panels so the frontend can show an init overlay
-      const isCliCommand = cliAgentType !== undefined;
       if (isCliCommand) {
-        const cliState = panel.state;
-        const cliCs = (cliState.customState || {}) as TerminalPanelState;
-        cliCs.isCliPanel = true;
-        cliCs.isCliReady = false; // Reset on (re-)launch so the overlay shows for fresh CLI processes
-        cliCs.agentType = cliAgentType;
-        cliState.customState = cliCs;
-        // Will be persisted below — either by the claude-specific block or the explicit call after it
-      }
-
-      // If this is a Claude CLI command, inject --session-id or --resume
-      if (
-        cliAgentType === 'claude' &&
-        !initialCommand.includes('--session-id') &&
-        !initialCommand.includes('--resume')
-      ) {
-        const termState = existingState as TerminalPanelState | undefined;
-        if (termState?.hasClaudeSessionId) {
-          commandToRun = `claude --resume ${panel.id} --dangerously-skip-permissions`;
-        } else {
-          commandToRun = `${initialCommand} --session-id ${panel.id}`;
-        }
-
-        // Mark that we've assigned a session ID to this panel
-        // (isCliPanel is already set above and will be included here)
-        const updatedState = panel.state;
-        const cs = (updatedState.customState || {}) as TerminalPanelState;
-        cs.hasClaudeSessionId = true;
-        updatedState.customState = cs;
-        panelManager.updatePanel(panel.id, { state: updatedState });
-      } else if (isCliCommand) {
-        // Non-claude CLI (e.g. codex) — persist the isCliPanel flag explicitly
-        panelManager.updatePanel(panel.id, { state: panel.state });
+        panel.state.customState = launchResolution.customState;
+        await panelManager.updatePanel(panel.id, { state: panel.state }).catch(error => {
+          console.warn(`[TerminalPanelManager] Failed to persist CLI launch state for panel ${panel.id}:`, error);
+        });
       }
 
       // Detect the interactive prompt before injecting the command.

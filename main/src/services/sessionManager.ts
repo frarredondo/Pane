@@ -1844,33 +1844,28 @@ export class SessionManager extends EventEmitter {
             const agentType = customState.agentType ?? this.getTerminalAgentType(customState.initialCommand);
 
             if (agentType === 'claude') {
-              // Panel ID was passed as --session-id on original launch, so use it as resume ID.
-              customState.initialCommand = `claude --resume ${panel.id} --dangerously-skip-permissions`;
+              customState.hasClaudeSessionId = true;
+              customState.agentType = 'claude';
             } else if (agentType === 'codex') {
-              customState.initialCommand = customState.agentSessionId
-                ? `codex resume --yolo ${customState.agentSessionId}`
-                : 'codex resume --yolo';
               customState.agentType = 'codex';
               if (customState.agentSessionId) {
-                console.log(`[SessionManager] Resuming Codex panel ${panel.id} with captured session ${customState.agentSessionId}`);
+                console.log(`[SessionManager] Preparing Codex panel ${panel.id} for captured-session resume`);
               } else {
-                console.warn(`[SessionManager] Codex panel ${panel.id} has no captured session id; opening interactive resume picker`);
+                console.warn(`[SessionManager] Codex panel ${panel.id} has no captured session id; terminal launch will open interactive resume picker`);
               }
             } else {
               continue;
             }
 
-            customState.wasInterrupted = undefined;
             state.customState = customState;
 
-            // Save to DB first (critical: initializeTerminal reads from state)
-            this.db.updatePanel(panel.id, { state });
+            // Keep DB, PanelManager cache, and renderer state aligned before terminal launch.
+            await panelManager.updatePanel(panel.id, { state });
 
-            // Reload panel from DB to get fresh state
-            const reloadedPanel = this.db.getPanel(panel.id);
+            const reloadedPanel = panelManager.getPanel(panel.id) ?? this.db.getPanel(panel.id);
             if (reloadedPanel) {
               await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
-              console.log(`[SessionManager] Resumed terminal panel ${panel.id} with ${customState.initialCommand}`);
+              console.log(`[SessionManager] Resumed terminal panel ${panel.id} via launch-time ${agentType} resolver`);
               resumedPanelCount++;
             }
           }
