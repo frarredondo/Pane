@@ -783,6 +783,11 @@ export const SessionView = memo(() => {
   // Create branch actions for the panel bar
   const branchActions = useMemo(() => {
     if (!activeSession) return [];
+    const busyReason = hook.isMerging
+      ? 'Git operation already in progress'
+      : activeSession.status === 'running' || activeSession.status === 'initializing'
+        ? 'Session is currently running'
+        : undefined;
     
     return activeSession.isMainRepo ? [
       {
@@ -792,7 +797,8 @@ export const SessionView = memo(() => {
         onClick: hook.handleGitPull,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
         variant: 'default' as const,
-        description: hook.gitCommands?.getPullCommand ? `git ${hook.gitCommands.getPullCommand()}` : 'git pull'
+        description: hook.gitCommands?.getPullCommand ? `git ${hook.gitCommands.getPullCommand()}` : 'git pull',
+        disabledReason: busyReason,
       },
       {
         id: 'push',
@@ -801,7 +807,8 @@ export const SessionView = memo(() => {
         onClick: hook.handleGitPush,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
         variant: 'success' as const,
-        description: hook.gitCommands?.getPushCommand ? `git ${hook.gitCommands.getPushCommand()}` : 'git push'
+        description: hook.gitCommands?.getPushCommand ? `git ${hook.gitCommands.getPushCommand()}` : 'git push',
+        disabledReason: busyReason,
       }
     ] : [
       // --- Sync ---
@@ -812,7 +819,8 @@ export const SessionView = memo(() => {
         onClick: hook.handleGitFetch,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
         variant: 'default' as const,
-        description: `Fetch from remote into ${hook.gitCommands?.currentBranch || 'current branch'} without merging`
+        description: `Fetch from remote into ${hook.gitCommands?.currentBranch || 'current branch'} without merging`,
+        disabledReason: busyReason,
       },
       // --- Update working tree ---
       {
@@ -824,7 +832,8 @@ export const SessionView = memo(() => {
         variant: 'default' as const,
         description: activeSession.gitStatus?.hasUncommittedChanges
           ? `Stash uncommitted changes on ${hook.gitCommands?.currentBranch || 'current branch'}`
-          : 'No changes to stash'
+          : 'No changes to stash',
+        disabledReason: busyReason ?? (activeSession.gitStatus?.hasUncommittedChanges ? undefined : 'No changes to stash'),
       },
       {
         id: 'stash-pop',
@@ -833,7 +842,8 @@ export const SessionView = memo(() => {
         onClick: hook.handleGitStashPop,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing' || !hook.hasStash,
         variant: 'default' as const,
-        description: hook.hasStash ? 'Apply and remove most recent stash' : 'No stash to pop'
+        description: hook.hasStash ? 'Apply and remove most recent stash' : 'No stash to pop',
+        disabledReason: busyReason ?? (hook.hasStash ? undefined : 'No stash to pop'),
       },
       // --- Commit & push ---
       {
@@ -849,7 +859,8 @@ export const SessionView = memo(() => {
         variant: 'default' as const,
         description: (activeSession.gitStatus?.hasUncommittedChanges || activeSession.gitStatus?.hasUntrackedFiles)
           ? `Stage all changes and commit on ${hook.gitCommands?.currentBranch || 'current branch'}`
-          : 'No changes to commit'
+          : 'No changes to commit',
+        disabledReason: busyReason ?? ((activeSession.gitStatus?.hasUncommittedChanges || activeSession.gitStatus?.hasUntrackedFiles) ? undefined : 'No changes to commit'),
       },
       {
         id: 'undo-commit',
@@ -861,7 +872,8 @@ export const SessionView = memo(() => {
         variant: 'default' as const,
         description: activeSession.gitStatus?.ahead
           ? 'Undo last commit, keeping changes staged (git reset --soft HEAD~1)'
-          : 'No commits to undo'
+          : 'No commits to undo',
+        disabledReason: busyReason ?? (activeSession.gitStatus?.ahead ? undefined : 'No commits to undo'),
       },
       {
         id: 'pull',
@@ -871,7 +883,8 @@ export const SessionView = memo(() => {
         onClick: hook.handleGitPull,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
         variant: 'default' as const,
-        description: `Pull latest changes into ${hook.gitCommands?.currentBranch || 'current branch'}`
+        description: `Pull latest changes into ${hook.gitCommands?.currentBranch || 'current branch'}`,
+        disabledReason: busyReason,
       },
       {
         id: 'push',
@@ -883,7 +896,8 @@ export const SessionView = memo(() => {
         variant: 'default' as const,
         description: activeSession.gitStatus?.ahead
           ? `Push ${activeSession.gitStatus.ahead} commit(s)${hook.gitCommands?.currentBranch ? ` from ${hook.gitCommands.currentBranch}` : ''} to remote`
-          : 'No commits to push'
+          : 'No commits to push',
+        disabledReason: busyReason ?? (activeSession.gitStatus?.ahead ? undefined : 'No commits to push'),
       },
       // --- Main branch operations (last) ---
       {
@@ -894,7 +908,8 @@ export const SessionView = memo(() => {
         onClick: hook.handleRebaseMainIntoWorktree,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing' || !hook.hasChangesToRebase,
         variant: 'default' as const,
-        description: hook.gitCommands?.getRebaseFromMainCommand ? hook.gitCommands.getRebaseFromMainCommand() : `Pulls latest changes from ${hook.gitCommands?.comparisonBaseBranch || 'main'}`
+        description: hook.gitCommands?.getRebaseFromMainCommand ? hook.gitCommands.getRebaseFromMainCommand() : `Pulls latest changes from ${hook.gitCommands?.comparisonBaseBranch || 'main'}`,
+        disabledReason: busyReason ?? (hook.hasChangesToRebase ? undefined : 'No changes to rebase from main'),
       },
       {
         id: 'rebase-to-main',
@@ -907,7 +922,8 @@ export const SessionView = memo(() => {
         variant: 'success' as const,
         description: (!activeSession.gitStatus?.totalCommits || activeSession.gitStatus?.totalCommits === 0 || activeSession.gitStatus?.ahead === 0) ?
                      'No commits to merge' :
-                     (hook.gitCommands?.getSquashAndRebaseToMainCommand ? hook.gitCommands.getSquashAndRebaseToMainCommand() : `Merges all commits to ${hook.gitCommands?.comparisonBaseBranch || 'main'} (with safety checks)`)
+                     (hook.gitCommands?.getSquashAndRebaseToMainCommand ? hook.gitCommands.getSquashAndRebaseToMainCommand() : `Merges all commits to ${hook.gitCommands?.comparisonBaseBranch || 'main'} (with safety checks)`),
+        disabledReason: busyReason ?? ((!activeSession.gitStatus?.totalCommits || activeSession.gitStatus?.totalCommits === 0 || activeSession.gitStatus?.ahead === 0) ? 'No commits to merge' : undefined),
       }
     ];
   }, [activeSession, hook.isMerging, hook.gitCommands, hook.hasChangesToRebase, hook.hasStash, hook.handleGitPull, hook.handleGitPush, hook.handleGitSoftReset, hook.handleGitFetch, hook.handleGitStash, hook.handleGitStashPop, hook.setShowCommitMessageDialog, hook.setDialogType, hook.handleRebaseMainIntoWorktree, hook.handleSquashAndRebaseToMain, activeSession?.gitStatus]);

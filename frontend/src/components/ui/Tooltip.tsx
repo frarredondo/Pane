@@ -132,7 +132,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
         <div
           ref={tooltipRef}
           className={cn(
-            'fixed z-[9999] px-3 py-1.5 text-sm text-text-primary bg-bg-tertiary border border-border-primary rounded-lg shadow-lg transition-opacity duration-150',
+            'fixed z-tooltip px-3 py-1.5 text-sm text-text-primary bg-bg-tertiary border border-border-primary rounded-lg shadow-lg transition-opacity duration-150',
             interactive ? 'whitespace-normal' : 'whitespace-nowrap pointer-events-none'
           )}
           style={style}

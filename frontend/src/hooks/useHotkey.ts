@@ -30,11 +30,15 @@ export function useHotkey(def: HotkeyDefinition): void {
   const enabledRef = useRef(def.enabled);
   enabledRef.current = def.enabled;
 
+  const disabledReasonRef = useRef(def.disabledReason);
+  disabledReasonRef.current = def.disabledReason;
+
   useEffect(() => {
     register({
       ...def,
       action: () => actionRef.current(),
       enabled: def.enabled ? () => enabledRef.current!() : undefined,
+      disabledReason: def.disabledReason ? () => disabledReasonRef.current?.() ?? null : undefined,
     });
     return () => unregister(def.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps

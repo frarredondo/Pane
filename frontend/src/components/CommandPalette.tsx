@@ -5,6 +5,8 @@ import { Input } from './ui/Input';
 import { useHotkeyStore, type HotkeyDefinition } from '../stores/hotkeyStore';
 import { formatKeyDisplay, CATEGORY_LABELS, CATEGORY_ORDER } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
+import { Tooltip } from './ui/Tooltip';
+import { cn } from '../utils/cn';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -13,7 +15,7 @@ interface CommandPaletteProps {
 
 type ListItem =
   | { type: 'header'; category: string }
-  | { type: 'command'; hotkey: HotkeyDefinition; flatIndex: number };
+  | { type: 'command'; hotkey: HotkeyDefinition; flatIndex: number; disabled: boolean; disabledReason: string | null };
 
 export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,11 +26,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const getAll = useHotkeyStore((s) => s.getAll);
   const search = useHotkeyStore((s) => s.search);
 
-  // Get filtered results — exclude the command palette's own hotkey, disabled hotkeys, and showInPalette: false
+  // Get filtered results — exclude the command palette's own hotkey and showInPalette: false.
+  // Disabled commands remain visible, sorted after enabled commands.
   const results = (searchTerm
     ? search(searchTerm, { paletteOnly: true })
     : getAll({ paletteOnly: true })
-  ).filter((h) => h.id !== 'open-command-palette' && (!h.enabled || h.enabled()));
+  ).filter((h) => h.id !== 'open-command-palette');
 
   const { listItems, commandCount } = buildListItems(results);
 
@@ -59,6 +62,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     );
     const selected = commandItems[selectedIndex];
     if (selected) {
+      if (selected.disabled) return;
       onClose();
       setTimeout(() => selected.hotkey.action(), 50);
     }
@@ -126,17 +130,23 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
               );
             }
             const isSelected = item.flatIndex === selectedIndex;
-            return (
+            const button = (
               <button
                 key={item.hotkey.id}
                 data-selected={isSelected}
-                className={`w-full flex items-center justify-between px-4 py-2 text-sm cursor-pointer transition-colors ${
-                  isSelected
-                    ? 'bg-interactive/15 text-text-primary'
-                    : 'text-text-secondary hover:bg-surface-hover'
-                }`}
+                aria-disabled={item.disabled}
+                className={cn(
+                  'w-full flex items-center justify-between px-4 py-2 text-sm transition-colors',
+                  item.disabled
+                    ? 'text-text-tertiary opacity-60 cursor-not-allowed'
+                    : 'cursor-pointer',
+                  isSelected && !item.disabled && 'bg-interactive/15 text-text-primary',
+                  isSelected && item.disabled && 'bg-surface-hover/60',
+                  !isSelected && !item.disabled && 'text-text-secondary hover:bg-surface-hover'
+                )}
                 onClick={() => {
                   setSelectedIndex(item.flatIndex);
+                  if (item.disabled) return;
                   onClose();
                   setTimeout(() => item.hotkey.action(), 50);
                 }}
@@ -149,6 +159,18 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                   </Kbd>
                 )}
               </button>
+            );
+
+            if (item.disabled && item.disabledReason) {
+              return (
+                <Tooltip key={item.hotkey.id} content={item.disabledReason} side="right" className="block">
+                  {button}
+                </Tooltip>
+              );
+            }
+
+            return (
+              button
             );
           })
         )}
@@ -165,22 +187,35 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
 }
 
 function buildListItems(results: HotkeyDefinition[]) {
-  const grouped: Record<string, HotkeyDefinition[]> = {};
+  const grouped: Record<string, Array<{ hotkey: HotkeyDefinition; disabled: boolean; disabledReason: string | null }>> = {};
   for (const def of results) {
     if (!grouped[def.category]) grouped[def.category] = [];
-    grouped[def.category].push(def);
+    const disabled = !!def.enabled && !def.enabled();
+    grouped[def.category].push({
+      hotkey: def,
+      disabled,
+      disabledReason: disabled ? def.disabledReason?.() ?? 'Command unavailable' : null,
+    });
   }
 
   const listItems: ListItem[] = [];
   let flatIndex = 0;
-  for (const category of CATEGORY_ORDER) {
+  const appendCategoryItems = (category: HotkeyDefinition['category'], disabled: boolean) => {
     const hotkeys = grouped[category];
-    if (!hotkeys) continue;
+    const filteredHotkeys = hotkeys?.filter((item) => item.disabled === disabled);
+    if (!filteredHotkeys?.length) return;
     listItems.push({ type: 'header', category });
-    for (const hotkey of hotkeys) {
-      listItems.push({ type: 'command', hotkey, flatIndex });
+    for (const item of filteredHotkeys) {
+      listItems.push({ type: 'command', ...item, flatIndex });
       flatIndex++;
     }
+  };
+
+  for (const category of CATEGORY_ORDER) {
+    appendCategoryItems(category, false);
+  }
+  for (const category of CATEGORY_ORDER) {
+    appendCategoryItems(category, true);
   }
 
   return { listItems, commandCount: flatIndex };
