@@ -16,6 +16,8 @@ interface SessionContextValue {
     disabled: boolean;
     variant: 'default' | 'success' | 'danger';
     description: string;
+    shortcut?: string;
+    disabledReason?: string;
   }>;
   isMerging?: boolean;
   gitCommands?: GitCommands;
@@ -40,6 +42,8 @@ export const SessionProvider: React.FC<{
     disabled: boolean;
     variant: 'default' | 'success' | 'danger';
     description: string;
+    shortcut?: string;
+    disabledReason?: string;
   }>;
   isMerging?: boolean;
   gitCommands?: GitCommands | null;

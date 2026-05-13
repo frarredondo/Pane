@@ -670,6 +670,31 @@ export const useSessionView = (
   }, [activeSession?.status, activeSessionId]);
   
   const isSessionBusy = activeSession?.status === 'running' || activeSession?.status === 'initializing';
+  const getGitCommandDisabledReason = (command: 'commit' | 'push' | 'undo' | 'pull' | 'rebase' | 'merge'): string | null => {
+    if (!activeSession) return 'No active session';
+    if (isMerging) return 'Git operation already in progress';
+    if (isSessionBusy) return 'Session is currently running';
+    if (activeSession.isMainRepo) return 'Only available in worktree panes';
+
+    switch (command) {
+      case 'commit':
+        return (activeSession.gitStatus?.hasUncommittedChanges || activeSession.gitStatus?.hasUntrackedFiles)
+          ? null
+          : 'No changes to commit';
+      case 'push':
+        return (activeSession.gitStatus?.ahead ?? 0) > 0 ? null : 'No commits to push';
+      case 'undo':
+        return (activeSession.gitStatus?.ahead ?? 0) > 0 ? null : 'No local commits to undo';
+      case 'pull':
+        return null;
+      case 'rebase':
+        return hasChangesToRebase ? null : 'No changes to rebase from main';
+      case 'merge':
+        return !!activeSession.gitStatus?.totalCommits && activeSession.gitStatus.totalCommits > 0 && (activeSession.gitStatus?.ahead ?? 0) > 0
+          ? null
+          : 'No commits to merge';
+    }
+  };
 
   useHotkey({
     id: 'git-commit',
@@ -682,6 +707,7 @@ export const useSessionView = (
     },
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo &&
       ((activeSession.gitStatus?.hasUncommittedChanges ?? false) || (activeSession.gitStatus?.hasUntrackedFiles ?? false)),
+    disabledReason: () => getGitCommandDisabledReason('commit'),
   });
 
   useHotkey({
@@ -691,6 +717,7 @@ export const useSessionView = (
     category: 'session',
     action: () => handleGitPush(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
+    disabledReason: () => getGitCommandDisabledReason('push'),
   });
 
   useHotkey({
@@ -700,6 +727,7 @@ export const useSessionView = (
     category: 'session',
     action: () => handleGitSoftReset(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
+    disabledReason: () => getGitCommandDisabledReason('undo'),
   });
 
   useHotkey({
@@ -709,6 +737,7 @@ export const useSessionView = (
     category: 'session',
     action: () => handleGitPull(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo,
+    disabledReason: () => getGitCommandDisabledReason('pull'),
   });
 
   useHotkey({
@@ -718,6 +747,7 @@ export const useSessionView = (
     category: 'session',
     action: () => handleRebaseMainIntoWorktree(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && hasChangesToRebase,
+    disabledReason: () => getGitCommandDisabledReason('rebase'),
   });
 
   useHotkey({
@@ -729,6 +759,7 @@ export const useSessionView = (
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo &&
       !!activeSession.gitStatus?.totalCommits && activeSession.gitStatus.totalCommits > 0 &&
       (activeSession.gitStatus?.ahead ?? 0) > 0,
+    disabledReason: () => getGitCommandDisabledReason('merge'),
   });
 
   const handleSendInput = async (attachedImages?: AttachedImage[], attachedTexts?: AttachedText[]) => {

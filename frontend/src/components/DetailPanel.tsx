@@ -6,6 +6,8 @@ import { Button } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
 import { Dropdown, DropdownMenuItem } from './ui/Dropdown';
 import { GitHistoryGraph } from './GitHistoryGraph';
+import { Kbd } from './ui/Kbd';
+import { formatKeyDisplay } from '../utils/hotkeyUtils';
 
 interface DetailPanelProps {
   isVisible: boolean;
@@ -52,6 +54,23 @@ function DetailSection({ title, children }: { title: string; children: React.Rea
     <div className="px-2 py-2 border-b border-border-primary">
       <SectionHeader>{title}</SectionHeader>
       {children}
+    </div>
+  );
+}
+
+function actionTooltip(action: { description?: string; disabled?: boolean; disabledReason?: string; shortcut?: string }, disabled = action.disabled): React.ReactNode {
+  const message = disabled ? action.disabledReason ?? action.description : action.description;
+  return (
+    <div className="space-y-1">
+      {message && (
+        <div>{disabled ? `Unavailable: ${message}` : message}</div>
+      )}
+      {action.shortcut && (
+        <div className="flex items-center gap-2 text-text-tertiary">
+          <span>Shortcut</span>
+          <Kbd size="xs" variant="muted">{formatKeyDisplay(action.shortcut)}</Kbd>
+        </div>
+      )}
     </div>
   );
 }
@@ -428,7 +447,7 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
 
                   return (
                     <div key={`${left.id}-${right.id}`} className="flex gap-0.5 [&>*]:min-w-[90px]">
-                      <Tooltip content={left.description} side="left">
+                      <Tooltip content={actionTooltip(left, left.disabled || isMerging)} side="left">
                         <Button variant="ghost" size="sm" className={pairBtnClass} onClick={left.onClick} disabled={left.disabled || isMerging}>
                           <left.icon className={pairIconClass} />
                           {isRebaseMerge ? (
@@ -449,7 +468,7 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
                           )}
                         </Button>
                       </Tooltip>
-                      <Tooltip content={right.description} side="left">
+                      <Tooltip content={actionTooltip(right, right.disabled || isMerging)} side="left">
                         <Button variant="ghost" size="sm" className={pairBtnClass} onClick={right.onClick} disabled={right.disabled || isMerging}>
                           <right.icon className={pairIconClass} />
                           {isRebaseMerge ? (
@@ -482,7 +501,7 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
                 const isFetch = action.id === 'fetch';
 
                 return (
-                  <Tooltip key={action.id} content={action.description} side="left">
+                  <Tooltip key={action.id} content={actionTooltip(action, action.disabled || isMerging)} side="left">
                     <Button variant="ghost" size="sm" className={sidebarBtn} onClick={action.onClick} disabled={action.disabled || isMerging}>
                       <action.icon className="w-4 h-4 mr-2 flex-shrink-0" />
                       {isFetch && fetchedAgo ? (

@@ -45,6 +45,8 @@ export interface HotkeyDefinition {
   devOnly?: boolean;
   /** Is this hotkey currently enabled? Checked on every keypress. */
   enabled?: () => boolean;
+  /** Explanation shown when a command is present but unavailable. */
+  disabledReason?: () => string | null;
   /** If false, hotkey works but doesn't appear in Command Palette/Help. Defaults to true. */
   showInPalette?: boolean;
 }
