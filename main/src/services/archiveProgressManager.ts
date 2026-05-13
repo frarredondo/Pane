@@ -61,6 +61,7 @@ export class ArchiveProgressManager extends EventEmitter {
     
     this.activeTasks.set(sessionId, task);
     this.taskQueue.push(task);
+    console.log(`[ArchiveProgressManager] queued sessionId=${sessionId} sessionName=${JSON.stringify(sessionName)} worktreeName=${JSON.stringify(worktreeName)} projectName=${JSON.stringify(projectName)} queueLength=${this.taskQueue.length}`);
     this.emitProgress();
     
     // Start processing if not already processing
@@ -82,6 +83,7 @@ export class ArchiveProgressManager extends EventEmitter {
 
       // Update status to pending (actively processing)
       task.status = 'pending';
+      console.log(`[ArchiveProgressManager] pending sessionId=${task.sessionId} worktreeName=${JSON.stringify(task.worktreeName)} remainingQueue=${this.taskQueue.length}`);
       this.emitProgress();
 
       if (task.executeCallback) {
@@ -110,6 +112,7 @@ export class ArchiveProgressManager extends EventEmitter {
     if (!task) return;
 
     task.status = status;
+    console.log(`[ArchiveProgressManager] status sessionId=${sessionId} status=${status}${error ? ` error=${JSON.stringify(error)}` : ''}`);
     
     if (error) {
       task.error = error;

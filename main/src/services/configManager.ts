@@ -15,6 +15,7 @@ export class ConfigManager extends EventEmitter {
   private configDir: string;
   private fileWatcher: FSWatcher | null = null;
   private lastConfigJson: string = '';
+  private saveConfigQueue: Promise<void> = Promise.resolve();
 
   constructor(defaultGitPath?: string) {
     super();
@@ -152,10 +153,24 @@ export class ConfigManager extends EventEmitter {
   }
 
   private async saveConfig(): Promise<void> {
-    await fs.mkdir(this.configDir, { recursive: true });
-    const tmpPath = this.configPath + '.tmp';
-    await fs.writeFile(tmpPath, JSON.stringify(this.config, null, 2));
-    await fs.rename(tmpPath, this.configPath);
+    const configJson = JSON.stringify(this.config, null, 2);
+    const writeConfig = async () => {
+      await fs.mkdir(this.configDir, { recursive: true });
+      const tmpPath = `${this.configPath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+
+      try {
+        await fs.writeFile(tmpPath, configJson);
+        await fs.rename(tmpPath, this.configPath);
+        this.lastConfigJson = configJson;
+      } catch (error) {
+        await fs.unlink(tmpPath).catch(() => {});
+        throw error;
+      }
+    };
+
+    const queuedWrite = this.saveConfigQueue.then(writeConfig, writeConfig);
+    this.saveConfigQueue = queuedWrite.catch(() => {});
+    await queuedWrite;
   }
 
   getConfig(): AppConfig {

@@ -75,7 +75,7 @@ async function fileExists(
       return true;
     }
     if (!commandRunner) return false;
-    await commandRunner.execAsync(`test -e "${filePath}"`, cwd || filePath);
+    await commandRunner.execAsync(`test -e "${filePath}"`, cwd || filePath, { silent: true });
     return true;
   } catch {
     return false;

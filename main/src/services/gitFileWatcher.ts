@@ -397,7 +397,14 @@ export class GitFileWatcher extends EventEmitter {
     try {
       // First, refresh the index to ensure it's up to date
       // This is very fast and updates git's internal cache
-      this.execGit('git update-index --refresh --ignore-submodules', worktreePath);
+      try {
+        this.execGit('git update-index --refresh --ignore-submodules', worktreePath);
+      } catch (error) {
+        // `git update-index --refresh` exits non-zero for dirty/racy paths.
+        // That is a refresh signal, not an application error.
+        this.logger?.verbose(`[GitFileWatcher] update-index indicated refresh needed for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`);
+        return true;
+      }
 
       // Check for unstaged changes (modified files)
       try {
@@ -426,7 +433,7 @@ export class GitFileWatcher extends EventEmitter {
       return false;
     } catch (error) {
       // If any command fails unexpectedly, assume refresh is needed
-      this.logger?.error('[GitFileWatcher] Error in checkIfRefreshNeeded:', error as Error);
+      this.logger?.warn(`[GitFileWatcher] Unexpected refresh check failure for ${worktreePath}; scheduling refresh`, error as Error);
       return true;
     }
   }

@@ -27,6 +27,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     console.error('Error caught by boundary:', error, errorInfo);
     console.error('Component stack:', errorInfo.componentStack);
     this.setState({ errorInfo });
+    window.electronAPI?.diagnostics?.rendererFatal({
+      kind: 'error-boundary',
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack ?? undefined,
+      url: window.location.href,
+    }).catch(() => {});
 
     // Log to file in development mode for debugging
     if (process.env.NODE_ENV === 'development') {

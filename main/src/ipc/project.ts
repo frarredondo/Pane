@@ -367,15 +367,26 @@ export function registerProjectHandlers(ipcMain: IpcMain, services: AppServices)
           }
 
           try {
-            console.log(`[Main] Removing worktree '${session.worktree_name}' for session ${session.id}`);
+            console.log(`[WorktreeAudit] remove_requested source="project-delete" sessionId=${JSON.stringify(session.id)} projectId=${projectIdNum} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(session.worktree_name)} worktreePath=${JSON.stringify(session.worktree_path || '')}`);
             // Pass session creation date for analytics tracking
             const sessionCreatedAt = session.created_at ? new Date(session.created_at) : undefined;
-            await worktreeManager.removeWorktree(project.path, session.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner);
+            await worktreeManager.removeWorktree(project.path, session.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, {
+              source: 'project-delete',
+              sessionId: session.id,
+              projectId: projectIdNum,
+            });
             worktreeCleanupCount++;
           } catch (error) {
             // Log error but continue with other worktrees
             console.error(`[Main] Failed to remove worktree '${session.worktree_name}' for session ${session.id}:`, error);
           }
+        }
+      } else {
+        for (const session of allProjectSessions) {
+          if (session.is_main_repo || !session.worktree_name) {
+            continue;
+          }
+          console.warn(`[WorktreeAudit] remove_skipped source="project-delete" sessionId=${JSON.stringify(session.id)} projectId=${projectIdNum} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(session.worktree_name)} worktreePath=${JSON.stringify(session.worktree_path || '')} reason="missing_project_context"`);
         }
       }
       
@@ -712,4 +723,4 @@ export function registerProjectHandlers(ipcMain: IpcMain, services: AppServices)
       return { success: false, error: error instanceof Error ? error.message : 'Failed to run project script' };
     }
   });
-} 
+}

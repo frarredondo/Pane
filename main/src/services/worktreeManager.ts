@@ -8,6 +8,25 @@ import { CommandRunner } from '../utils/commandRunner';
 import { GIT_ATTRIBUTION_ENV } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 
+export type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
+
+export interface WorktreeAuditContext {
+  source: WorktreeAuditSource;
+  sessionId?: string;
+  projectId?: number;
+}
+
+function formatWorktreeAuditDetails(details: Record<string, unknown>): string {
+  return Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${JSON.stringify(String(value))}`)
+    .join(' ');
+}
+
+function logWorktreeAudit(phase: string, details: Record<string, unknown>): void {
+  console.log(`[WorktreeAudit] ${phase} ${formatWorktreeAuditDetails(details)}`);
+}
+
 // Interface for raw commit data
 interface RawCommitData {
   hash: string;
@@ -155,8 +174,34 @@ export class WorktreeManager {
       try {
         // Use cross-platform approach without shell redirection
         try {
+          logWorktreeAudit('remove_requested', {
+            source: 'create-cleanup',
+            projectPath,
+            worktreeName: name,
+            worktreePath,
+          });
+          logWorktreeAudit('remove_started', {
+            source: 'create-cleanup',
+            projectPath,
+            worktreeName: name,
+            worktreePath,
+          });
           await commandRunner.execAsync(`git worktree remove "${worktreePath}" --force`, projectPath);
-        } catch {
+          logWorktreeAudit('remove_succeeded', {
+            source: 'create-cleanup',
+            projectPath,
+            worktreeName: name,
+            worktreePath,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logWorktreeAudit('remove_skipped', {
+            source: 'create-cleanup',
+            projectPath,
+            worktreeName: name,
+            worktreePath,
+            reason: errorMessage,
+          });
           // Ignore cleanup errors
         }
       } catch {
@@ -310,13 +355,23 @@ export class WorktreeManager {
     return { worktreePath: projectPath, baseCommit, baseBranch: detectedBranch };
   }
 
-  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
+  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<void> {
     return await withLock(`worktree-remove-${projectPath}-${name}`, async () => {
       const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
       const worktreePath = pathResolver.join(baseDir, name);
+      const auditDetails = {
+        source: auditContext?.source,
+        sessionId: auditContext?.sessionId,
+        projectId: auditContext?.projectId,
+        projectPath,
+        worktreeName: name,
+        worktreePath,
+      };
 
       try {
+        logWorktreeAudit('remove_started', auditDetails);
         await commandRunner.execAsync(`git worktree remove "${worktreePath}" --force`, projectPath);
+        logWorktreeAudit('remove_succeeded', auditDetails);
 
         // Track worktree cleanup
         if (this.analyticsManager && sessionCreatedAt) {
@@ -333,9 +388,17 @@ export class WorktreeManager {
         if (errorMessage.includes('is not a working tree') ||
             errorMessage.includes('does not exist') ||
             errorMessage.includes('No such file or directory')) {
-          console.log(`Worktree ${worktreePath} already removed or doesn't exist, skipping...`);
+          logWorktreeAudit('remove_skipped', {
+            ...auditDetails,
+            reason: errorMessage,
+          });
           return;
         }
+
+        logWorktreeAudit('remove_failed', {
+          ...auditDetails,
+          reason: errorMessage,
+        });
 
         // For other errors, still throw
         throw new Error(`Failed to remove worktree: ${errorMessage}`);

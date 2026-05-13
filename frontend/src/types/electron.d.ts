@@ -19,6 +19,16 @@ interface PermissionResponse {
   reason?: string;
 }
 
+interface RendererDiagnosticPayload {
+  kind: 'unhandledrejection' | 'error' | 'error-boundary';
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  url?: string;
+  line?: number;
+  column?: number;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Generic type parameter default for flexible API responses
 interface IPCResponse<T = any> {
   success: boolean;
@@ -51,6 +61,10 @@ interface ElectronAPI {
 
   // System utilities
   openExternal: (url: string) => Promise<void>;
+
+  diagnostics: {
+    rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
+  };
 
   // Session management
   sessions: {

@@ -249,11 +249,15 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
       await sessionManager.archiveSession(sessionId);
 
       // Add the archive message to session output
-      sessionManager.addSessionOutput(sessionId, {
-        type: 'stdout',
-        data: archiveMessage,
-        timestamp: new Date()
-      });
+      try {
+        sessionManager.addSessionOutput(sessionId, {
+          type: 'stdout',
+          data: archiveMessage,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        console.warn(`[ArchiveCleanup] archive_message_output_failed sessionId=${sessionId}:`, error);
+      }
 
       // Kill all panel processes for this session before worktree cleanup
       // This prevents leaked node-pty processes and ensures worktree removal succeeds.
@@ -288,6 +292,7 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
 
       // Create cleanup callback for background operations
       const cleanupCallback = async () => {
+        console.log(`[ArchiveCleanup] cleanup_started sessionId=${sessionId} sessionName=${JSON.stringify(dbSession.name)} worktreeName=${JSON.stringify(dbSession.worktree_name || '')}`);
         let cleanupMessage = '';
 
         // Stop any active run commands for this session so their file handles are released
@@ -359,12 +364,18 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
 
                 // Pass session creation date for analytics tracking
                 const sessionCreatedAt = dbSession.created_at ? new Date(dbSession.created_at) : undefined;
-                await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner);
+                console.log(`[WorktreeAudit] remove_requested source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(dbSession.worktree_name)} worktreePath=${JSON.stringify(dbSession.worktree_path || '')}`);
+                await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, {
+                  source: 'session-delete',
+                  sessionId,
+                  projectId: dbSession.project_id,
+                });
 
                 cleanupMessage += `\x1b[32m✓ Worktree removed successfully\x1b[0m\r\n`;
               } catch (worktreeError) {
                 // Log the error but don't fail
                 console.error(`[Main] Failed to remove worktree ${dbSession.worktree_name}:`, worktreeError);
+                console.error(`[ArchiveCleanup] worktree_remove_failed sessionId=${sessionId} worktreeName=${dbSession.worktree_name}:`, worktreeError);
                 cleanupMessage += `\x1b[33m⚠ Failed to remove worktree (manual cleanup may be needed)\x1b[0m\r\n`;
 
                 // Update progress: failed
@@ -372,8 +383,14 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
                   archiveProgressManager.updateTaskStatus(sessionId, 'failed', 'Failed to remove worktree');
                 }
               }
+            } else {
+              console.warn(`[WorktreeAudit] remove_skipped source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} worktreeName=${JSON.stringify(dbSession.worktree_name)} reason="missing_project_context"`);
             }
+          } else {
+            console.warn(`[WorktreeAudit] remove_skipped source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} worktreeName=${JSON.stringify(dbSession.worktree_name)} reason="missing_project"`);
           }
+        } else {
+          console.log(`[WorktreeAudit] remove_skipped source="session-delete" sessionId=${JSON.stringify(sessionId)} worktreeName=${JSON.stringify(dbSession.worktree_name || '')} reason="no_session_worktree_cleanup_needed"`);
         }
 
         // Clean up session artifacts (images)
@@ -421,18 +438,25 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
 
         // If there were any cleanup messages, add them to the session output
         if (cleanupMessage) {
-          sessionManager.addSessionOutput(sessionId, {
-            type: 'stdout',
-            data: cleanupMessage,
-            timestamp: new Date()
-          });
+          try {
+            sessionManager.addSessionOutput(sessionId, {
+              type: 'stdout',
+              data: cleanupMessage,
+              timestamp: new Date()
+            });
+          } catch (error) {
+            console.warn(`[ArchiveCleanup] cleanup_output_failed sessionId=${sessionId}:`, error);
+          }
         }
+        console.log(`[ArchiveCleanup] cleanup_completed sessionId=${sessionId}`);
       };
 
       // Queue the cleanup task if we have worktree cleanup to do
       if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo) {
         const project = databaseService.getProject(dbSession.project_id);
         if (project && archiveProgressManager) {
+          console.log(`[ArchiveCleanup] archive_queued sessionId=${sessionId} sessionName=${JSON.stringify(dbSession.name)} worktreeName=${JSON.stringify(dbSession.worktree_name)} projectName=${JSON.stringify(project.name)}`);
+          console.log(`[WorktreeAudit] remove_queued source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(dbSession.worktree_name)} worktreePath=${JSON.stringify(dbSession.worktree_path || '')}`);
           archiveProgressManager.addTask(
             sessionId,
             dbSession.name,
@@ -440,6 +464,9 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
             project.name,
             cleanupCallback
           );
+        } else {
+          console.warn(`[ArchiveCleanup] archive_queue_skipped sessionId=${sessionId} reason=${archiveProgressManager ? '"missing_project"' : '"missing_archive_progress_manager"'}`);
+          setImmediate(() => cleanupCallback());
         }
       } else {
         // No worktree cleanup needed, just run artifact cleanup immediately

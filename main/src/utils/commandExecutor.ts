@@ -31,6 +31,11 @@ export interface ExtendedExecSyncOptions extends ExecSyncOptions {
   silent?: boolean;
 }
 
+export interface ExtendedExecAsyncOptions extends ExecOptions {
+  timeout?: number;
+  silent?: boolean;
+}
+
 class CommandExecutor {
   execSync(command: string, options: ExecSyncOptionsWithStringEncoding & { silent?: boolean }, wslContext?: WSLContext | null): string;
   execSync(command: string, options?: ExecSyncOptionsWithBufferEncoding & { silent?: boolean }, wslContext?: WSLContext | null): Buffer;
@@ -126,19 +131,22 @@ class CommandExecutor {
     }
   }
 
-  async execAsync(command: string, options?: ExecOptions & { timeout?: number }, wslContext?: WSLContext | null): Promise<{ stdout: string; stderr: string }> {
+  async execAsync(command: string, options?: ExtendedExecAsyncOptions, wslContext?: WSLContext | null): Promise<{ stdout: string; stderr: string }> {
     const cwd = options?.cwd || process.cwd();
     const shellPath = getShellPath();
+    const silentMode = options?.silent === true;
 
     if (wslContext) {
       // Invoke wsl.exe directly via execFile — bypasses cmd.exe entirely
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { cwd: _cwd, ...cleanOptions } = options || {};
+      const { cwd: _cwd, silent: _silent, ...cleanOptions } = options || {};
       const wslCwd = typeof cwd === 'string' ? cwd : undefined;
       const extraEnv = getExtraEnvVars(cleanOptions?.env as Record<string, string | undefined>);
       const { file, args } = getWSLExecArgs(command, wslContext.distribution, wslCwd, extraEnv);
 
-      console.log(`[CommandExecutor] Executing async (WSL): ${file} ${args.join(' ')} in ${cwd}`);
+      if (!silentMode) {
+        console.log(`[CommandExecutor] Executing async (WSL): ${file} ${args.join(' ')} in ${cwd}`);
+      }
       const timeout = cleanOptions?.timeout || 60_000;
       const maxBuffer = cleanOptions?.maxBuffer || 10 * 1024 * 1024;
       const wslOptions: ExecFileOptions = {
@@ -151,7 +159,7 @@ class CommandExecutor {
       try {
         const result = await nodeExecFileAsync(file, args, wslOptions);
 
-        if (result.stdout) {
+        if (result.stdout && !silentMode) {
           const stdout = String(result.stdout);
           const lines = stdout.split('\n');
           const preview = lines[0].substring(0, 100) +
@@ -161,24 +169,30 @@ class CommandExecutor {
 
         return { stdout: String(result.stdout), stderr: String(result.stderr) };
       } catch (error: unknown) {
-        console.error(`[CommandExecutor] Async Failed (WSL): ${command}`);
-        console.error(`[CommandExecutor] Async Error: ${error instanceof Error ? error.message : String(error)}`);
+        if (!silentMode) {
+          console.error(`[CommandExecutor] Async Failed (WSL): ${command}`);
+          console.error(`[CommandExecutor] Async Error: ${error instanceof Error ? error.message : String(error)}`);
+        }
         throw error;
       }
     }
 
-    console.log(`[CommandExecutor] Executing async: ${command} in ${cwd}`);
+    if (!silentMode) {
+      console.log(`[CommandExecutor] Executing async: ${command} in ${cwd}`);
+    }
 
     const timeout = options?.timeout || 60_000;
     const maxBuffer = options?.maxBuffer || 10 * 1024 * 1024;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { silent: _silent, ...cleanOptions } = options || {};
 
     const enhancedOptions: ExecOptions = {
-      ...options,
+      ...cleanOptions,
       timeout,
       maxBuffer,
       env: {
         ...process.env,
-        ...options?.env,
+        ...cleanOptions?.env,
         PATH: shellPath
       }
     };
@@ -186,7 +200,7 @@ class CommandExecutor {
     try {
       const result = await nodeExecAsync(command, enhancedOptions);
 
-      if (result.stdout) {
+      if (result.stdout && !silentMode) {
         const stdout = String(result.stdout);
         const lines = stdout.split('\n');
         const preview = lines[0].substring(0, 100) +
@@ -196,8 +210,10 @@ class CommandExecutor {
 
       return { stdout: String(result.stdout), stderr: String(result.stderr) };
     } catch (error: unknown) {
-      console.error(`[CommandExecutor] Async Failed: ${command}`);
-      console.error(`[CommandExecutor] Async Error: ${error instanceof Error ? error.message : String(error)}`);
+      if (!silentMode) {
+        console.error(`[CommandExecutor] Async Failed: ${command}`);
+        console.error(`[CommandExecutor] Async Error: ${error instanceof Error ? error.message : String(error)}`);
+      }
       throw error;
     }
   }
