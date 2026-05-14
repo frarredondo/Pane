@@ -14,7 +14,7 @@
 </a>
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/dcouple/Pane/total?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases)
+[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases)
 [![GitHub Stars](https://img.shields.io/github/stars/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane)
 [![Latest Release](https://img.shields.io/github/v/release/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases/latest)
 [![Commit Activity](https://img.shields.io/github/commit-activity/m/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/graphs/commit-activity)
