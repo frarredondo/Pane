@@ -85,6 +85,7 @@ describe('GitStatusManager', () => {
 
     mockWorktreeManager = {
       getProjectMainBranch: vi.fn().mockResolvedValue('main'),
+      getSessionComparisonBranch: vi.fn().mockResolvedValue('main'),
     } as Partial<WorktreeManager> as WorktreeManager;
 
     mockGitDiffManager = {} as Partial<GitDiffManager> as GitDiffManager;
