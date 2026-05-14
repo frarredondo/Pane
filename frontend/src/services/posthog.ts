@@ -142,4 +142,52 @@ export function capture(eventName: string, properties?: Record<string, unknown>)
   }
 }
 
+/**
+ * Capture a single event regardless of opt-in state, without toggling
+ * opt-in afterward. Counterpart to captureAndOptOut: that one is for the
+ * decline click; this one is for measurement events that need to fire
+ * BEFORE the user has consented (e.g. consent_dialog_shown).
+ *
+ * Sends the event directly via HTTP so it bypasses the SDK's opt-in gate.
+ * Same network path as captureAndOptOut, just without the opt-out flip.
+ *
+ * Use this sparingly. The only legitimate case is funnel-completeness
+ * events that must be captured before the user can opt in or out —
+ * specifically, "the user saw the consent dialog." It establishes the
+ * real denominator for opt-in rate (versus the conservative
+ * opted_in + opted_out lower bound).
+ */
+export function captureUnconditionally(eventName: string, properties?: Record<string, unknown>): void {
+  const token = (posthog.get_property?.('$token') as string | undefined)
+    || posthog.config?.token
+    || DEFAULT_API_KEY;
+  const host = posthog.config?.api_host || DEFAULT_HOST;
+  const distinctId = posthog.get_distinct_id();
+
+  const payload = {
+    api_key: token,
+    event: eventName,
+    properties: {
+      ...properties,
+      distinct_id: distinctId,
+      token,
+      $lib: 'posthog-js',
+    },
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    fetch(`${host}/capture/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch((err) => {
+      console.error('[PostHog] Failed to send unconditional event:', err);
+    });
+  } catch (error) {
+    console.error('[PostHog] Failed to capture event:', error);
+  }
+}
+
 export { posthog };

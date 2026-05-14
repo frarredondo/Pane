@@ -35,7 +35,7 @@ import { CloudWidget } from './components/CloudWidget';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
 import { useNavigationStore } from './stores/navigationStore';
-import { initPostHog, capture, posthog } from './services/posthog';
+import { initPostHog, capture, captureUnconditionally, posthog } from './services/posthog';
 import type { VersionUpdateInfo, PermissionInput } from './types/session';
 import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
@@ -249,6 +249,13 @@ function App() {
         const hasShownConsent = consentResult?.data === 'true';
 
         if (!hasShownConsent) {
+          // Fire consent_dialog_shown BEFORE the user can opt in/out, so we
+          // have a true "saw the dialog" denominator for funnel math instead
+          // of the conservative opted_in + opted_out lower bound. Uses direct
+          // HTTP via captureUnconditionally so it bypasses the opt-in gate.
+          // See docs/analytics-attribution.md in runpane-website repo for
+          // the funnel formula this event enables.
+          captureUnconditionally('consent_dialog_shown');
           setIsAnalyticsConsentOpen(true);
         }
       } catch (error) {

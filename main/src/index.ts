@@ -1256,6 +1256,22 @@ app.whenReady().then(async () => {
       });
     }
 
+    // Reactivation detection — fire BEFORE recording this open so the
+    // previous open is the one we compute the gap from. Distinct events
+    // for 7d and 30d so dashboards can filter by intent (light churn vs
+    // deep churn). PostHog distinct_id dedupes naturally for "how many
+    // users came back" counts.
+    const lastOpen = databaseService.getLastAppOpen();
+    if (lastOpen?.opened_at) {
+      const gapMs = Date.now() - new Date(lastOpen.opened_at).getTime();
+      const gapDays = Math.floor(gapMs / (1000 * 60 * 60 * 24));
+      if (gapDays >= 30) {
+        analyticsManager.track('app_reactivated_after_30d', { gap_days: gapDays });
+      } else if (gapDays >= 7) {
+        analyticsManager.track('app_reactivated_after_7d', { gap_days: gapDays });
+      }
+    }
+
     analyticsManager.track('app_opened', {
       is_first_launch: isFirstLaunch,
     });
