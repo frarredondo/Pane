@@ -87,6 +87,25 @@ interface VersionInfo {
   releaseNotes?: string;
 }
 
+interface PermissionRequest {
+  id: string;
+  sessionId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  timestamp: number;
+}
+
+interface PermissionResponse {
+  behavior: 'allow' | 'deny';
+  updatedInput?: Record<string, unknown>;
+  message?: string;
+}
+
+interface PermissionResolvedEvent {
+  request: PermissionRequest;
+  response: PermissionResponse;
+}
+
 interface UpdaterInfo {
   version: string;
   releaseDate?: string;
@@ -116,6 +135,8 @@ const DAEMON_OWNED_EXACT_CHANNELS = [
   'git:get-github-remote',
   'git:restore',
   'git:revert',
+  'permission:getPending',
+  'permission:respond',
   'file:copy',
   'file:delete',
   'file:duplicate',
@@ -612,8 +633,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Permissions
   permissions: {
-    respond: (requestId: string, response: boolean | { approved: boolean; remember?: boolean }): Promise<IPCResponse> => invokeIpc('permission:respond', requestId, response),
-    getPending: (): Promise<IPCResponse> => invokeIpc('permission:getPending'),
+    respond: (requestId: string, response: PermissionResponse): Promise<IPCResponse> => invokeIpc('permission:respond', requestId, response),
+    getPending: (): Promise<IPCResponse<PermissionRequest[]>> => invokeIpc('permission:getPending'),
   },
 
   // Stravu OAuth integration
@@ -661,6 +682,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Event listeners for real-time updates
   events: {
+    onPermissionRequest: (callback: (request: PermissionRequest) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, request: PermissionRequest) => callback(request);
+      ipcRenderer.on('permission:request', wrappedCallback);
+      return () => ipcRenderer.removeListener('permission:request', wrappedCallback);
+    },
+    onPermissionResolved: (callback: (event: PermissionResolvedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, event: PermissionResolvedEvent) => callback(event);
+      ipcRenderer.on('permission:resolved', wrappedCallback);
+      return () => ipcRenderer.removeListener('permission:resolved', wrappedCallback);
+    },
     // Session events
     onSessionCreated: (callback: (session: Session) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, session: Session) => callback(session);
@@ -1047,7 +1078,8 @@ contextBridge.exposeInMainWorld('electron', {
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     const validChannels = [
-      'permission:request'
+      'permission:request',
+      'permission:resolved',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));
@@ -1055,7 +1087,8 @@ contextBridge.exposeInMainWorld('electron', {
   },
   off: (channel: string, callback: (...args: unknown[]) => void) => {
     const validChannels = [
-      'permission:request'
+      'permission:request',
+      'permission:resolved',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback);
