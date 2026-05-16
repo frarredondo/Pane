@@ -75,6 +75,8 @@ interface VersionInfo {
   current: string;
   latest: string;
   hasUpdate: boolean;
+  releaseUrl?: string;
+  downloadUrl?: string;
   releaseNotes?: string;
 }
 
@@ -319,6 +321,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     checkAndDownload: (): Promise<IPCResponse> => ipcRenderer.invoke('updater:check-and-download'),
     downloadUpdate: (): Promise<IPCResponse> => ipcRenderer.invoke('updater:download-update'),
     installUpdate: (): Promise<IPCResponse> => ipcRenderer.invoke('updater:install-update'),
+    copyUpdateCommand: (): Promise<IPCResponse> => ipcRenderer.invoke('updater:copy-update-command'),
+    openTerminalWithCommand: (): Promise<IPCResponse> => ipcRenderer.invoke('updater:open-terminal-with-command'),
   },
 
   // System utilities
