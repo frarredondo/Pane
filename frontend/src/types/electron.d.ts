@@ -439,6 +439,8 @@ interface ElectronAPI {
     stopVm: () => Promise<IPCResponse>;
     startTunnel: () => Promise<IPCResponse>;
     stopTunnel: () => Promise<IPCResponse>;
+    connectWorkspace: () => Promise<IPCResponse>;
+    disconnectWorkspace: () => Promise<IPCResponse>;
     startPolling: () => Promise<IPCResponse>;
     stopPolling: () => Promise<IPCResponse>;
     onStateChanged: (callback: (state: CloudVmState) => void) => () => void;
