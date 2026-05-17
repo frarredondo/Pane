@@ -1536,10 +1536,14 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             Open in Editor
           </span>
         </PopoverButton>
-        <PopoverButton onClick={handleShowInExplorer}>
+        <PopoverButton
+          onClick={handleShowInExplorer}
+          disabled={isRemoteMode}
+          title={isRemoteMode ? 'Only available in local mode' : undefined}
+        >
           <span className="flex items-center gap-2">
             <FolderOpen className="w-4 h-4" />
-            Show in Explorer
+            Show in Explorer{isRemoteMode ? ' (local only)' : ''}
           </span>
         </PopoverButton>
       </TerminalPopover>
@@ -1551,6 +1555,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         text={selectionPopover.text}
         workingDirectory={workingDirectory}
         sessionId={panel.sessionId}
+        isRemoteMode={isRemoteMode}
         onClose={closeSelectionPopover}
       />
 
