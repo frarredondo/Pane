@@ -23,6 +23,20 @@
 
 <br />
 
+**Quick install (recommended)**
+
+<sub>Mac / Linux</sub><br />
+<pre><code>curl -fsSL https://runpane.com/install.sh | sh</code></pre>
+
+<sub>Windows (PowerShell)</sub><br />
+<pre><code>irm https://runpane.com/install.ps1 | iex</code></pre>
+
+<sub><em>Bypasses the macOS Gatekeeper / Windows SmartScreen prompts on direct downloads.</em></sub>
+
+<br />
+
+<sub>or download the installer directly</sub>
+
 <a href="https://runpane.com/api/download?platform=mac&source=readme">
   <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS">
 </a>
