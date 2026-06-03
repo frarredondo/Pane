@@ -54,6 +54,8 @@
 
 </div>
 
+> **Experimental:** Remote Pane is now available for running Pane against a remote workstation or VM while keeping the local desktop UI. This is a large runtime split and still experimental; see the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) before using it for critical work.
+
 ---
 
 Not an IDE. Not a terminal emulator. **Vim for agent management.**
@@ -89,6 +91,7 @@ Each of these is a small thing. Together they compound fast.
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
 | **Status Dots** | Activity indicators at the tab, pane, and project level tell you which agent is idle, working, or waiting without you having to look. | <img src="images/qol-status-dots.png" alt="Session activity status dots" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
+| **Remote Pane** | Experimental remote daemon support lets your local Pane desktop connect to a remote workstation or VM. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for setup and current limits. | |
 | **Auto Secrets Copy** | Every pane automatically mirrors `.env` files and secrets from your root project so your worktree is runnable the moment it's created. | |
 | **Isolated Ports** | Each pane runs on its own port range automatically, so you can spin up five dev servers in parallel without a single conflict. | |
 | **Terminal Rendering Patches** | Claude Code's scroll-jump bug (long conversations snapping to top when you scroll up) is fixed here, even though it's still broken in Claude Code itself. | |
