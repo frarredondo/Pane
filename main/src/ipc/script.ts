@@ -340,4 +340,4 @@ export function registerScriptHandlers(
   });
 
   commandRegistry.bindChannels(ipcMain, DAEMON_SCRIPT_CHANNELS);
-} 
+}

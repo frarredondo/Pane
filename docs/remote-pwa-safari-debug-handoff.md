@@ -312,4 +312,3 @@ Do not send:
 - Full `pane-remote://...` code.
 - `access_token` query string.
 - `token` body value.
-

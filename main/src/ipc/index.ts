@@ -76,4 +76,4 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);
 
   return commandRegistry;
-} 
+}

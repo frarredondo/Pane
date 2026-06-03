@@ -45,4 +45,4 @@ export function registerPromptHandlers(
   });
 
   commandRegistry.bindChannels(ipcMain, DAEMON_PROMPT_CHANNELS);
-} 
+}
