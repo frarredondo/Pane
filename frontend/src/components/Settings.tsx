@@ -3,7 +3,7 @@ import { NotificationSettings } from './NotificationSettings';
 import { useNotifications } from '../hooks/useNotifications';
 import { API } from '../utils/api';
 import { optIn, capture, captureAndOptOut } from '../services/posthog';
-import type { PreferredShell, TerminalShortcut } from '../types/config';
+import type { PreferredShell, PreferredTerminalPowerMode, TerminalShortcut } from '../types/config';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
 import {
@@ -138,6 +138,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
   const [devMode, setDevMode] = useState(false);
   const [usePtyHost, setUsePtyHost] = useState(false);
   const [initialUsePtyHost, setInitialUsePtyHost] = useState(false);
+  const [terminalPowerMode, setTerminalPowerMode] = useState<PreferredTerminalPowerMode>('performance');
   const [additionalPathsText, setAdditionalPathsText] = useState('');
   const [platform, setPlatform] = useState<string>('darwin');
   const [enableCommitFooter, setEnableCommitFooter] = useState(true);
@@ -263,6 +264,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
       setDevMode(data.devMode || false);
       setUsePtyHost(data.usePtyHost === true);
       setInitialUsePtyHost(data.usePtyHost === true);
+      setTerminalPowerMode(data.terminalPowerMode === 'batterySaver' ? 'batterySaver' : 'performance');
       setClaudeExecutablePath(data.claudeExecutablePath || '');
       setEnableCommitFooter(data.enableCommitFooter !== false); // Default to true
       setUiScale(data.uiScale || 1.0);
@@ -786,6 +788,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
         autoCheckUpdates,
         devMode,
         usePtyHost,
+        terminalPowerMode,
         claudeExecutablePath,
         enableCommitFooter,
         uiScale,
@@ -2653,6 +2656,42 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
                       Restart Pane for this change to take effect.
                     </p>
                   )}
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-text-primary mb-2">
+                    Terminal power mode
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTerminalPowerMode('performance')}
+                      className={`text-left p-3 rounded-lg border transition-colors ${
+                        terminalPowerMode === 'performance'
+                          ? 'border-interactive bg-surface-interactive text-text-primary'
+                          : 'border-border-secondary bg-surface-secondary hover:bg-surface-hover text-text-secondary'
+                      }`}
+                    >
+                      <div className="text-sm font-medium">Performance</div>
+                      <div className="text-xs text-text-tertiary mt-1">
+                        Keep mounted terminals live for best scrollback and instant resume. Uses more battery.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTerminalPowerMode('batterySaver')}
+                      className={`text-left p-3 rounded-lg border transition-colors ${
+                        terminalPowerMode === 'batterySaver'
+                          ? 'border-interactive bg-surface-interactive text-text-primary'
+                          : 'border-border-secondary bg-surface-secondary hover:bg-surface-hover text-text-secondary'
+                      }`}
+                    >
+                      <div className="text-sm font-medium">Battery Saver</div>
+                      <div className="text-xs text-text-tertiary mt-1">
+                        Suspend inactive or unfocused terminal rendering. May replay scrollback when shown.
+                      </div>
+                    </button>
+                  </div>
                 </div>
               </SettingsSection>
 

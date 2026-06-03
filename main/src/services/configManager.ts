@@ -36,6 +36,7 @@ export class ConfigManager extends EventEmitter {
       theme: 'light-rounded',
       terminalFontFamily: 'Geist Mono',
       terminalFontSize: 14,
+      terminalPowerMode: 'performance',
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',
       stravuApiKey: undefined,

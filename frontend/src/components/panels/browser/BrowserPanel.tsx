@@ -35,6 +35,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
@@ -101,7 +102,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     }, 2000);
   }, []);
 
-  const navigateTo = (rawUrl: string) => {
+  const navigateTo = useCallback((rawUrl: string) => {
     const normalized = normalizeUrl(rawUrl);
     if (!isLocalhostUrl(normalized)) {
       setUrlError('Only localhost and 127.0.0.1 URLs are supported');
@@ -112,7 +113,12 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     setUrl(normalized);
     setInputUrl(normalized);
     persistState(normalized);
-  };
+  }, [persistState]);
+
+  useEffect(() => {
+    if (!currentUrlFromPanelState || currentUrlFromPanelState === url) return;
+    navigateTo(currentUrlFromPanelState);
+  }, [currentUrlFromPanelState, navigateTo, url]);
 
   const handleBack = () => {
     webviewRef.current?.goBack();
