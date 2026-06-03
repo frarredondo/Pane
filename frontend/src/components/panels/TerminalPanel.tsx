@@ -106,8 +106,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   const [windowFocused, setWindowFocused] = useState(true);
   const interceptorRef = useRef<TerminalInterceptor | null>(null);
   const skipNextInterceptRef = useRef(false); // set by AltGr @ detection
+  const terminalPowerMode = useConfigStore((state) => state.config?.terminalPowerMode ?? 'performance');
+  const useBatterySaverTerminalVisibility = terminalPowerMode === 'batterySaver';
   const panelVisible = isActive;
-  const effectiveVisible = panelVisible && windowFocused;
+  const effectiveVisible = useBatterySaverTerminalVisibility ? panelVisible && windowFocused : true;
   const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -356,6 +358,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     filePopover,
     selectionPopover,
     handleOpenInEditor,
+    handleOpenInBrowser,
     handleShowInExplorer,
     closeFilePopover,
     closeSelectionPopover,
@@ -539,6 +542,13 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           rescaleOverlappingGlyphs: true,
           minimumContrastRatio: 1,
           macOptionIsMeta: false,
+          linkHandler: {
+            activate: (_event, uri) => {
+              void window.electronAPI.openExternal(uri).catch((error: unknown) => {
+                console.error('[TerminalPanel] Failed to open terminal link:', error);
+              });
+            },
+          },
         });
         console.log('[TerminalPanel] XTerm instance created:', !!terminal);
 
@@ -1359,9 +1369,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     };
   }, [panel.id]); // Only depend on panel.id to prevent re-initialization on session switch
 
-  // Handle visibility changes (resize and full refresh when becoming visible)
+  // Handle Battery Saver visibility changes (resize and full refresh when becoming visible)
   // Include isInitialized so this effect re-runs after terminal initialization completes
   useEffect(() => {
+    if (!useBatterySaverTerminalVisibility) return;
     if (!effectiveVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
 
     // Show overlay immediately to mask the terminal.reset()+rewrite flicker
@@ -1421,8 +1432,52 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       if (retryTimer) clearTimeout(retryTimer);
       if (delayedRefreshTimer) clearTimeout(delayedRefreshTimer);
       if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
+      setIsRefreshing(false);
     };
-  }, [effectiveVisible, panel.id, isInitialized, autoFocus, handleRefreshTerminal, forwardToMainLog]);
+  }, [useBatterySaverTerminalVisibility, effectiveVisible, panel.id, isInitialized, autoFocus, handleRefreshTerminal, forwardToMainLog]);
+
+  // Performance mode keeps mounted terminals live, so returning to a panel only
+  // needs layout/paint work. Do not reset and replay scrollback here.
+  useEffect(() => {
+    if (useBatterySaverTerminalVisibility) return;
+    if (!panelVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
+
+    let lastWidth = 0;
+    let retries = 0;
+    const MAX_RETRIES = 10;
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const fitAndPaint = () => {
+      if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
+
+      const containerWidth = terminalRef.current.clientWidth;
+      if ((containerWidth === 0 || containerWidth !== lastWidth) && retries < MAX_RETRIES) {
+        lastWidth = containerWidth;
+        retries++;
+        retryTimer = setTimeout(fitAndPaint, 50);
+        return;
+      }
+
+      resizePtyToFit();
+      const terminal = xtermRef.current;
+      if (terminal && terminal.rows > 0) {
+        terminal.refresh(0, terminal.rows - 1);
+      }
+      if (autoFocus) {
+        terminal?.focus();
+      }
+    };
+
+    const animationFrame = requestAnimationFrame(fitAndPaint);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(animationFrame);
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [useBatterySaverTerminalVisibility, panelVisible, isInitialized, autoFocus, resizePtyToFit]);
 
   useEffect(() => {
     if (!xtermRef.current) {
@@ -1580,6 +1635,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         workingDirectory={workingDirectory}
         sessionId={panel.sessionId}
         isRemoteMode={isRemoteMode}
+        onOpenInBrowser={handleOpenInBrowser}
         onClose={closeSelectionPopover}
       />
 

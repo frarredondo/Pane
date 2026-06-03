@@ -5,6 +5,7 @@ import { registerAllLinkProviders } from '../linkProviders';
 import { panelApi } from '../../../services/panelApi';
 import { usePanelStore } from '../../../stores/panelStore';
 import { useConfigStore } from '../../../stores/configStore';
+import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
 
 export interface UseTerminalLinksConfig {
   workingDirectory: string;
@@ -32,6 +33,14 @@ interface SelectionPopoverState {
   x: number;
   y: number;
   text: string;
+}
+
+function getBrowserPanelTitle(url: string): string {
+  try {
+    return new URL(url).host || 'Browser';
+  } catch {
+    return 'Browser';
+  }
 }
 
 export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalLinksConfig) {
@@ -132,6 +141,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   // Get panel store methods
   const addPanel = usePanelStore((state) => state.addPanel);
   const setActivePanelInStore = usePanelStore((state) => state.setActivePanel);
+  const updatePanelState = usePanelStore((state) => state.updatePanelState);
 
   // File popover action handlers
   const handleOpenInEditor = useCallback(async () => {
@@ -185,6 +195,47 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     setFilePopover((prev) => ({ ...prev, visible: false }));
   }, [filePopover, isRemoteMode]);
 
+  const handleOpenInBrowser = useCallback(async (url: string) => {
+    const panels = usePanelStore.getState().getSessionPanels(config.sessionId);
+    const existingPanel = panels.find((candidate) => candidate.type === 'browser');
+
+    let browserPanel: ToolPanel;
+    if (existingPanel) {
+      const existingCustomState = (existingPanel.state.customState ?? {}) as BrowserPanelState & Record<string, unknown>;
+      browserPanel = {
+        ...existingPanel,
+        state: {
+          ...existingPanel.state,
+          customState: {
+            ...existingCustomState,
+            currentUrl: url,
+          },
+        },
+      };
+      await panelApi.updatePanel(browserPanel.id, { state: browserPanel.state });
+      updatePanelState(browserPanel);
+    } else {
+      browserPanel = await panelApi.createPanel({
+        sessionId: config.sessionId,
+        type: 'browser',
+        title: getBrowserPanelTitle(url),
+        initialState: {
+          customState: {
+            currentUrl: url,
+          },
+        },
+      });
+      addPanel(browserPanel);
+    }
+
+    setActivePanelInStore(config.sessionId, browserPanel.id);
+    await panelApi.setActivePanel(config.sessionId, browserPanel.id);
+
+    window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
+      detail: { url, sessionId: config.sessionId },
+    }));
+  }, [config.sessionId, addPanel, setActivePanelInStore, updatePanelState]);
+
   const closeTooltip = useCallback(() => {
     setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
@@ -204,6 +255,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     isRemoteMode,
     selectionPopover,
     handleOpenInEditor,
+    handleOpenInBrowser,
     handleShowInExplorer,
     closeTooltip,
     closeFilePopover,

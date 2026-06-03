@@ -11,6 +11,7 @@ export interface SelectionPopoverProps {
   workingDirectory?: string;
   sessionId?: string;
   isRemoteMode?: boolean;
+  onOpenInBrowser?: (url: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -59,6 +60,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   workingDirectory,
   sessionId,
   isRemoteMode = false,
+  onOpenInBrowser,
   onClose,
 }) => {
   // Early return when not visible to avoid unnecessary computation
@@ -87,12 +89,21 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
     }
   };
 
-  const handleOpenInBrowser = () => {
+  const handleOpenInBrowser = async () => {
     if (urlMatch && sessionId) {
-      window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
-        detail: { url: urlMatch[0], sessionId }
-      }));
-      onClose();
+      try {
+        if (onOpenInBrowser) {
+          await onOpenInBrowser(urlMatch[0]);
+        } else {
+          window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
+            detail: { url: urlMatch[0], sessionId }
+          }));
+        }
+      } catch (error) {
+        console.error('Failed to open URL in browser panel:', error);
+      } finally {
+        onClose();
+      }
     }
   };
 

@@ -562,7 +562,13 @@ async function createWindow() {
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (url.startsWith('about:')) {
+      return { action: 'deny' };
+    }
+
+    void shell.openExternal(url).catch((error) => {
+      console.error('Failed to open external URL from window.open:', error);
+    });
     return { action: 'deny' };
   });
 

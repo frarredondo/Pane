@@ -16,6 +16,8 @@ export interface CustomCommand {
   command: string;
 }
 
+export type TerminalPowerMode = 'performance' | 'batterySaver';
+
 export interface AnalyticsIdentity {
   distinctId: string;
   identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
@@ -107,6 +109,8 @@ export interface AppConfig {
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals
   preferredShell?: 'auto' | 'gitbash' | 'powershell' | 'pwsh' | 'cmd';
+  // Terminal rendering/power behavior
+  terminalPowerMode?: TerminalPowerMode;
   // Cloud VM settings
   cloud?: CloudVmConfig;
   // Self-hosted remote daemon settings and saved client profiles
@@ -168,6 +172,8 @@ export interface UpdateConfigRequest {
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals
   preferredShell?: 'auto' | 'gitbash' | 'powershell' | 'pwsh' | 'cmd';
+  // Terminal rendering/power behavior
+  terminalPowerMode?: TerminalPowerMode;
   // Cloud VM settings
   cloud?: CloudVmConfig;
   // Self-hosted remote daemon settings and saved client profiles
