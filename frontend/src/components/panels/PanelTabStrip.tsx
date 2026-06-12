@@ -351,7 +351,9 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                   )} />
                 )}
                 {getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5' : 'w-4 h-4')}
-                <span>{displayTitle}</span>
+                {/* Bold marks the primary group's strip: the group the top
+                    bar's tool tabs and the un-split gesture belong to */}
+                <span className={cn(compact && isPrimary && "font-semibold")}>{displayTitle}</span>
               </span>
             )}
 

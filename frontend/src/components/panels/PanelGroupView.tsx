@@ -198,6 +198,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             activePanelId={group.activePanelId}
             onPanelSelect={onPanelSelect}
             onPanelClose={onPanelClose}
+            isPrimary={isPrimary}
             isFocused={isFocusedGroup}
             variant="compact"
             onDragStart={onDragStart}

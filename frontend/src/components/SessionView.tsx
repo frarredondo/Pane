@@ -40,6 +40,7 @@ import {
   updateSizes,
   findGroupContainingPanel,
   subsetInsertIndex,
+  mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
 import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, X } from 'lucide-react';
@@ -1101,17 +1102,31 @@ export const SessionView = memo(() => {
     setDropZones(new Map());
   }, [activeSession, applyLayout, preferWorkingActive]);
 
-  // Stable identity for the primary strip's drop handler so memo(PanelTabBar)
-  // holds. When split, the top bar shows only the permanent subset, so its
-  // drop indexes must translate to the group's full panel order.
+  // Top-bar drops are the un-split gesture: merge every group back into the
+  // primary group and place the dropped tab at the indicated position. When
+  // the pane isn't split, the merge is the identity and this is a plain
+  // reorder. The top bar shows only the permanent subset while split, so its
+  // drop indexes translate to the group's full panel order first.
   const primaryGroupId = primaryGroupNode?.id;
   const handlePrimaryStripDrop = useCallback((panelId: string, insertIndex: number) => {
-    if (!primaryGroupId || !primaryGroupNode) return;
+    if (!primaryGroupId || !primaryGroupNode || !activeSession) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout) return;
     const fullIndex = isSplitLayout && topBarPanels
       ? subsetInsertIndex(primaryGroupNode.panelIds, topBarPanels.map(p => p.id), insertIndex)
       : insertIndex;
-    handleStripDrop(primaryGroupId, panelId, fullIndex);
-  }, [primaryGroupId, primaryGroupNode, isSplitLayout, topBarPanels, handleStripDrop]);
+    const merged = mergeAllGroups(currentLayout.root);
+    const newRoot = movePanelInLayout(merged, panelId, { groupId: merged.id, index: fullIndex });
+    applyLayout(sid, {
+      ...currentLayout,
+      root: newRoot,
+      focusedGroupId: merged.id,
+      zoomedGroupId: null,
+    });
+    setDraggedPanelId(null);
+    setDropZones(new Map());
+  }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
