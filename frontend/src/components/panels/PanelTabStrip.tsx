@@ -222,6 +222,18 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     if (el) el.focus();
   }, []);
 
+  // The divider separates the default tool tabs (diff/explorer/browser) from
+  // the working tabs. It sits after the RIGHTMOST default in the strip, not
+  // after a hardcoded type, so reordering the defaults moves it correctly.
+  // Suppressed when the rightmost default is the strip's last tab.
+  const lastDefaultIndex = useMemo(() => {
+    let last = -1;
+    panels.forEach((p, idx) => {
+      if (p.type === 'diff' || p.type === 'explorer' || p.type === 'browser') last = idx;
+    });
+    return last;
+  }, [panels]);
+
   // Shortcut hints are only truthful when the hotkeys actually target this
   // strip's panels: Mod+Shift+1-9 act on the focused group, so hide hints
   // while a different group has focus.
@@ -357,7 +369,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           </div>
         );
 
-        const showDividerAfter = !compact && panel.type === 'browser';
+        const showDividerAfter = !compact && index === lastDefaultIndex && index < panels.length - 1;
         const divider = showDividerAfter ? (
           <div className="h-4 w-px bg-border-primary mx-1 flex-shrink-0" aria-hidden="true" />
         ) : null;
