@@ -22,7 +22,6 @@ export interface PanelStore {
 
   // Layout actions
   setLayout: (sessionId: string, layout: SessionPanelLayout) => void;
-  clearLayout: (sessionId: string) => void;
   setFocusedGroup: (sessionId: string, groupId: string) => void;
 
   // Getters

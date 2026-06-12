@@ -90,13 +90,6 @@ export const usePanelStore = create<PanelStore>()(
       });
     },
 
-    clearLayout: (sessionId) => {
-      set((state) => {
-        delete state.layouts[sessionId];
-        delete state.focusedGroupIds[sessionId];
-      });
-    },
-
     setFocusedGroup: (sessionId, groupId) => {
       set((state) => {
         state.focusedGroupIds[sessionId] = groupId;

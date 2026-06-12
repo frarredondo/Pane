@@ -249,7 +249,10 @@ export const SessionView = memo(() => {
           const pinnedNow = nowPanels.find(p => p.type === 'terminal');
           const liveIdsNow = (pinnedNow ? nowPanels.filter(p => p.id !== pinnedNow.id) : nowPanels)
             .map(p => p.id);
-          const base = stored ?? createSingleGroupLayout(
+          // Treat unknown future layout versions as no stored layout rather
+          // than reconciling a shape this build doesn't understand.
+          const versionOk = stored?.version === 1;
+          const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
             sortedLive.map(p => p.id),
             fallbackActiveId,
           );

@@ -332,13 +332,21 @@ export function movePanel(
   }
 
   if (isCenterTarget(target)) {
-    // Center: insert into the target group at index
-    const removed = removePanelFromTree(root);
+    // Center: insert into the target group at index. target.index is based on
+    // the pre-removal tab order, so a same-group move to a later position must
+    // shift left by one or it lands one slot past the drop indicator.
     const centerTarget = target;
+    let insertIndex = centerTarget.index;
+    const targetGroup = findGroup(root, centerTarget.groupId);
+    if (targetGroup) {
+      const sourceIdx = targetGroup.panelIds.indexOf(panelId);
+      if (sourceIdx !== -1 && sourceIdx < insertIndex) insertIndex -= 1;
+    }
+    const removed = removePanelFromTree(root);
     function insertIntoGroup(node: PanelLayoutNode): PanelLayoutNode {
       if (node.type === 'group' && node.id === centerTarget.groupId) {
         const newPanelIds = [...node.panelIds];
-        const insertIdx = Math.min(centerTarget.index, newPanelIds.length);
+        const insertIdx = Math.min(insertIndex, newPanelIds.length);
         newPanelIds.splice(insertIdx, 0, panelId);
         return { ...node, panelIds: newPanelIds, activePanelId: panelId };
       }

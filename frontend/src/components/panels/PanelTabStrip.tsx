@@ -124,7 +124,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         });
         const panel = panels.find(p => p.id === editingPanelId);
         if (panel) {
-          panel.title = editingTitle.trim();
+          usePanelStore.getState().updatePanelState({ ...panel, title: editingTitle.trim() });
         }
       } catch (error) {
         console.error('Failed to rename panel:', error);

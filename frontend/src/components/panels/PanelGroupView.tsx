@@ -13,7 +13,7 @@ import React, { useCallback, useMemo } from 'react';
 import { PanelTabStrip } from './PanelTabStrip';
 import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
-import type { DropZone } from '../../utils/panelLayout';
+import { dropZoneFor, type DropZone } from '../../utils/panelLayout';
 import { cn } from '../../utils/cn';
 
 // ---------------------------------------------------------------------------
@@ -31,21 +31,7 @@ const DropOverlay: React.FC<DropOverlayProps> = React.memo(({ onZoneChange, onDr
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const rect = e.currentTarget.getBoundingClientRect();
-    const rx = (e.clientX - rect.left) / rect.width;
-    const ry = (e.clientY - rect.top) / rect.height;
-    const d = Math.min(rx, 1 - rx, ry, 1 - ry);
-    if (d > 0.25) {
-      onZoneChange('center');
-      return;
-    }
-    const edges: [DropZone, number][] = [
-      ['left', rx],
-      ['right', 1 - rx],
-      ['top', ry],
-      ['bottom', 1 - ry],
-    ];
-    edges.sort((a, b) => a[1] - b[1]);
-    onZoneChange(edges[0][0]);
+    onZoneChange(dropZoneFor(e.clientX, e.clientY, rect));
   }, [onZoneChange]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
