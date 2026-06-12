@@ -708,6 +708,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Onboarding
   onboarding: {
     detectEnvironment: (): Promise<IPCResponse> => invokeIpc('onboarding:detect-environment'),
+    getGitHubAuthCommand: (): Promise<IPCResponse> => invokeIpc('onboarding:get-github-auth-command'),
+    openGitHubAuthTerminal: (): Promise<IPCResponse> => invokeIpc('onboarding:open-github-auth-terminal'),
+    startGitHubAuthTerminal: (cols?: number, rows?: number): Promise<IPCResponse> => invokeIpc('onboarding:start-github-auth-pty', cols, rows),
+    writeGitHubAuthTerminal: (terminalId: string, data: string): Promise<IPCResponse> => invokeIpc('onboarding:write-github-auth-pty', terminalId, data),
+    resizeGitHubAuthTerminal: (terminalId: string, cols: number, rows: number): Promise<IPCResponse> => invokeIpc('onboarding:resize-github-auth-pty', terminalId, cols, rows),
+    killGitHubAuthTerminal: (terminalId: string): Promise<IPCResponse> => invokeIpc('onboarding:kill-github-auth-pty', terminalId),
+    onGitHubAuthTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void): (() => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { terminalId: string; data: string }) => callback(data);
+      ipcRenderer.on('onboarding:github-auth-pty-output', wrappedCallback);
+      return () => ipcRenderer.removeListener('onboarding:github-auth-pty-output', wrappedCallback);
+    },
+    onGitHubAuthTerminalExit: (callback: (data: { terminalId: string; exitCode: number; signal: number | null }) => void): (() => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { terminalId: string; exitCode: number; signal: number | null }) => callback(data);
+      ipcRenderer.on('onboarding:github-auth-pty-exit', wrappedCallback);
+      return () => ipcRenderer.removeListener('onboarding:github-auth-pty-exit', wrappedCallback);
+    },
     setupDefaultRepo: (): Promise<IPCResponse> => invokeIpc('onboarding:setup-default-repo'),
     supportProject: (): Promise<IPCResponse> => invokeIpc('onboarding:support-project'),
   },

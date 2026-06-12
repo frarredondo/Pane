@@ -473,6 +473,16 @@ body.light-rounded {
   filter: invert(1) hue-rotate(180deg);
 }
 
+.pane-onboarding-auth-terminal .xterm {
+  filter: none !important;
+  background-color: var(--color-terminal-bg) !important;
+}
+
+.pane-onboarding-auth-terminal .xterm-viewport,
+.pane-onboarding-auth-terminal .xterm-screen {
+  background-color: var(--color-terminal-bg) !important;
+}
+
 .xterm-viewport {
   background-color: transparent !important;
 }
