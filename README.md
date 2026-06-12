@@ -97,15 +97,23 @@ Each of these is a small thing. Together they compound fast.
 
 ## Remote Pane
 
-Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: you run a small Pane daemon on the host, copy one `pane-remote://...` connection code, then connect from desktop Pane or the free browser app at [runpane.com/app](https://runpane.com/app/).
+Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute; the client just connects with a `pane-remote://...` code.
 
-**Remote host setup:**
+The easiest setup path is in the app:
+
+1. Install Pane normally on the machine that should host your projects and agents.
+2. Open `Settings > Remote Pane` on that host machine.
+3. Set it up as a remote host and copy the generated `pane-remote://...` connection code.
+4. On another desktop, open Pane, go to `Settings > Remote Pane`, paste the code, and connect.
+5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
+
+For a headless VM or server, use the remote installer instead:
 
 ```bash
 curl -fsSL https://runpane.com/install-remote.sh | sh -s -- --label "My Server"
 ```
 
-**Windows PowerShell remote host setup:**
+Windows PowerShell:
 
 ```powershell
 & ([scriptblock]::Create((irm https://runpane.com/install-remote.ps1))) -Label "My Server"
@@ -117,7 +125,7 @@ Prefer SSH instead of Tailscale:
 pnpm remote:setup -- --label "My Server" --prefer-tunnel ssh
 ```
 
-The setup command prints the connection code and, for SSH mode, the forwarding command. Import the code in `Settings > Remote Pane`, or paste it into [runpane.com/app](https://runpane.com/app/) on your phone. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the step-by-step setup, mobile install instructions, API key notes, and security model.
+The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model.
 
 ---
 
