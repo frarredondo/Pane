@@ -300,3 +300,42 @@ export const PANEL_CAPABILITIES: Record<ToolPanelType, PanelCapabilities> = {
     canAppearInWorktrees: true,
   }
 };
+
+// --- Layout tree types (split tab groups) ---
+
+/** A leaf node: one tab group containing an ordered list of panel ids. */
+export interface PanelGroupNode {
+  type: 'group';
+  /** Stable id; used as React key and Allotment.Pane key. */
+  id: string;
+  /** Ordered panel ids (layout order, not type-sorted). */
+  panelIds: string[];
+  /** Active (visible) panel within this group; null when group is empty. */
+  activePanelId: string | null;
+}
+
+/** A branch node: children arranged in a row or column with sash-resizable sizes. */
+export interface PanelSplitNode {
+  type: 'split';
+  /** Stable id; used as React key. */
+  id: string;
+  /** 'row' = children side-by-side horizontally; 'column' = stacked vertically. */
+  direction: 'row' | 'column';
+  /** Child nodes (groups or nested splits). Length >= 2. */
+  children: PanelLayoutNode[];
+  /** Proportional sizes parallel to children; sum is unconstrained (allotment normalizes). */
+  sizes: number[];
+}
+
+/** Discriminated union for the recursive layout tree. */
+export type PanelLayoutNode = PanelGroupNode | PanelSplitNode;
+
+/** Top-level layout persisted per session as JSON in sessions.panel_layout. */
+export interface SessionPanelLayout {
+  version: 1;
+  root: PanelLayoutNode;
+  /** Id of the group that has keyboard focus. */
+  focusedGroupId?: string;
+  /** Id of the group that is zoomed (fills the stage); null/undefined when not zoomed. */
+  zoomedGroupId?: string | null;
+}

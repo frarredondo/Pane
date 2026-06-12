@@ -21,9 +21,25 @@ import { panelApi } from '../services/panelApi';
 import { setPendingViewCommit } from './panels/diff/CombinedDiffView';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
+import { SplitLayout } from './panels/SplitLayout';
 import { SessionProvider } from '../contexts/SessionContext';
-import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../shared/types/panels';
+import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, SessionPanelLayout, PanelGroupNode } from '../../../shared/types/panels';
 import { PanelCreateOptions } from '../types/panelComponents';
+import {
+  createSingleGroupLayout,
+  reconcile as reconcileLayout,
+  splitGroup,
+  movePanel as movePanelInLayout,
+  removePanelFromLayout,
+  addPanelToGroup,
+  findGroup,
+  primaryGroup,
+  allGroups,
+  findGroupInDirection,
+  updateSizes,
+  findGroupContainingPanel,
+  type DropZone,
+} from '../utils/panelLayout';
 import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, X } from 'lucide-react';
 import { ClaudeIcon, OpenAIIcon, getCliBrandIcon } from './ui/BrandIcons';
 import type { Project } from '../types/project';
@@ -80,83 +96,262 @@ export const SessionView = memo(() => {
     addPanel,
     removePanel,
     updatePanelState,
+    layouts,
+    focusedGroupIds,
+    setLayout: setLayoutInStore,
+    setFocusedGroup: setFocusedGroupInStore,
   } = usePanelStore();
   
   // History store for navigation
   const { addToHistory } = useSessionHistoryStore();
 
-  // Load panels when session changes
+  // --- Layout debounced persist ---
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingLayoutRef = useRef<{ sessionId: string; layout: SessionPanelLayout } | null>(null);
+
+  const flushLayoutPersist = useCallback(() => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    const pending = pendingLayoutRef.current;
+    if (pending) {
+      pendingLayoutRef.current = null;
+      panelApi.setLayout(pending.sessionId, pending.layout).catch(err => {
+        console.warn('[SessionView] Failed to persist layout:', err);
+      });
+    }
+  }, []);
+
+  const debouncedPersist = useCallback((sessionId: string, layout: SessionPanelLayout) => {
+    pendingLayoutRef.current = { sessionId, layout };
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      const pending = pendingLayoutRef.current;
+      if (pending) {
+        pendingLayoutRef.current = null;
+        panelApi.setLayout(pending.sessionId, pending.layout).catch(err => {
+          console.warn('[SessionView] Failed to persist layout:', err);
+        });
+      }
+    }, 500);
+  }, []);
+
+  // --- Layout application helper ---
+  // Self-healing: every mutation funnels through here, so focus and zoom are
+  // repaired centrally instead of in each caller. A collapse that removed the
+  // focused group falls back to the primary group; a dead zoom target clears.
+  const applyLayout = useCallback((sessionId: string, next: SessionPanelLayout) => {
+    let focusedGid = next.focusedGroupId;
+    if (!focusedGid || !findGroup(next.root, focusedGid)) {
+      focusedGid = primaryGroup(next.root).id;
+    }
+    let zoomedGid = next.zoomedGroupId && findGroup(next.root, next.zoomedGroupId)
+      ? next.zoomedGroupId
+      : null;
+    if (zoomedGid) {
+      // Any structural change (group added/removed) exits zoom, matching
+      // VS Code: a split or drop while zoomed would otherwise land panels in
+      // a pane that Allotment keeps hidden.
+      const prev = usePanelStore.getState().layouts[sessionId];
+      if (prev) {
+        const prevGroupIds = allGroups(prev.root).map(g => g.id).join('|');
+        const nextGroupIds = allGroups(next.root).map(g => g.id).join('|');
+        if (prevGroupIds !== nextGroupIds) zoomedGid = null;
+      }
+      // Zoom follows focus: moving focus off the zoomed group (directional
+      // nav can target hidden groups) exits zoom instead of typing blind.
+      if (zoomedGid && focusedGid !== zoomedGid) zoomedGid = null;
+    }
+    const repaired: SessionPanelLayout = { ...next, focusedGroupId: focusedGid, zoomedGroupId: zoomedGid };
+
+    setLayoutInStore(sessionId, repaired);
+    setFocusedGroupInStore(sessionId, focusedGid);
+    debouncedPersist(sessionId, repaired);
+
+    // Mirror focused panel to activePanels for existing compatibility
+    const g = findGroup(repaired.root, focusedGid);
+    if (g?.activePanelId) {
+      const currentActive = usePanelStore.getState().activePanels[sessionId];
+      if (g.activePanelId !== currentActive) {
+        setActivePanelInStore(sessionId, g.activePanelId);
+        panelApi.setActivePanel(sessionId, g.activePanelId).catch(() => {});
+      }
+    }
+  }, [setLayoutInStore, setFocusedGroupInStore, debouncedPersist, setActivePanelInStore]);
+
+  // Load panels AND layout when session changes
   useEffect(() => {
     if (activeSession?.id) {
-      devLog.debug('[SessionView] Loading panels for session:', activeSession.id);
+      const sid = activeSession.id;
+      devLog.debug('[SessionView] Loading panels for session:', sid);
+
+      // Flush any pending layout from the previous session
+      flushLayoutPersist();
+
+      // Snapshot the ids present BEFORE the async load: a panel:created event
+      // landing during the load adds its panel to the store, and a plain
+      // setPanels(loadedPanels) overwrite would erase it again. Panels that
+      // appeared mid-flight (in the store now, absent from both the snapshot
+      // and the response) are merged back in.
+      const preLoadIds = new Set(
+        (usePanelStore.getState().panels[sid] || []).map(p => p.id)
+      );
 
       // Always reload panels from database when switching sessions
-      // to ensure we get the latest saved state
-      panelApi.loadPanelsForSession(activeSession.id).then(loadedPanels => {
+      panelApi.loadPanelsForSession(sid).then(async loadedPanels => {
         devLog.debug('[SessionView] Loaded panels:', loadedPanels);
-        setPanels(activeSession.id, loadedPanels);
+        const inFlight = (usePanelStore.getState().panels[sid] || []).filter(
+          p => !preLoadIds.has(p.id) && !loadedPanels.some(lp => lp.id === p.id)
+        );
+        setPanels(sid, inFlight.length > 0 ? [...loadedPanels, ...inFlight] : loadedPanels);
 
         // Pick default active: prefer diff, then explorer, then first panel
         const fallback = loadedPanels.find(p => p.type === 'diff')
           || loadedPanels.find(p => p.type === 'explorer')
           || loadedPanels[0];
 
-        return panelApi.getActivePanel(activeSession.id).then(activePanel => {
-          console.log('[SessionView] Active panel from backend:', activePanel);
-          if (activePanel) {
-            setActivePanelInStore(activeSession.id, activePanel.id);
-          } else if (fallback) {
-            setActivePanelInStore(activeSession.id, fallback.id);
-            panelApi.setActivePanel(activeSession.id, fallback.id);
-          }
+        const activePanelResult = await panelApi.getActivePanel(sid);
+        const fallbackActiveId = activePanelResult?.id ?? fallback?.id ?? null;
+
+        if (activePanelResult) {
+          setActivePanelInStore(sid, activePanelResult.id);
+        } else if (fallback) {
+          setActivePanelInStore(sid, fallback.id);
+          panelApi.setActivePanel(sid, fallback.id).catch(() => {});
+        }
+
+        // --- Layout load + reconcile ---
+        // The pinned terminal (first terminal) is excluded from the layout tree
+        const pinned = loadedPanels.find(p => p.type === 'terminal');
+        const livePanels = pinned ? loadedPanels.filter(p => p.id !== pinned.id) : loadedPanels;
+
+        // Sort for initial layout creation (diff first, explorer second, then position)
+        const typeOrder = (type: string) => {
+          if (type === 'diff') return 0;
+          if (type === 'explorer') return 1;
+          return 2;
+        };
+        const sortedLive = [...livePanels].sort((a, b) => {
+          const orderDiff = typeOrder(a.type) - typeOrder(b.type);
+          if (orderDiff !== 0) return orderDiff;
+          return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
         });
+
+        try {
+          const stored = await panelApi.getLayout(sid);
+          // Recompute live ids from the store at set time: panel:created
+          // events that landed while this load was in flight are in the store
+          // but not in the loadedPanels snapshot. Reconciling against the
+          // current store adopts them as orphans instead of dropping them.
+          const nowPanels = usePanelStore.getState().panels[sid] || [];
+          const pinnedNow = nowPanels.find(p => p.type === 'terminal');
+          const liveIdsNow = (pinnedNow ? nowPanels.filter(p => p.id !== pinnedNow.id) : nowPanels)
+            .map(p => p.id);
+          // Treat unknown future layout versions as no stored layout rather
+          // than reconciling a shape this build doesn't understand.
+          const versionOk = stored?.version === 1;
+          const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
+            sortedLive.map(p => p.id),
+            fallbackActiveId,
+          );
+          const { layout } = reconcileLayout(base, liveIdsNow);
+          setLayoutInStore(sid, layout);
+          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+        } catch (err) {
+          console.warn('[SessionView] Failed to load layout, creating default:', err);
+          const layout = createSingleGroupLayout(
+            sortedLive.map(p => p.id),
+            fallbackActiveId,
+          );
+          setLayoutInStore(sid, layout);
+          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+        }
       });
     }
-  }, [activeSession?.id, setPanels, setActivePanelInStore]); // Remove panels from deps to avoid skipping reload
+
+    // Flush layout on cleanup (session switch or unmount)
+    return () => {
+      flushLayoutPersist();
+    };
+  }, [activeSession?.id, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Listen for panel updates from the backend
   useEffect(() => {
     if (!activeSession?.id) return;
-    
+    const sid = activeSession.id;
+
     // Handle panel creation events (for logs panel auto-creation)
     const handlePanelCreated = (panel: ToolPanel) => {
-      console.log('[SessionView] Received panel:created event:', panel);
-      
       // Only add if it's for the current session
-      if (panel.sessionId === activeSession.id) {
-        // Check if panel already exists to prevent duplicates
-        const existingPanels = panels[activeSession.id] || [];
+      if (panel.sessionId === sid) {
+        const existingPanels = panels[sid] || [];
         const panelExists = existingPanels.some(p => p.id === panel.id);
-        
+
         if (!panelExists) {
-          console.log('[SessionView] Adding new panel to store:', panel);
           addPanel(panel);
-        } else {
-          console.log('[SessionView] Panel already exists, not adding duplicate:', panel.id);
+
+          // The pinned terminal (first terminal in the session) never enters
+          // the layout tree
+          const sessionPanelsList = usePanelStore.getState().panels[sid] || [];
+          const pinnedTerminal = sessionPanelsList.find(p => p.type === 'terminal');
+          if (pinnedTerminal && panel.id === pinnedTerminal.id) {
+            return;
+          }
+
+          // Add the new panel to the layout (into the focused group, falling
+          // back to the primary group if focus is stale). addPanelToGroup is
+          // idempotent, so racing with handlePanelCreate cannot double-insert.
+          const currentLayout = usePanelStore.getState().layouts[sid];
+          if (currentLayout) {
+            const focusedGid = usePanelStore.getState().focusedGroupIds[sid];
+            const group = (focusedGid && findGroup(currentLayout.root, focusedGid))
+              || primaryGroup(currentLayout.root);
+            const nextRoot = addPanelToGroup(currentLayout.root, group.id, panel.id);
+            if (nextRoot !== currentLayout.root) {
+              applyLayout(sid, { ...currentLayout, root: nextRoot });
+            }
+          }
         }
       }
     };
-    
+
     const handlePanelUpdated = (updatedPanel: ToolPanel) => {
-      console.log('[SessionView] Received panel:updated event:', updatedPanel);
-      
-      // Only update if it's for the current session
-      if (updatedPanel.sessionId === activeSession.id) {
-        console.log('[SessionView] Updating panel in store:', updatedPanel);
+      if (updatedPanel.sessionId === sid) {
         updatePanelState(updatedPanel);
       }
     };
-    
+
+    // Handle panel deletion events (for backend-initiated deletes)
+    const handlePanelDeleted = (data: { panelId: string; sessionId: string }) => {
+      if (data.sessionId === sid) {
+        removePanel(sid, data.panelId);
+        // Reconcile layout. A null result means the tree collapsed entirely;
+        // keep one empty group so later creates have a landing spot.
+        const currentLayout = usePanelStore.getState().layouts[sid];
+        if (currentLayout) {
+          const updated = removePanelFromLayout(currentLayout.root, data.panelId);
+          const next: SessionPanelLayout = updated
+            ? { ...currentLayout, root: updated }
+            : { ...createSingleGroupLayout([], null), zoomedGroupId: null };
+          applyLayout(sid, next);
+        }
+      }
+    };
+
     // Listen for panel events
     const unsubscribeCreated = window.electronAPI?.events?.onPanelCreated?.(handlePanelCreated);
     const unsubscribeUpdated = window.electronAPI?.events?.onPanelUpdated?.(handlePanelUpdated);
-    
+    const unsubscribeDeleted = window.electronAPI?.events?.onPanelDeleted?.(handlePanelDeleted);
+
     // Cleanup
     return () => {
       unsubscribeCreated?.();
       unsubscribeUpdated?.();
+      unsubscribeDeleted?.();
     };
-  }, [activeSession?.id, addPanel, updatePanelState, panels]);
+  }, [activeSession?.id, addPanel, updatePanelState, removePanel, panels, applyLayout]);
 
   // Get panels for current session with memoization
   const sessionPanels = useMemo(
@@ -197,6 +392,40 @@ export const SessionView = memo(() => {
     [sessionPanels, activePanels, activeSession?.id]
   );
 
+  // --- Layout-derived memos ---
+  const sessionLayout = useMemo(
+    () => layouts[activeSession?.id || ''],
+    [layouts, activeSession?.id]
+  );
+  const focusedGroupId = useMemo(
+    () => focusedGroupIds[activeSession?.id || ''] ?? '',
+    [focusedGroupIds, activeSession?.id]
+  );
+  const focusedGroup: PanelGroupNode | null = useMemo(
+    () => sessionLayout ? findGroup(sessionLayout.root, focusedGroupId) : null,
+    [sessionLayout, focusedGroupId]
+  );
+  /** Panels in the focused group, in layout order. */
+  const focusedGroupPanels = useMemo(() => {
+    if (!focusedGroup) return sortedSessionPanels;
+    const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
+    return focusedGroup.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
+  }, [focusedGroup, tabBarPanels, sortedSessionPanels]);
+  /** Primary group panels (for PanelTabBar tab strip). */
+  const primaryGroupNode = useMemo(
+    () => sessionLayout ? primaryGroup(sessionLayout.root) : null,
+    [sessionLayout]
+  );
+  const primaryGroupPanels = useMemo(() => {
+    if (!primaryGroupNode) return undefined; // undefined means PanelTabBar uses its own sort
+    const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
+    return primaryGroupNode.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
+  }, [primaryGroupNode, tabBarPanels]);
+  // --- Drag & drop state ---
+  const [draggedPanelId, setDraggedPanelId] = useState<string | null>(null);
+  const [dropZones, setDropZones] = useState<Map<string, DropZone | null>>(new Map());
+  const isTabDragging = draggedPanelId !== null;
+
   // Track current session/panel in history when they change
   useEffect(() => {
     if (activeSession?.id && currentActivePanel?.id) {
@@ -209,6 +438,36 @@ export const SessionView = memo(() => {
   renderLog('[SessionView] Active panel ID:', activePanels[activeSession?.id || '']);
   renderLog('[SessionView] Current active panel:', currentActivePanel);
 
+  // --- Layout-aware panel select ---
+  const handleGroupPanelSelect = useCallback(
+    (groupId: string, panel: ToolPanel) => {
+      if (!activeSession) return;
+      const sid = activeSession.id;
+      const currentLayout = usePanelStore.getState().layouts[sid];
+      if (!currentLayout) return;
+
+      // Update the group's activePanelId
+      function setGroupActive(node: SessionPanelLayout['root']): SessionPanelLayout['root'] {
+        if (node.type === 'group' && node.id === groupId) {
+          return { ...node, activePanelId: panel.id };
+        }
+        if (node.type === 'split') {
+          return { ...node, children: node.children.map(setGroupActive) };
+        }
+        return node;
+      }
+      const next: SessionPanelLayout = {
+        ...currentLayout,
+        root: setGroupActive(currentLayout.root),
+        focusedGroupId: groupId,
+      };
+      applyLayout(sid, next);
+      setFocusedGroupInStore(sid, groupId);
+      addToHistory(sid, panel.id);
+    },
+    [activeSession, applyLayout, setFocusedGroupInStore, addToHistory]
+  );
+
   // FIX: Memoize all callbacks to prevent re-renders
   const handlePanelSelect = useCallback(
     async (panel: ToolPanel) => {
@@ -217,10 +476,20 @@ export const SessionView = memo(() => {
       // Add to history when panel is selected
       addToHistory(activeSession.id, panel.id);
 
+      // If layout exists, find which group contains this panel and update it
+      const currentLayout = usePanelStore.getState().layouts[activeSession.id];
+      if (currentLayout) {
+        const group = findGroupContainingPanel(currentLayout.root, panel.id);
+        if (group) {
+          handleGroupPanelSelect(group.id, panel);
+          return;
+        }
+      }
+
       setActivePanelInStore(activeSession.id, panel.id);
       await panelApi.setActivePanel(activeSession.id, panel.id);
     },
-    [activeSession, setActivePanelInStore, addToHistory]
+    [activeSession, setActivePanelInStore, addToHistory, handleGroupPanelSelect]
   );
 
   const handleCommitClick = useCallback(
@@ -240,21 +509,21 @@ export const SessionView = memo(() => {
     [activeSession, sessionPanels, handlePanelSelect]
   );
 
-  // Tab cycling: navigates between panels in the current session using
+  // Tab cycling: navigates between panels in the focused group using
   // keyboard shortcuts. Supports wrap-around (last → first). Only enabled
-  // when there are 2+ panels. Uses sortedSessionPanels to match tab bar order.
+  // when there are 2+ panels. Uses focusedGroupPanels (layout order).
   const cycleTab = useCallback((direction: 'next' | 'prev') => {
-    if (!activeSession || sortedSessionPanels.length < 2) return;
+    if (!activeSession || focusedGroupPanels.length < 2) return;
 
-    const currentIndex = sortedSessionPanels.findIndex(
+    const currentIndex = focusedGroupPanels.findIndex(
       p => p.id === currentActivePanel?.id
     );
-    const nextIndex = cycleIndex(currentIndex, sortedSessionPanels.length, direction);
+    const nextIndex = cycleIndex(currentIndex, focusedGroupPanels.length, direction);
     if (nextIndex === -1) return;
 
-    const nextPanel = sortedSessionPanels[nextIndex];
+    const nextPanel = focusedGroupPanels[nextIndex];
     handlePanelSelect(nextPanel);
-  }, [activeSession, sortedSessionPanels, currentActivePanel, handlePanelSelect]);
+  }, [activeSession, focusedGroupPanels, currentActivePanel, handlePanelSelect]);
 
   // Tab cycling hotkeys
   useHotkey({
@@ -262,7 +531,7 @@ export const SessionView = memo(() => {
     label: 'Previous Tab',
     keys: 'mod+a',
     category: 'tabs',
-    enabled: () => sortedSessionPanels.length > 1,
+    enabled: () => focusedGroupPanels.length > 1,
     action: () => cycleTab('prev'),
     showInPalette: true,
   });
@@ -272,27 +541,27 @@ export const SessionView = memo(() => {
     label: 'Next Tab',
     keys: 'mod+d',
     category: 'tabs',
-    enabled: () => sortedSessionPanels.length > 1,
+    enabled: () => focusedGroupPanels.length > 1,
     action: () => cycleTab('next'),
     showInPalette: true,
   });
 
-  // Mod+Shift+1 through Mod+Shift+9 to switch between panel tabs
+  // Mod+Shift+1 through Mod+Shift+9 to switch between panel tabs (focused group scoped)
   const panelLabel = (i: number) => {
-    const p = sortedSessionPanels[i];
+    const p = focusedGroupPanels[i];
     if (!p) return `Switch to tab ${i + 1}`;
     const name = p.type === 'diff' ? 'Diff' : p.title;
     return `Switch to ${name}`;
   };
-  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => !!sortedSessionPanels[0], action: () => { const p = sortedSessionPanels[0]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), keys: 'mod+shift+2', category: 'tabs', enabled: () => !!sortedSessionPanels[1], action: () => { const p = sortedSessionPanels[1]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), keys: 'mod+shift+3', category: 'tabs', enabled: () => !!sortedSessionPanels[2], action: () => { const p = sortedSessionPanels[2]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), keys: 'mod+shift+4', category: 'tabs', enabled: () => !!sortedSessionPanels[3], action: () => { const p = sortedSessionPanels[3]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), keys: 'mod+shift+5', category: 'tabs', enabled: () => !!sortedSessionPanels[4], action: () => { const p = sortedSessionPanels[4]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), keys: 'mod+shift+6', category: 'tabs', enabled: () => !!sortedSessionPanels[5], action: () => { const p = sortedSessionPanels[5]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), keys: 'mod+shift+7', category: 'tabs', enabled: () => !!sortedSessionPanels[6], action: () => { const p = sortedSessionPanels[6]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), keys: 'mod+shift+8', category: 'tabs', enabled: () => !!sortedSessionPanels[7], action: () => { const p = sortedSessionPanels[7]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), keys: 'mod+shift+9', category: 'tabs', enabled: () => !!sortedSessionPanels[8], action: () => { const p = sortedSessionPanels[8]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => !!focusedGroupPanels[0], action: () => { const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), keys: 'mod+shift+2', category: 'tabs', enabled: () => !!focusedGroupPanels[1], action: () => { const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), keys: 'mod+shift+3', category: 'tabs', enabled: () => !!focusedGroupPanels[2], action: () => { const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), keys: 'mod+shift+4', category: 'tabs', enabled: () => !!focusedGroupPanels[3], action: () => { const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), keys: 'mod+shift+5', category: 'tabs', enabled: () => !!focusedGroupPanels[4], action: () => { const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), keys: 'mod+shift+6', category: 'tabs', enabled: () => !!focusedGroupPanels[5], action: () => { const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), keys: 'mod+shift+7', category: 'tabs', enabled: () => !!focusedGroupPanels[6], action: () => { const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), keys: 'mod+shift+8', category: 'tabs', enabled: () => !!focusedGroupPanels[7], action: () => { const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), keys: 'mod+shift+9', category: 'tabs', enabled: () => !!focusedGroupPanels[8], action: () => { const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
 
   // --- Add Tool commands (palette-only, no keybindings) ---
   // Only enabled in session view (not project view) to prevent hidden panel mutations
@@ -368,32 +637,205 @@ export const SessionView = memo(() => {
     action: () => hook.setShowArchiveConfirm(true),
   });
 
+  // --- Split tab group hotkeys ---
+  // Mod+\: split right (move active tab to a new group to the right)
+  useHotkey({
+    id: 'split-right',
+    label: 'Split Right',
+    keys: 'mod+\\',
+    category: 'tabs',
+    enabled: () => {
+      if (!activeSession || !focusedGroup) return false;
+      return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
+    },
+    action: () => {
+      if (!activeSession || !focusedGroup || !focusedGroup.activePanelId) return;
+      const sid = activeSession.id;
+      const currentLayout = usePanelStore.getState().layouts[sid];
+      if (!currentLayout) return;
+      const newRoot = splitGroup(currentLayout.root, focusedGroup.id, focusedGroup.activePanelId, 'row', true);
+      // Find the new group (the one containing the moved panel)
+      const newGroup = findGroupContainingPanel(newRoot, focusedGroup.activePanelId);
+      const next: SessionPanelLayout = {
+        ...currentLayout,
+        root: newRoot,
+        focusedGroupId: newGroup?.id ?? currentLayout.focusedGroupId,
+      };
+      applyLayout(sid, next);
+      if (newGroup) {
+        setFocusedGroupInStore(sid, newGroup.id);
+      }
+    },
+    showInPalette: true,
+  });
+
+  // Mod+Shift+\: split down
+  useHotkey({
+    id: 'split-down',
+    label: 'Split Down',
+    keys: 'mod+shift+\\',
+    category: 'tabs',
+    enabled: () => {
+      if (!activeSession || !focusedGroup) return false;
+      return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
+    },
+    action: () => {
+      if (!activeSession || !focusedGroup || !focusedGroup.activePanelId) return;
+      const sid = activeSession.id;
+      const currentLayout = usePanelStore.getState().layouts[sid];
+      if (!currentLayout) return;
+      const newRoot = splitGroup(currentLayout.root, focusedGroup.id, focusedGroup.activePanelId, 'column', true);
+      const newGroup = findGroupContainingPanel(newRoot, focusedGroup.activePanelId);
+      const next: SessionPanelLayout = {
+        ...currentLayout,
+        root: newRoot,
+        focusedGroupId: newGroup?.id ?? currentLayout.focusedGroupId,
+      };
+      applyLayout(sid, next);
+      if (newGroup) {
+        setFocusedGroupInStore(sid, newGroup.id);
+      }
+    },
+    showInPalette: true,
+  });
+
+  // Mod+Alt+Arrows: directional group focus
+  useHotkey({
+    id: 'focus-group-left',
+    label: 'Focus Group Left',
+    keys: 'mod+alt+ArrowLeft',
+    category: 'tabs',
+    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
+    action: () => {
+      if (!activeSession || !sessionLayout) return;
+      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'left');
+      if (target) handleFocusGroup(target);
+    },
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'focus-group-right',
+    label: 'Focus Group Right',
+    keys: 'mod+alt+ArrowRight',
+    category: 'tabs',
+    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
+    action: () => {
+      if (!activeSession || !sessionLayout) return;
+      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'right');
+      if (target) handleFocusGroup(target);
+    },
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'focus-group-up',
+    label: 'Focus Group Up',
+    keys: 'mod+alt+ArrowUp',
+    category: 'tabs',
+    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
+    action: () => {
+      if (!activeSession || !sessionLayout) return;
+      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'up');
+      if (target) handleFocusGroup(target);
+    },
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'focus-group-down',
+    label: 'Focus Group Down',
+    keys: 'mod+alt+ArrowDown',
+    category: 'tabs',
+    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
+    action: () => {
+      if (!activeSession || !sessionLayout) return;
+      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'down');
+      if (target) handleFocusGroup(target);
+    },
+    showInPalette: true,
+  });
+
+  // Mod+Shift+Z: zoom toggle
+  useHotkey({
+    id: 'zoom-toggle',
+    label: 'Toggle Zoom',
+    keys: 'mod+shift+z',
+    category: 'tabs',
+    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
+    action: () => {
+      if (!activeSession || !sessionLayout) return;
+      const sid = activeSession.id;
+      const currentLayout = usePanelStore.getState().layouts[sid];
+      if (!currentLayout) return;
+      const isZoomed = !!currentLayout.zoomedGroupId;
+      const next: SessionPanelLayout = {
+        ...currentLayout,
+        zoomedGroupId: isZoomed ? null : focusedGroupId,
+      };
+      applyLayout(sid, next);
+    },
+    showInPalette: true,
+  });
+
   const handlePanelClose = useCallback(
     async (panel: ToolPanel) => {
       if (!activeSession) return;
-      
-      // Find next panel to activate
-      const panelIndex = sessionPanels.findIndex(p => p.id === panel.id);
-      const nextPanel = sessionPanels[panelIndex + 1] || sessionPanels[panelIndex - 1];
-      
+      const sid = activeSession.id;
+
       // Remove from store first for immediate UI update
-      removePanel(activeSession.id, panel.id);
-      
-      // Set next active panel if available
-      if (nextPanel) {
-        setActivePanelInStore(activeSession.id, nextPanel.id);
-        await panelApi.setActivePanel(activeSession.id, nextPanel.id);
+      removePanel(sid, panel.id);
+
+      // Update layout: remove the panel and pick next active. A null result
+      // means the tree collapsed entirely; keep one empty group so later
+      // creates have a landing spot (applyLayout repairs focus).
+      const currentLayout = usePanelStore.getState().layouts[sid];
+      if (currentLayout) {
+        // Find which group had this panel to pick a neighbor
+        const group = findGroupContainingPanel(currentLayout.root, panel.id);
+        const updated = removePanelFromLayout(currentLayout.root, panel.id);
+        if (updated) {
+          const next: SessionPanelLayout = { ...currentLayout, root: updated };
+          // Find the next panel in the same group
+          if (group) {
+            const remainingInGroup = group.panelIds.filter(id => id !== panel.id);
+            const panelIndex = group.panelIds.indexOf(panel.id);
+            const nextInGroup = remainingInGroup[Math.min(panelIndex, remainingInGroup.length - 1)];
+            if (nextInGroup) {
+              // Update the group's activePanelId
+              function fixActive(node: SessionPanelLayout['root']): SessionPanelLayout['root'] {
+                if (node.type === 'group' && node.id === group!.id) {
+                  return { ...node, activePanelId: nextInGroup };
+                }
+                if (node.type === 'split') {
+                  return { ...node, children: node.children.map(fixActive) };
+                }
+                return node;
+              }
+              next.root = fixActive(next.root);
+            }
+          }
+          applyLayout(sid, next);
+        } else {
+          applyLayout(sid, { ...createSingleGroupLayout([], null), zoomedGroupId: null });
+        }
+      } else {
+        // Fallback: no layout, use old logic
+        const panelIndex = sessionPanels.findIndex(p => p.id === panel.id);
+        const nextPanel = sessionPanels[panelIndex + 1] || sessionPanels[panelIndex - 1];
+        if (nextPanel) {
+          setActivePanelInStore(sid, nextPanel.id);
+          await panelApi.setActivePanel(sid, nextPanel.id);
+        }
       }
-      
+
       // Delete on backend
       await panelApi.deletePanel(panel.id);
     },
-    [activeSession, sessionPanels, removePanel, setActivePanelInStore]
+    [activeSession, sessionPanels, removePanel, setActivePanelInStore, applyLayout]
   );
 
   const handlePanelCreate = useCallback(
     async (type: ToolPanelType, options?: PanelCreateOptions) => {
       if (!activeSession) return;
+      const sid = activeSession.id;
 
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
       let initialState: { customState?: unknown } | undefined = undefined;
@@ -405,20 +847,174 @@ export const SessionView = memo(() => {
         };
       }
 
+      // Captured BEFORE the create: if the session has no terminal yet, the
+      // panel we are about to create becomes the pinned dock terminal and
+      // must never enter the layout tree.
+      const hadTerminalBefore = (usePanelStore.getState().panels[sid] || [])
+        .some(p => p.type === 'terminal');
+
       const newPanel = await panelApi.createPanel({
-        sessionId: activeSession.id,
+        sessionId: sid,
         type,
         title: options?.title,
         initialState
       });
 
       // Immediately add the panel and set it as active
-      // The panel:created event will also fire, but addPanel checks for duplicates
       addPanel(newPanel);
-      setActivePanelInStore(activeSession.id, newPanel.id);
+      setActivePanelInStore(sid, newPanel.id);
+
+      const becomesPinnedTerminal = type === 'terminal' && !hadTerminalBefore;
+      if (becomesPinnedTerminal) return;
+
+      // Add to layout (into the focused group, falling back to the primary
+      // group if focus is stale). addPanelToGroup is idempotent, so racing
+      // with the panel:created event handler cannot double-insert.
+      const currentLayout = usePanelStore.getState().layouts[sid];
+      if (currentLayout) {
+        const focusedGid = usePanelStore.getState().focusedGroupIds[sid];
+        const targetGroup = (focusedGid && findGroup(currentLayout.root, focusedGid))
+          || primaryGroup(currentLayout.root);
+        const nextRoot = addPanelToGroup(currentLayout.root, targetGroup.id, newPanel.id);
+        if (nextRoot !== currentLayout.root) {
+          applyLayout(sid, { ...currentLayout, root: nextRoot });
+        }
+      }
     },
-    [activeSession, addPanel, setActivePanelInStore]
+    [activeSession, addPanel, setActivePanelInStore, applyLayout]
   );
+
+  // --- SplitLayout callbacks ---
+  const handleSizesChange = useCallback((splitNodeId: string, sizes: number[]) => {
+    if (!activeSession) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout) return;
+    // Allotment re-layouts when panes hide/show for zoom; those geometries
+    // are transient (the hidden pane reports a collapsed size) and must not
+    // be persisted or a restart-while-zoomed restores a sliver.
+    if (currentLayout.zoomedGroupId) return;
+    const next: SessionPanelLayout = { ...currentLayout, root: updateSizes(currentLayout.root, splitNodeId, sizes) };
+    applyLayout(sid, next);
+  }, [activeSession, applyLayout]);
+
+  const handleFocusGroup = useCallback((groupId: string) => {
+    if (!activeSession) return;
+    const sid = activeSession.id;
+    // No-op when already focused: this fires on every mousedown inside a
+    // group (capture phase), and re-applying focus would schedule a layout
+    // persist and an IPC write per click.
+    if (usePanelStore.getState().focusedGroupIds[sid] === groupId) return;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (currentLayout) {
+      const group = findGroup(currentLayout.root, groupId);
+      if (group?.activePanelId) {
+        setActivePanelInStore(sid, group.activePanelId);
+        panelApi.setActivePanel(sid, group.activePanelId).catch(() => {});
+      }
+      // applyLayout syncs focusedGroupIds in the store
+      const next: SessionPanelLayout = { ...currentLayout, focusedGroupId: groupId };
+      applyLayout(sid, next);
+    } else {
+      setFocusedGroupInStore(sid, groupId);
+    }
+  }, [activeSession, setFocusedGroupInStore, setActivePanelInStore, applyLayout]);
+
+  const handleDropZoneChange = useCallback((groupId: string, zone: DropZone | null) => {
+    setDropZones(prev => {
+      const next = new Map(prev);
+      if (zone === null) next.delete(groupId);
+      else next.set(groupId, zone);
+      return next;
+    });
+  }, []);
+
+  const handleDropTab = useCallback((groupId: string, zone: DropZone) => {
+    if (!activeSession || !draggedPanelId) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout) return;
+
+    // No-op: dropping onto own group center
+    const sourceGroup = findGroupContainingPanel(currentLayout.root, draggedPanelId);
+    if (zone === 'center' && sourceGroup?.id === groupId) {
+      setDraggedPanelId(null);
+      setDropZones(new Map());
+      return;
+    }
+    // No-op: dropping the only tab of a group onto an edge of the same group
+    if (sourceGroup?.id === groupId && sourceGroup?.panelIds.length === 1) {
+      setDraggedPanelId(null);
+      setDropZones(new Map());
+      return;
+    }
+
+    let newRoot: SessionPanelLayout['root'];
+    if (zone === 'center') {
+      const targetGroup = findGroup(currentLayout.root, groupId);
+      const insertIdx = targetGroup ? targetGroup.panelIds.length : 0;
+      newRoot = movePanelInLayout(currentLayout.root, draggedPanelId, { groupId, index: insertIdx });
+    } else {
+      newRoot = movePanelInLayout(currentLayout.root, draggedPanelId, { groupId, edge: zone });
+    }
+
+    const next: SessionPanelLayout = { ...currentLayout, root: newRoot };
+    applyLayout(sid, next);
+    setDraggedPanelId(null);
+    setDropZones(new Map());
+  }, [activeSession, draggedPanelId, applyLayout]);
+
+  const handleDragStart = useCallback((panelId: string) => {
+    setDraggedPanelId(panelId);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedPanelId(null);
+    setDropZones(new Map());
+  }, []);
+
+  const handleStripDrop = useCallback((groupId: string, panelId: string, insertIndex: number) => {
+    if (!activeSession) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout) return;
+
+    const newRoot = movePanelInLayout(currentLayout.root, panelId, { groupId, index: insertIndex });
+    const next: SessionPanelLayout = { ...currentLayout, root: newRoot };
+    applyLayout(sid, next);
+    setDraggedPanelId(null);
+    setDropZones(new Map());
+  }, [activeSession, applyLayout]);
+
+  // --- Editor stage element (shared by both layouts) ---
+  const editorStageElement = useMemo(() => {
+    if (!sessionLayout || !activeSession) return null;
+    return (
+      <SplitLayout
+        layout={sessionLayout}
+        panels={tabBarPanels}
+        focusedGroupId={focusedGroupId}
+        isMainRepo={!!activeSession.isMainRepo}
+        onSizesChange={handleSizesChange}
+        onPanelSelect={handleGroupPanelSelect}
+        onPanelClose={handlePanelClose}
+        onFocusGroup={handleFocusGroup}
+        isTabDragging={isTabDragging}
+        draggedPanelId={draggedPanelId}
+        dropZones={dropZones}
+        onDropZoneChange={handleDropZoneChange}
+        onDropTab={handleDropTab}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onStripDrop={handleStripDrop}
+      />
+    );
+  }, [
+    sessionLayout, activeSession, tabBarPanels, focusedGroupId,
+    handleSizesChange, handleGroupPanelSelect, handlePanelClose, handleFocusGroup,
+    isTabDragging, draggedPanelId, dropZones, handleDropZoneChange,
+    handleDropTab, handleDragStart, handleDragEnd, handleStripDrop,
+  ]);
 
   // Dynamic shortcuts for custom commands (mod+shift+5, 6, 7, ...)
   const registerHotkey = useHotkeyStore((s) => s.register);
@@ -874,7 +1470,7 @@ export const SessionView = memo(() => {
         id: 'undo-commit',
         label: 'Undo Commit',
         icon: Undo2,
-        shortcut: 'mod+shift+z',
+        shortcut: 'mod+alt+z',
         onClick: hook.handleGitSoftReset,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing' || !activeSession.gitStatus?.ahead,
         variant: 'default' as const,
@@ -982,6 +1578,14 @@ export const SessionView = memo(() => {
           onPanelCreate={handlePanelCreate}
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
+          primaryGroupPanels={primaryGroupPanels}
+          primaryGroupActivePanelId={primaryGroupNode?.activePanelId}
+          primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onStripDrop={primaryGroupNode ? (panelId, idx) => handleStripDrop(primaryGroupNode.id, panelId, idx) : undefined}
+          isTabDragging={isTabDragging}
+          draggedPanelId={draggedPanelId}
         />
 
         {/* Content area: center panels + right detail */}
@@ -992,32 +1596,8 @@ export const SessionView = memo(() => {
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
-                  {sessionPanels.length > 0 && currentActivePanel ? (
-                    sessionPanels
-                      .filter(p => !defaultTerminalPanel || p.id !== defaultTerminalPanel.id)
-                      .map(panel => {
-                        const isActive = panel.id === currentActivePanel.id;
-                        const shouldKeepAlive = ['terminal'].includes(panel.type);
-                        if (!isActive && !shouldKeepAlive) return null;
-                        return (
-                          <div
-                            key={panel.id}
-                            className="absolute inset-0"
-                            style={{
-                              display: isActive ? 'block' : 'none',
-                              pointerEvents: isActive ? 'auto' : 'none'
-                            }}
-                          >
-                            <PanelContainer
-                              panel={panel}
-                              isActive={isActive}
-                              isMainRepo={!!activeSession.isMainRepo}
-                            />
-                          </div>
-                        );
-                      })
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center text-text-secondary">
+                  {editorStageElement || (
+                    <div className="flex-1 flex items-center justify-center text-text-secondary h-full">
                       <div className="text-center p-8">
                         <div className="text-4xl mb-4">⚡</div>
                         <h2 className="text-xl font-semibold mb-2">No Active Panel</h2>
@@ -1135,32 +1715,8 @@ export const SessionView = memo(() => {
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
-                  {sessionPanels.length > 0 && currentActivePanel ? (
-                    sessionPanels
-                      .filter(p => !defaultTerminalPanel || p.id !== defaultTerminalPanel.id)
-                      .map(panel => {
-                        const isActive = panel.id === currentActivePanel.id;
-                        const shouldKeepAlive = ['terminal'].includes(panel.type);
-                        if (!isActive && !shouldKeepAlive) return null;
-                        return (
-                          <div
-                            key={panel.id}
-                            className="absolute inset-0"
-                            style={{
-                              display: isActive ? 'block' : 'none',
-                              pointerEvents: isActive ? 'auto' : 'none'
-                            }}
-                          >
-                            <PanelContainer
-                              panel={panel}
-                              isActive={isActive}
-                              isMainRepo={!!activeSession.isMainRepo}
-                            />
-                          </div>
-                        );
-                      })
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center text-text-secondary">
+                  {editorStageElement || (
+                    <div className="flex-1 flex items-center justify-center text-text-secondary h-full">
                       <div className="text-center p-8">
                         <div className="text-4xl mb-4">⚡</div>
                         <h2 className="text-xl font-semibold mb-2">No Active Panel</h2>

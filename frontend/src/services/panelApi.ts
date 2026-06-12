@@ -1,4 +1,4 @@
-import { CreatePanelRequest, ToolPanel } from '../../../shared/types/panels';
+import { CreatePanelRequest, SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
 
 export const panelApi = {
   async createPanel(request: CreatePanelRequest): Promise<ToolPanel> {
@@ -61,6 +61,21 @@ export const panelApi = {
     // Use direct invoke for event emission as there's no typed wrapper for this
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- IPC event emission returns void
     return window.electron!.invoke('panels:emitEvent', panelId, eventType, data) as unknown as void;
+  },
+
+  async getLayout(sessionId: string): Promise<SessionPanelLayout | null> {
+    const response = await window.electronAPI.invoke('panels:get-layout', sessionId) as { success: boolean; data?: SessionPanelLayout | null; error?: string };
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to get panel layout');
+    }
+    return response.data ?? null;
+  },
+
+  async setLayout(sessionId: string, layout: SessionPanelLayout | null): Promise<void> {
+    const response = await window.electronAPI.invoke('panels:set-layout', sessionId, layout) as { success: boolean; error?: string };
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to set panel layout');
+    }
   },
 
   async clearPanelUnviewedContent(panelId: string): Promise<void> {

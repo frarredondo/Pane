@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
 import { PanelTabBarProps, PanelCreateOptions } from '../../types/panelComponents';
-import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, LogsPanelState } from '../../../../shared/types/panels';
+import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../../shared/types/panels';
 import { useSession } from '../../contexts/SessionContext';
 import { useConfigStore } from '../../stores/configStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
@@ -13,7 +13,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { Kbd } from '../ui/Kbd';
 import { useResourceMonitor } from '../../hooks/useResourceMonitor';
 import { ClaudeIcon, OpenAIIcon, CLI_BRAND_ICONS, getCliBrandIcon } from '../ui/BrandIcons';
-import { usePanelStore } from '../../stores/panelStore';
+import { PanelTabStrip } from './PanelTabStrip';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 function formatMemory(mb: number): string {
@@ -66,7 +66,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   onPanelCreate,
   context = 'worktree',  // Default to worktree for backward compatibility
   onToggleDetailPanel,
-  detailPanelVisible
+  detailPanelVisible,
+  // Optional split tab group integration
+  primaryGroupPanels,
+  primaryGroupActivePanelId,
+  primaryGroupFocused,
+  onDragStart,
+  onDragEnd,
+  onStripDrop,
+  isTabDragging,
+  draggedPanelId,
 }) => {
   const sessionContext = useSession();
   const session = sessionContext?.session;
@@ -76,9 +85,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const dropdownMenuRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
-  const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState('');
-  const editInputRef = useRef<HTMLInputElement>(null);
+  // Rename state moved to PanelTabStrip
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customCommand, setCustomCommand] = useState('');
   const customInputRef = useRef<HTMLInputElement>(null);
@@ -93,7 +100,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const { snapshot, isLoading: resourceLoading, startActive, stopActive, refresh } = useResourceMonitor();
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
-  const getPanelActivityStatus = usePanelStore(s => s.getPanelActivityStatus);
+  // Activity status moved to PanelTabStrip
 
   const customCommands = config?.customCommands ?? [];
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
@@ -249,18 +256,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     onPanelSelect(panel);
   }, [onPanelSelect]);
 
-  const handlePanelClose = useCallback((e: React.MouseEvent, panel: ToolPanel) => {
-    e.stopPropagation();
-    
-    // Prevent closing logs panel while it's running
-    if (panel.type === 'logs') {
-      const logsState = panel.state?.customState as LogsPanelState;
-      if (logsState?.isRunning) {
-        alert('Cannot close logs panel while process is running. Please stop the process first.');
-        return;
-      }
-    }
-    
+  // PanelTabStrip owns stopPropagation and the logs-running close guard
+  const handlePanelClose = useCallback((panel: ToolPanel) => {
     onPanelClose(panel);
   }, [onPanelClose]);
   
@@ -271,48 +268,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     setCustomCommand('');
   }, [onPanelCreate]);
   
-  const handleStartRename = useCallback((e: React.MouseEvent, panel: ToolPanel) => {
-    e.stopPropagation();
-    if (panel.type === 'diff') {
-      return;
-    }
-    setEditingPanelId(panel.id);
-    setEditingTitle(panel.title);
-  }, []);
-  
-  const handleRenameSubmit = useCallback(async () => {
-    if (editingPanelId && editingTitle.trim()) {
-      try {
-        // Update the panel title via IPC
-        await window.electron?.invoke('panels:update', editingPanelId, {
-          title: editingTitle.trim()
-        });
-        
-        // Update the local panel in the store
-        const panel = panels.find(p => p.id === editingPanelId);
-        if (panel) {
-          panel.title = editingTitle.trim();
-        }
-      } catch (error) {
-        console.error('Failed to rename panel:', error);
-      }
-    }
-    setEditingPanelId(null);
-    setEditingTitle('');
-  }, [editingPanelId, editingTitle, panels]);
-  
-  const handleRenameCancel = useCallback(() => {
-    setEditingPanelId(null);
-    setEditingTitle('');
-  }, []);
-  
-  const handleRenameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleRenameSubmit();
-    } else if (e.key === 'Escape') {
-      handleRenameCancel();
-    }
-  }, [handleRenameSubmit, handleRenameCancel]);
+  // Rename handlers moved to PanelTabStrip
   
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -392,14 +348,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         break;
     }
   }, []);
-  
-  // Focus input when editing starts
-  useEffect(() => {
-    if (editingPanelId && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
-    }
-  }, [editingPanelId]);
   
   // Ctrl+T: open Add Tool dropdown
   useHotkey({
@@ -532,107 +480,21 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         role="tablist"
         aria-label="Panel Tabs"
       >
-        {/* Scrollable tab area */}
-        <div className="flex items-center overflow-x-auto scrollbar-none min-w-0 flex-1">
-          {/* Render panel tabs */}
-          {sortedPanels.map((panel, index) => {
-          const isPermanent = panel.metadata?.permanent === true;
-          const isEditing = editingPanelId === panel.id;
-          const isDiffPanel = panel.type === 'diff';
-          const displayTitle = isDiffPanel ? 'Diff' : panel.title;
-          const shortcutHint = index < 9 ? hotkeyDisplay(`panel-tab-${index + 1}`) ?? undefined : undefined;
-          const isCompactTab = panel.type === 'diff' || panel.type === 'explorer' || panel.type === 'browser';
-
-          const tab = (
-            <div
-              className={cn(
-                "group relative inline-flex items-center h-[var(--panel-tab-height)] justify-center whitespace-nowrap cursor-pointer select-none",
-                isCompactTab
-                  ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-6")
-                  : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-7"),
-                activePanel?.id === panel.id
-                  ? "text-text-primary"
-                  : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
-              )}
-              onClick={() => !isEditing && handlePanelClick(panel)}
-              onDoubleClick={(e) => {
-                if (!isEditing && !isPermanent && !isDiffPanel) {
-                  handleStartRename(e, panel);
-                }
-              }}
-              role="tab"
-              aria-selected={activePanel?.id === panel.id}
-              tabIndex={activePanel?.id === panel.id ? 0 : -1}
-              onKeyDown={(e) => {
-                if (isEditing) return;
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handlePanelClick(panel);
-                }
-              }}
-            >
-              {isEditing ? (
-                <input
-                  ref={editInputRef}
-                  type="text"
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onKeyDown={handleRenameKeyDown}
-                  onBlur={handleRenameSubmit}
-                  className="px-1 text-sm bg-bg-primary border border-border-primary rounded outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus text-text-primary"
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ width: `${Math.max(50, editingTitle.length * 8)}px` }}
-                />
-              ) : (
-                <span className="inline-flex items-center justify-center gap-2 min-w-0">
-                  {panel.type === 'terminal' && (
-                    <span className={cn(
-                      "w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all",
-                      getPanelActivityStatus(panel.id) === 'active'
-                        ? 'bg-status-info opacity-100 duration-150'
-                        : 'bg-text-muted/20 opacity-40 duration-[3s]'
-                    )} />
-                  )}
-                  {getPanelIcon(panel.type, panel)}
-                  <span>{displayTitle}</span>
-                </span>
-              )}
-
-              {!isPermanent && !isEditing && (
-                <button
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
-                  onClick={(e) => handlePanelClose(e, panel)}
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              )}
-            </div>
-          );
-
-          const showDividerAfter = panel.type === 'browser';
-          const divider = showDividerAfter ? (
-            <div className="h-4 w-px bg-border-primary mx-1 flex-shrink-0" aria-hidden="true" />
-          ) : null;
-
-          return shortcutHint ? (
-            <React.Fragment key={panel.id}>
-              <Tooltip
-                content={
-                  <span className="flex flex-col items-start gap-1">
-                    <span className="text-text-secondary">{displayTitle}</span>
-                    <Kbd size="xs" variant="muted" className="origin-left scale-[0.8]">{shortcutHint}</Kbd>
-                  </span>
-                }
-                side="bottom"
-              >
-                {tab}
-              </Tooltip>
-              {divider}
-            </React.Fragment>
-          ) : <React.Fragment key={panel.id}>{tab}{divider}</React.Fragment>;
-        })}
-
-        </div>
+        {/* Scrollable tab area — delegated to PanelTabStrip */}
+        <PanelTabStrip
+          panels={primaryGroupPanels ?? sortedPanels}
+          activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
+          onPanelSelect={handlePanelClick}
+          onPanelClose={handlePanelClose}
+          isPrimary
+          isFocused={primaryGroupFocused ?? true}
+          showShortcutHints
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onStripDrop={onStripDrop}
+          isTabDragging={isTabDragging}
+          draggedPanelId={draggedPanelId}
+        />
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>

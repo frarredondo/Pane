@@ -1106,12 +1106,34 @@ export class DatabaseService {
           )
           .run();
 
-        // Copy data, folder_id has already been converted to TEXT values above
+        // Copy data, folder_id has already been converted to TEXT values
+        // above. Copy by explicit column intersection rather than SELECT *:
+        // the live sessions table may carry columns added by later
+        // migrations (status_message, active_panel_id, panel_layout, ...)
+        // that this historical target schema does not include, and SELECT *
+        // fails outright on a column-count mismatch. Skipped columns are
+        // re-added by their own PRAGMA-checked ALTERs on the next pass.
+        const folderMigTargetCols = (
+          this.db
+            .prepare("PRAGMA table_info(sessions_folders_migration)")
+            .all() as SqliteTableInfo[]
+        ).map((c) => c.name);
+        const folderMigSourceCols = new Set(
+          (
+            this.db
+              .prepare("PRAGMA table_info(sessions)")
+              .all() as SqliteTableInfo[]
+          ).map((c) => c.name),
+        );
+        const folderMigCopyCols = folderMigTargetCols
+          .filter((c) => folderMigSourceCols.has(c))
+          .map((c) => `"${c}"`)
+          .join(", ");
         this.db
           .prepare(
             `
-          INSERT INTO sessions_folders_migration 
-          SELECT * FROM sessions
+          INSERT INTO sessions_folders_migration (${folderMigCopyCols})
+          SELECT ${folderMigCopyCols} FROM sessions
         `,
           )
           .run();
@@ -1624,6 +1646,21 @@ export class DatabaseService {
         .prepare("ALTER TABLE sessions ADD COLUMN active_panel_id TEXT")
         .run();
       console.log("[Database] Added active_panel_id column to sessions table");
+    }
+
+    // Add panel_layout column for split tab groups (JSON layout tree per
+    // session). MUST stay after the timestamp-normalization and folder
+    // rebuilds above: those recreate the sessions table from explicit schemas
+    // that do not include late-added columns, so a column added before them
+    // would be dropped mid-run (same reason active_panel_id lives here).
+    const hasPanelLayoutColumn = sessionsTableInfoPanel.some(
+      (col: SqliteTableInfo) => col.name === "panel_layout",
+    );
+    if (!hasPanelLayoutColumn) {
+      this.db
+        .prepare("ALTER TABLE sessions ADD COLUMN panel_layout TEXT")
+        .run();
+      console.log("[Database] Added panel_layout column to sessions table");
     }
 
     // Migration 004: Claude panels migration
@@ -4223,6 +4260,21 @@ export class DatabaseService {
     this.db
       .prepare("UPDATE sessions SET active_panel_id = ? WHERE id = ?")
       .run(panelId, sessionId);
+  }
+
+  /** Get the raw JSON layout string for a session's split tab groups. */
+  getSessionPanelLayout(sessionId: string): string | null {
+    const row = this.db
+      .prepare("SELECT panel_layout FROM sessions WHERE id = ?")
+      .get(sessionId) as { panel_layout: string | null } | undefined;
+    return row?.panel_layout ?? null;
+  }
+
+  /** Set the raw JSON layout string for a session's split tab groups. */
+  setSessionPanelLayout(sessionId: string, layoutJson: string | null): void {
+    this.db
+      .prepare("UPDATE sessions SET panel_layout = ? WHERE id = ?")
+      .run(layoutJson, sessionId);
   }
 
   getActivePanel(sessionId: string): ToolPanel | null {

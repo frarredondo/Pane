@@ -113,6 +113,8 @@ const PANEL_CHANNELS = [
   'panels:resize-terminal',
   'panels:send-terminal-input',
   'panels:shouldAutoCreate',
+  'panels:get-layout',
+  'panels:set-layout',
   'terminal:input',
   'terminal:resize',
   'terminal:getState',

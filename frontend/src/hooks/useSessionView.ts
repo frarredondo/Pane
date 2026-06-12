@@ -725,7 +725,7 @@ export const useSessionView = (
   useHotkey({
     id: 'git-soft-reset',
     label: 'Git: Undo Last Commit',
-    keys: 'mod+shift+z',
+    keys: 'mod+alt+z',
     category: 'session',
     action: () => handleGitSoftReset(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
