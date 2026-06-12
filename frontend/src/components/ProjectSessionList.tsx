@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Plus, FolderPlus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, Pin, Monitor } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { useHotkeyStore } from '../stores/hotkeyStore';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
 import { Dropdown } from './ui/Dropdown';
@@ -31,7 +30,6 @@ export function ProjectSessionList({
   remoteDesktopTooltip,
 }: ProjectSessionListProps) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [expandedProjects, setExpandedProjects] = useState<Set<number>>(new Set());
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForProject, setCreateForProject] = useState<Project | null>(null);
 
@@ -47,12 +45,13 @@ export function ProjectSessionList({
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  // Expansion state lives in the navigation store so the always-mounted
+  // session hotkeys (useSessionNavigationHotkeys) see the same visible ordering
+  const expandedProjects = useNavigationStore(s => s.expandedProjects);
+  const toggleProjectExpanded = useNavigationStore(s => s.toggleProjectExpanded);
+  const expandProject = useNavigationStore(s => s.expandProject);
   const panelPanels = usePanelStore(s => s.panels);
   const panelActivityStatus = usePanelStore(s => s.activityStatus);
-
-  // Hotkey registration
-  const register = useHotkeyStore(s => s.register);
-  const unregister = useHotkeyStore(s => s.unregister);
 
   // Load projects
   const loadProjects = useCallback(async () => {
@@ -120,80 +119,8 @@ export function ProjectSessionList({
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
   }, [sessions, getPinnedSessionLabel]);
 
-  // Flat list of all visible sessions (for hotkey mapping)
-  const allVisibleSessions = useMemo(() => {
-    const result: Session[] = [];
-    projects.forEach(p => {
-      if (expandedProjects.has(p.id)) {
-        const list = sessionsByProject.get(p.id) || [];
-        result.push(...list);
-      }
-    });
-    return result;
-  }, [projects, expandedProjects, sessionsByProject]);
-
-  // Register ⌘1-⌘9 hotkeys with dynamic session name labels
-  const allVisibleSessionsRef = useRef(allVisibleSessions);
-  allVisibleSessionsRef.current = allVisibleSessions;
-  const setActiveSessionRef = useRef(setActiveSession);
-  setActiveSessionRef.current = setActiveSession;
-  const navigateToSessionsRef = useRef(navigateToSessions);
-  navigateToSessionsRef.current = navigateToSessions;
-
-  // Build stable label key so we re-register when session names/projects change
-  const sessionLabelKey = allVisibleSessions.slice(0, 9).map(s => `${s.name}:${s.projectId}`).join('|');
-  const projectsRef = useRef(projects);
-  projectsRef.current = projects;
-
-  useEffect(() => {
-    const ids: string[] = [];
-    for (let i = 1; i <= 9; i++) {
-      const id = `switch-session-${i}`;
-      ids.push(id);
-      const session = allVisibleSessionsRef.current[i - 1];
-      let label = `Switch to pane ${i}`;
-      if (session) {
-        const project = projectsRef.current.find(p => p.id === session.projectId);
-        label = project
-          ? `Switch to ${session.name} (${project.name})`
-          : `Switch to ${session.name}`;
-      }
-      const idx = i - 1;
-      register({
-        id,
-        label,
-        keys: `mod+${i}`,
-        category: 'session',
-        enabled: () => !!allVisibleSessionsRef.current[idx],
-        action: () => {
-          const s = allVisibleSessionsRef.current[idx];
-          if (s) {
-            setActiveSessionRef.current(s.id);
-            navigateToSessionsRef.current();
-          }
-        },
-      });
-    }
-    return () => ids.forEach(id => unregister(id));
-  }, [register, unregister, sessionLabelKey]);
-
-  // Track known project IDs so we only auto-expand newly added ones
-  const knownProjectIds = useRef<Set<number>>(new Set());
-  const projectIds = useMemo(() => projects.map(p => p.id).join(','), [projects]);
-
-  // Auto-expand newly added projects (preserves user-collapsed state for existing ones)
-  useEffect(() => {
-    const newIds = projects.filter(p => !knownProjectIds.current.has(p.id)).map(p => p.id);
-    knownProjectIds.current = new Set(projects.map(p => p.id));
-    if (newIds.length > 0) {
-      setExpandedProjects(prev => {
-        const next = new Set(prev);
-        newIds.forEach(id => next.add(id));
-        return next;
-      });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIds]);
+  // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
+  // (always mounted in Sidebar), and new-project auto-expansion lives there too.
 
   // Auto-expand the project that contains the active session
   // (e.g., when a new session is created and auto-activated)
@@ -202,23 +129,11 @@ export function ProjectSessionList({
     const currentSessions = useSessionStore.getState().sessions;
     const session = currentSessions.find(s => s.id === activeSessionId);
     if (!session?.projectId) return;
-    if (!expandedProjects.has(session.projectId)) {
-      setExpandedProjects(prev => {
-        const next = new Set(prev);
-        next.add(session.projectId!);
-        return next;
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId]);
+    expandProject(session.projectId);
+  }, [activeSessionId, expandProject]);
 
   const toggleProject = (id: number) => {
-    setExpandedProjects(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    toggleProjectExpanded(id);
   };
 
   const handleSessionClick = (sessionId: string) => {

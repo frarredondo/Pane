@@ -608,7 +608,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             }
           }
           // Ctrl/Cmd+Alt+/: open shortcut settings
-          if (ctrlOrMeta && e.altKey && e.key === '/') return false;
+          // Check e.code too: macOS Option modifies e.key (e.g. '/' becomes '÷')
+          if (ctrlOrMeta && e.altKey && (e.key === '/' || (!e.getModifierState('AltGraph') && e.code === 'Slash'))) return false;
           // Ctrl/Cmd+W or Ctrl/Cmd+Q: close active tab
           if (ctrlOrMeta && (e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'q')) return false;
           // Ctrl/Cmd+T: open Add Tool dropdown
@@ -874,10 +875,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
                   const file = items[i].getAsFile();
                   if (!file) return;
 
-                  if (file.size > 10 * 1024 * 1024) {
+                  if (file.size > 50 * 1024 * 1024) {
                     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
                     if (terminal && !disposed) {
-                      terminal.paste(`[Image paste failed] File too large (${sizeMB} MB), max 10 MB\n`);
+                      terminal.paste(`[Image paste failed] File too large (${sizeMB} MB), max 50 MB\n`);
                     }
                     return;
                   }
@@ -1018,6 +1019,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
                   }
                 } catch (err) {
                   console.error('[TerminalPanel] Failed to drop file:', err);
+                  if (!disposed && terminal) {
+                    // Strip Electron's IPC wrapper so the user sees the backend reason
+                    const raw = err instanceof Error ? err.message : String(err);
+                    const reason = raw.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+                    terminal.paste(`[Drop failed] ${reason || 'Unknown error'}\n`);
+                  }
                 }
               }
             })();

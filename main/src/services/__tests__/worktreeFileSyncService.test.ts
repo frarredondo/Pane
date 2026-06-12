@@ -424,6 +424,239 @@ describe('worktreeFileSyncService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Entry ordering: small/critical entries before heavyweight directories
+  // -------------------------------------------------------------------------
+
+  describe('entry ordering', () => {
+    const environment: ProjectEnvironment = 'linux';
+    const mainRepoPath = '/home/user/repo';
+    const worktreePath = '/home/user/worktree';
+
+    function makeOrderingRunner(cpCommands: string[]): CommandRunner {
+      const execAsync = vi.fn().mockImplementation((cmd: string) => {
+        if (cmd.startsWith('find ')) {
+          if (cmd.includes('-name "node_modules"')) {
+            return Promise.resolve({ stdout: '/home/user/repo/node_modules', stderr: '' });
+          }
+          return Promise.resolve({ stdout: '/home/user/repo/.env', stderr: '' });
+        }
+        if (cmd.startsWith('test -e ')) {
+          return Promise.reject(new Error('not exists'));
+        }
+        if (cmd.startsWith('test -f ')) {
+          return cmd.includes('node_modules')
+            ? Promise.reject(new Error('not a file'))
+            : Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('mkdir ')) {
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('cp ')) {
+          cpCommands.push(cmd);
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        return Promise.resolve({ stdout: '', stderr: '' });
+      });
+      return { execAsync } as unknown as CommandRunner;
+    }
+
+    it('copies .env entries before node_modules even when node_modules is listed first', async () => {
+      const cpCommands: string[] = [];
+      const runner = makeOrderingRunner(cpCommands);
+
+      await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [nodeModulesEntry, envEntry],
+      );
+
+      expect(cpCommands).toHaveLength(2);
+      expect(cpCommands[0]).toBe(
+        'cp "/home/user/repo/.env" "/home/user/worktree/.env"',
+      );
+      expect(cpCommands[1]).toBe(
+        'cp -rp "/home/user/repo/node_modules" "/home/user/worktree/node_modules"',
+      );
+    });
+
+    it('keeps non-heavyweight entries in config order', async () => {
+      const cpCommands: string[] = [];
+      const execAsync = vi.fn().mockImplementation((cmd: string) => {
+        if (cmd.startsWith('find ')) {
+          return Promise.resolve({ stdout: '/home/user/repo/.env', stderr: '' });
+        }
+        if (cmd === 'test -e "/home/user/repo/.claude"') {
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('test -e ')) {
+          return Promise.reject(new Error('not exists'));
+        }
+        if (cmd.startsWith('test -f ')) {
+          return cmd.includes('.claude')
+            ? Promise.reject(new Error('not a file'))
+            : Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('mkdir ')) {
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('cp ')) {
+          cpCommands.push(cmd);
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        return Promise.resolve({ stdout: '', stderr: '' });
+      });
+      const runner = { execAsync } as unknown as CommandRunner;
+
+      await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [envEntry, claudeEntry],
+      );
+
+      expect(cpCommands).toHaveLength(2);
+      expect(cpCommands[0]).toContain('.env');
+      expect(cpCommands[1]).toContain('.claude');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Copy timeout
+  // -------------------------------------------------------------------------
+
+  describe('copy timeout', () => {
+    it('passes a generous per-call timeout to copy commands', async () => {
+      const cpCommands: string[] = [];
+      const runner = makeMockCommandRunner(
+        '/home/user/repo/node_modules',
+        new Set(),
+        cpCommands,
+      );
+
+      await worktreeFileSyncService.syncWorktree(
+        '/home/user/repo',
+        '/home/user/worktree',
+        runner,
+        'linux',
+        [nodeModulesEntry],
+      );
+
+      const execAsync = runner.execAsync as ReturnType<typeof vi.fn>;
+      const cpCall = execAsync.mock.calls.find((call) => String(call[0]).startsWith('cp '));
+      expect(cpCall).toBeDefined();
+      expect(cpCall?.[2]).toMatchObject({ timeout: 600_000 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Result summary: install command and failures
+  // -------------------------------------------------------------------------
+
+  describe('sync result', () => {
+    const environment: ProjectEnvironment = 'linux';
+    const mainRepoPath = '/home/user/repo';
+    const worktreePath = '/home/user/worktree';
+
+    it('returns the detected install command and no failures on success', async () => {
+      const cpCommands: string[] = [];
+      const existingDests = new Set(['/home/user/repo/pnpm-lock.yaml']);
+      const runner = makeMockCommandRunner(
+        '/home/user/repo/.env',
+        existingDests,
+        cpCommands,
+      );
+
+      const result = await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [envEntry],
+      );
+
+      expect(cpCommands).toHaveLength(1);
+      expect(result.installCommand).toBe('pnpm install');
+      expect(result.failures).toHaveLength(0);
+    });
+
+    it('reports per-match copy failures without aborting the sync', async () => {
+      const execAsync = vi.fn().mockImplementation((cmd: string) => {
+        if (cmd.startsWith('find ')) {
+          return Promise.resolve({ stdout: '/home/user/repo/node_modules', stderr: '' });
+        }
+        if (cmd.startsWith('test -e ')) {
+          return Promise.reject(new Error('not exists'));
+        }
+        if (cmd.startsWith('mkdir ')) {
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('cp ')) {
+          return Promise.reject(new Error('cp blew up'));
+        }
+        return Promise.resolve({ stdout: '', stderr: '' });
+      });
+      const runner = { execAsync } as unknown as CommandRunner;
+
+      const result = await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [nodeModulesEntry],
+      );
+
+      expect(result.installCommand).toBeNull();
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0].path).toBe('node_modules');
+      expect(result.failures[0].reason).toContain('cp blew up');
+    });
+
+    it('continues to later entries after an earlier entry fails', async () => {
+      const cpCommands: string[] = [];
+      const execAsync = vi.fn().mockImplementation((cmd: string) => {
+        if (cmd.startsWith('find ')) {
+          if (cmd.includes('-name "node_modules"')) {
+            return Promise.resolve({ stdout: '/home/user/repo/node_modules', stderr: '' });
+          }
+          return Promise.resolve({ stdout: '/home/user/repo/.env', stderr: '' });
+        }
+        if (cmd.startsWith('test -e ')) {
+          return Promise.reject(new Error('not exists'));
+        }
+        if (cmd.startsWith('mkdir ')) {
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd.startsWith('cp ')) {
+          if (cmd.includes('.env')) {
+            return Promise.reject(new Error('env copy failed'));
+          }
+          cpCommands.push(cmd);
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        return Promise.resolve({ stdout: '', stderr: '' });
+      });
+      const runner = { execAsync } as unknown as CommandRunner;
+
+      const result = await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [envEntry, nodeModulesEntry],
+      );
+
+      expect(cpCommands).toHaveLength(1);
+      expect(cpCommands[0]).toContain('node_modules');
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0].path).toBe('.env');
+      expect(result.failures[0].reason).toContain('env copy failed');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Disabled entries
   // -------------------------------------------------------------------------
 

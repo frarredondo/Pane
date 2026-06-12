@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useHotkey } from './useHotkey';
+import { useHotkeyStore } from '../stores/hotkeyStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { cycleIndex } from '../utils/arrayUtils';
@@ -68,6 +69,30 @@ export function useSessionNavigationHotkeys({
       })
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
   }, [sessions, projectById]);
+
+  const expandedProjects = useNavigationStore(s => s.expandedProjects);
+  const registerProjectIds = useNavigationStore(s => s.registerProjectIds);
+
+  // Auto-expand newly added projects. Lives here (not in ProjectSessionList)
+  // because this hook stays mounted when the sidebar is collapsed or immersive
+  // mode hides it, keeping mod+1-9 numbering alive and consistent.
+  useEffect(() => {
+    registerProjectIds(projects.map(p => p.id));
+  }, [projects, registerProjectIds]);
+
+  // Sessions in the exact order ProjectSessionList renders them: projects in
+  // display order, collapsed projects skipped, sessions sorted by createdAt.
+  // Pinned rows are excluded, matching the list's hotkey numbering.
+  const visibleSessions = useMemo(() => {
+    const result: Session[] = [];
+    projects.forEach(project => {
+      if (expandedProjects.has(project.id)) {
+        const list = sessionsByProject.get(project.id) || [];
+        result.push(...list);
+      }
+    });
+    return result;
+  }, [projects, expandedProjects, sessionsByProject]);
 
   const allActiveSessionsRef = useRef(allActiveSessions);
   allActiveSessionsRef.current = allActiveSessions;
@@ -148,4 +173,48 @@ export function useSessionNavigationHotkeys({
     },
     action: () => cyclePinnedOrAllSessions('prev'),
   });
+
+  const visibleSessionsRef = useRef(visibleSessions);
+  visibleSessionsRef.current = visibleSessions;
+  const projectByIdRef = useRef(projectById);
+  projectByIdRef.current = projectById;
+
+  const register = useHotkeyStore(s => s.register);
+  const unregister = useHotkeyStore(s => s.unregister);
+
+  // Register mod+1-9 with dynamic session name labels. Build a stable label key
+  // so we re-register when session names/projects change.
+  const sessionLabelKey = visibleSessions.slice(0, 9).map(s => `${s.name}:${s.projectId}`).join('|');
+
+  useEffect(() => {
+    const ids: string[] = [];
+    for (let i = 1; i <= 9; i++) {
+      const id = `switch-session-${i}`;
+      ids.push(id);
+      const session = visibleSessionsRef.current[i - 1];
+      let label = `Switch to pane ${i}`;
+      if (session) {
+        const project = session.projectId != null ? projectByIdRef.current.get(session.projectId) : undefined;
+        label = project
+          ? `Switch to ${session.name} (${project.name})`
+          : `Switch to ${session.name}`;
+      }
+      const idx = i - 1;
+      register({
+        id,
+        label,
+        keys: `mod+${i}`,
+        category: 'session',
+        enabled: () => !!visibleSessionsRef.current[idx],
+        action: () => {
+          const s = visibleSessionsRef.current[idx];
+          if (s) {
+            setActiveSessionRef.current(s.id);
+            navigateToSessionsRef.current();
+          }
+        },
+      });
+    }
+    return () => ids.forEach(id => unregister(id));
+  }, [register, unregister, sessionLabelKey]);
 }

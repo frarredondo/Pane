@@ -12,16 +12,12 @@ interface BrowserPanelProps {
   isActive: boolean;
 }
 
-const LOCALHOST_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/.*)?$/;
-
-function isLocalhostUrl(url: string): boolean {
-  return LOCALHOST_PATTERN.test(url);
-}
-
 function normalizeUrl(input: string): string {
   let url = input.trim();
-  if (url.startsWith('localhost') || url.startsWith('127.0.0.1') || url.startsWith('[::1]')) {
-    url = 'http://' + url;
+  if (!/^https?:\/\//i.test(url)) {
+    // Local hosts default to http, everything else to https
+    const isLocalHost = url.startsWith('localhost') || url.startsWith('127.0.0.1') || url.startsWith('[::1]');
+    url = (isLocalHost ? 'http://' : 'https://') + url;
   }
   return url;
 }
@@ -104,8 +100,14 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
   const navigateTo = useCallback((rawUrl: string) => {
     const normalized = normalizeUrl(rawUrl);
-    if (!isLocalhostUrl(normalized)) {
-      setUrlError('Only localhost and 127.0.0.1 URLs are supported');
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(normalized);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+      setUrlError('Enter a valid http or https URL');
       return;
     }
     setUrlError('');
@@ -388,7 +390,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             type="text"
             value={inputUrl}
             onChange={(e) => { setInputUrl(e.target.value); setUrlError(''); }}
-            placeholder="localhost:3000"
+            placeholder="Enter a URL (e.g. localhost:3000)"
             className={cn(
               'w-full px-2.5 py-1 text-sm rounded bg-bg-primary border border-border-primary',
               'text-text-primary placeholder-text-tertiary',
@@ -412,7 +414,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           <Globe className="w-12 h-12 mb-4 opacity-20" />
           <p className="text-sm">No URL loaded</p>
           <p className="text-xs text-text-tertiary mt-1">
-            Enter a localhost URL above or select one from terminal output
+            Enter a URL above or select one from terminal output
           </p>
         </div>
       ) : (

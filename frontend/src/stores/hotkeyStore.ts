@@ -69,23 +69,49 @@ interface HotkeyStore {
 // Canonical modifier order — MUST be identical in both normalize functions
 const MODIFIER_ORDER = ['mod', 'alt', 'shift'] as const;
 
+// Punctuation codes resolved via e.code when Alt is held; macOS Option modifies
+// e.key for these too (e.g. Option+/ produces '÷' on some layouts)
+const ALT_PUNCTUATION_CODES: Record<string, string> = {
+  Slash: '/',
+  Comma: ',',
+  Period: '.',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backquote: '`',
+  Minus: '-',
+  Equal: '=',
+};
+
+/**
+ * Resolve the logical key from e.code for Alt-held combos, where macOS Option
+ * translates e.key into a special character (e.g. Option+A produces 'å',
+ * Option+1 produces '¡', Option+/ produces '÷' on some layouts).
+ * Covers letters, digits, and common punctuation. Returns null when the code
+ * isn't one we normalize.
+ */
+function altKeyFromCode(code: string): string | null {
+  const letterMatch = code.match(/^Key([A-Z])$/);
+  if (letterMatch) return letterMatch[1].toLowerCase();
+  const digitMatch = code.match(/^Digit(\d)$/);
+  if (digitMatch) return digitMatch[1];
+  return ALT_PUNCTUATION_CODES[code] ?? null;
+}
+
 function normalizeKeyEvent(e: KeyboardEvent): string {
   const parts: string[] = [];
   if (e.metaKey || e.ctrlKey) parts.push('mod');
   if (e.altKey) parts.push('alt');
   if (e.shiftKey) parts.push('shift');
   // parts is already in canonical order because we push in that order
-  // Use e.code for letters when alt is held — macOS Option key modifies e.key
-  // (e.g. Option+A produces 'å' instead of 'a')
-  // Skip AltGr — on Windows/Linux international layouts AltGr sets both ctrlKey+altKey
+  // Use e.code for letters/digits/punctuation when alt is held; macOS Option
+  // key modifies e.key (e.g. Option+A produces 'å' instead of 'a')
+  // Skip AltGr: on Windows/Linux international layouts AltGr sets both ctrlKey+altKey
   // but is used for character input (e.g. AltGr+Q = '@' on German keyboards)
   const isAltGr = e.getModifierState('AltGraph');
-  const altLetterMatch = e.altKey && !isAltGr && e.code.match(/^Key([A-Z])$/);
-  let key = altLetterMatch
-    ? altLetterMatch[1].toLowerCase()
-    : e.key.length === 1
-      ? e.key.toLowerCase()
-      : e.key;
+  const altCodeKey = e.altKey && !isAltGr ? altKeyFromCode(e.code) : null;
+  let key = altCodeKey ?? (e.key.length === 1 ? e.key.toLowerCase() : e.key);
   // Use e.code for digits when shift is held — e.key is layout-dependent
   // (e.g. Shift+2 produces '@' on US, '"' on UK, different on AZERTY)
   const digitMatch = e.shiftKey && e.code.match(/^Digit(\d)$/);

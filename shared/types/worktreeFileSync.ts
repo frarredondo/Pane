@@ -5,8 +5,9 @@ export interface WorktreeFileSyncEntry {
   recursive: boolean;
 }
 
+// Small/critical entries come first; heavyweight directories (node_modules)
+// last so credentials and config land before slow recursive copies.
 export const DEFAULT_WORKTREE_FILE_SYNC_ENTRIES: WorktreeFileSyncEntry[] = [
-  { id: 'node_modules', path: 'node_modules', enabled: true, recursive: true },
   { id: 'env', path: '.env*', enabled: true, recursive: true },
   { id: 'claude', path: '.claude', enabled: true, recursive: false },
   { id: 'codex', path: '.codex', enabled: true, recursive: false },
@@ -19,4 +20,5 @@ export const DEFAULT_WORKTREE_FILE_SYNC_ENTRIES: WorktreeFileSyncEntry[] = [
   { id: 'gemini', path: '.gemini', enabled: true, recursive: false },
   { id: 'junie', path: '.junie', enabled: true, recursive: false },
   { id: 'aider-conf', path: '.aider.conf.yml', enabled: true, recursive: false },
+  { id: 'node_modules', path: 'node_modules', enabled: true, recursive: true },
 ];

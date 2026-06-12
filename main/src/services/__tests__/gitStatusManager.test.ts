@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { GitStatusManager } from '../gitStatusManager';
 import { execSync } from '../../utils/commandExecutor';
-import { existsSync } from 'fs';
 import { fastCheckWorkingDirectory, fastGetAheadBehind, fastGetDiffStats } from '../gitPlumbingCommands';
 import type { SessionManager } from '../sessionManager';
 import type { WorktreeManager } from '../worktreeManager';
@@ -56,7 +55,7 @@ const mockProject = {
 const mockProjectContext = {
   project: mockProject,
   pathResolver: {},
-  commandRunner: { execAsync: vi.fn() },
+  commandRunner: { execAsync: vi.fn(), exec: vi.fn(), wslContext: null },
 };
 
 const cleanIndexStatus: GitIndexStatus = {
@@ -105,9 +104,6 @@ describe('GitStatusManager', () => {
       mockLogger
     );
 
-    // Default mocks: no rebase in progress
-    (existsSync as Mock).mockReturnValue(false);
-
     // Default: no uncommitted changes, no ahead/behind
     (fastCheckWorkingDirectory as Mock).mockReturnValue(cleanIndexStatus);
     (fastGetAheadBehind as Mock).mockReturnValue({ ahead: 0, behind: 0 });
@@ -115,6 +111,9 @@ describe('GitStatusManager', () => {
 
     // Default execSync returns empty buffer
     (execSync as Mock).mockReturnValue(Buffer.from(''));
+
+    // Default commandRunner.exec returns empty string
+    (mockProjectContext.commandRunner.exec as Mock).mockReturnValue('');
   });
 
   describe('fetchGitStatus via getGitStatus (cache miss scenarios)', () => {
@@ -154,14 +153,14 @@ describe('GitStatusManager', () => {
     it('returns ahead state when commits ahead of main', async () => {
       (fastCheckWorkingDirectory as Mock).mockReturnValue(cleanIndexStatus);
       (fastGetAheadBehind as Mock).mockReturnValue({ ahead: 3, behind: 0 });
-      (execSync as Mock).mockImplementation((cmd: string) => {
-        if ((cmd as string).includes('diff --shortstat')) {
-          return Buffer.from(' 5 files changed, 20 insertions(+), 10 deletions(-)');
+      (mockProjectContext.commandRunner.exec as Mock).mockImplementation((cmd: string) => {
+        if (cmd.includes('diff --shortstat')) {
+          return ' 5 files changed, 20 insertions(+), 10 deletions(-)';
         }
-        if ((cmd as string).includes('rev-list --count')) {
-          return Buffer.from('3');
+        if (cmd.includes('rev-list --count')) {
+          return '3';
         }
-        return Buffer.from('');
+        return '';
       });
 
       const status = await (gitStatusManager as unknown as GitStatusManagerPrivates).fetchGitStatus('test-session');
@@ -189,14 +188,14 @@ describe('GitStatusManager', () => {
     it('returns diverged state when both ahead and behind', async () => {
       (fastCheckWorkingDirectory as Mock).mockReturnValue(cleanIndexStatus);
       (fastGetAheadBehind as Mock).mockReturnValue({ ahead: 2, behind: 3 });
-      (execSync as Mock).mockImplementation((cmd: string) => {
-        if ((cmd as string).includes('diff --shortstat')) {
-          return Buffer.from(' 4 files changed, 15 insertions(+), 8 deletions(-)');
+      (mockProjectContext.commandRunner.exec as Mock).mockImplementation((cmd: string) => {
+        if (cmd.includes('diff --shortstat')) {
+          return ' 4 files changed, 15 insertions(+), 8 deletions(-)';
         }
-        if ((cmd as string).includes('rev-list --count')) {
-          return Buffer.from('2');
+        if (cmd.includes('rev-list --count')) {
+          return '2';
         }
-        return Buffer.from('');
+        return '';
       });
 
       const status = await (gitStatusManager as unknown as GitStatusManagerPrivates).fetchGitStatus('test-session');
@@ -252,14 +251,14 @@ describe('GitStatusManager', () => {
       });
       (fastGetDiffStats as Mock).mockReturnValue({ additions: 5, deletions: 2, filesChanged: 2 });
       (fastGetAheadBehind as Mock).mockReturnValue({ ahead: 2, behind: 0 });
-      (execSync as Mock).mockImplementation((cmd: string) => {
-        if ((cmd as string).includes('diff --shortstat')) {
-          return Buffer.from(' 3 files changed, 10 insertions(+), 5 deletions(-)');
+      (mockProjectContext.commandRunner.exec as Mock).mockImplementation((cmd: string) => {
+        if (cmd.includes('diff --shortstat')) {
+          return ' 3 files changed, 10 insertions(+), 5 deletions(-)';
         }
-        if ((cmd as string).includes('rev-list --count')) {
-          return Buffer.from('2');
+        if (cmd.includes('rev-list --count')) {
+          return '2';
         }
-        return Buffer.from('');
+        return '';
       });
 
       const status = await (gitStatusManager as unknown as GitStatusManagerPrivates).fetchGitStatus('test-session');

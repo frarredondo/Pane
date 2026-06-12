@@ -1,7 +1,4 @@
 import { EventEmitter } from 'events';
-import { execSync } from '../utils/commandExecutor';
-import { existsSync } from 'fs';
-import { join } from 'path';
 import type { Logger } from '../utils/logger';
 import type { GitStatus } from '../types/session';
 import type { SessionManager } from './sessionManager';
@@ -258,7 +255,7 @@ export class GitStatusManager extends EventEmitter {
               const ctx = this.sessionManager.getProjectContext(session.id);
               if (ctx) {
                 const comparisonBranch = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
-                const { ahead, behind } = fastGetAheadBehind(session.worktreePath, comparisonBranch);
+                const { ahead, behind } = fastGetAheadBehind(session.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
                 
                 const updatedStatus = { ...cached.status };
                 updatedStatus.ahead = ahead;
@@ -321,17 +318,17 @@ export class GitStatusManager extends EventEmitter {
         // hasUncommittedChanges might be true if there were conflicts
         // We'll do a quick check for uncommitted changes
         try {
-          const quickStatus = fastCheckWorkingDirectory(session.worktreePath);
+          const quickStatus = fastCheckWorkingDirectory(session.worktreePath, ctx.commandRunner.wslContext);
           updatedStatus.hasUncommittedChanges = quickStatus.hasModified || quickStatus.hasStaged;
           updatedStatus.hasUntrackedFiles = quickStatus.hasUntracked;
           // Update state based on conflicts
           if (quickStatus.hasConflicts) {
             updatedStatus.state = 'conflict';
           }
-          
+
           if (updatedStatus.hasUncommittedChanges) {
             // Get updated diff stats
-            const quickStats = fastGetDiffStats(session.worktreePath);
+            const quickStats = fastGetDiffStats(session.worktreePath, ctx.commandRunner.wslContext);
             updatedStatus.additions = quickStats.additions;
             updatedStatus.deletions = quickStats.deletions;
             updatedStatus.filesChanged = quickStats.filesChanged;
@@ -677,27 +674,28 @@ export class GitStatusManager extends EventEmitter {
     if (!cached) return true;
     
     try {
+      const ctx = this.sessionManager.getProjectContext(sessionId);
+
       // Quick check using plumbing commands
-      const quickStatus = fastCheckWorkingDirectory(worktreePath);
-      
+      const quickStatus = fastCheckWorkingDirectory(worktreePath, ctx?.commandRunner.wslContext);
+
       // Compare with cached status
       const cachedHasChanges = cached.status.hasUncommittedChanges || cached.status.hasUntrackedFiles;
       const currentHasChanges = quickStatus.hasModified || quickStatus.hasStaged || quickStatus.hasUntracked;
-      
+
       // If the basic state differs, we need to refresh
       if (cachedHasChanges !== currentHasChanges) {
         return true;
       }
-      
+
       // If both have no changes, check if ahead/behind changed
       if (!currentHasChanges) {
-        const ctx = this.sessionManager.getProjectContext(sessionId);
         if (ctx) {
           const session = await this.sessionManager.getSession(sessionId);
           const comparisonBranch = session
             ? await this.worktreeManager.getSessionComparisonBranch(session, ctx)
             : await this.worktreeManager.getProjectMainBranch(ctx.project.path, ctx.commandRunner);
-          const { ahead, behind } = fastGetAheadBehind(worktreePath, comparisonBranch);
+          const { ahead, behind } = fastGetAheadBehind(worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
 
           if ((cached.status.ahead || 0) !== ahead || (cached.status.behind || 0) !== behind) {
             return true;
@@ -741,7 +739,7 @@ export class GitStatusManager extends EventEmitter {
       }
 
       // Use fast plumbing commands for initial checks
-      const quickStatus = fastCheckWorkingDirectory(session.worktreePath);
+      const quickStatus = fastCheckWorkingDirectory(session.worktreePath, ctx.commandRunner.wslContext);
       const hasUncommittedChanges = quickStatus.hasModified || quickStatus.hasStaged;
       const hasUntrackedFiles = quickStatus.hasUntracked;
       const hasMergeConflicts = quickStatus.hasConflicts;
@@ -750,7 +748,7 @@ export class GitStatusManager extends EventEmitter {
       let uncommittedDiff = { stats: { filesChanged: 0, additions: 0, deletions: 0 } };
       if (hasUncommittedChanges) {
         // Use fast diff stats instead of full diff capture when possible
-        const quickStats = fastGetDiffStats(session.worktreePath);
+        const quickStats = fastGetDiffStats(session.worktreePath, ctx.commandRunner.wslContext);
         uncommittedDiff = {
           stats: {
             filesChanged: quickStats.filesChanged,
@@ -762,7 +760,7 @@ export class GitStatusManager extends EventEmitter {
 
       // Get ahead/behind status using fast plumbing command
       const comparisonBranch = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
-      const { ahead, behind } = fastGetAheadBehind(session.worktreePath, comparisonBranch);
+      const { ahead, behind } = fastGetAheadBehind(session.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
 
       // Get total additions/deletions for all commits in the branch (compared to comparison branch)
       let totalCommitAdditions = 0;
@@ -771,7 +769,7 @@ export class GitStatusManager extends EventEmitter {
       if (ahead > 0) {
         // Use git diff --shortstat for commit statistics
         try {
-          const statLine = execSync(`git diff --shortstat ${comparisonBranch}...HEAD`, { cwd: session.worktreePath }).toString().trim();
+          const statLine = ctx.commandRunner.exec(`git diff --shortstat ${comparisonBranch}...HEAD`, session.worktreePath, { silent: true }).trim();
           if (statLine) {
             const filesMatch = statLine.match(/(\d+) files? changed/);
             const additionsMatch = statLine.match(/(\d+) insertions?\(\+\)/);
@@ -785,14 +783,6 @@ export class GitStatusManager extends EventEmitter {
           // Keep defaults of 0 if command fails
         }
       }
-
-      // Check for rebase in progress
-      let isRebasing = false;
-      
-      // Check for rebase in progress using filesystem APIs
-      const rebaseMergeExists = existsSync(join(session.worktreePath, '.git', 'rebase-merge'));
-      const rebaseApplyExists = existsSync(join(session.worktreePath, '.git', 'rebase-apply'));
-      isRebasing = rebaseMergeExists || rebaseApplyExists;
 
       // Determine the overall state and secondary states
       let state: GitStatus['state'] = 'clean';
@@ -827,7 +817,7 @@ export class GitStatusManager extends EventEmitter {
       // Get total number of commits in the branch
       let totalCommits = ahead;
       try {
-        const countStr = execSync(`git rev-list --count ${comparisonBranch}..HEAD`, { cwd: session.worktreePath }).toString().trim();
+        const countStr = ctx.commandRunner.exec(`git rev-list --count ${comparisonBranch}..HEAD`, session.worktreePath, { silent: true }).trim();
         totalCommits = parseInt(countStr, 10) || ahead;
       } catch {
         // Keep default of ahead if command fails

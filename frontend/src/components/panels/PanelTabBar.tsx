@@ -40,7 +40,7 @@ Each worktree needs its own dev server on a unique port.
 
 Create scripts/pane-run-script.js (Node.js, cross-platform) that:
 1. Auto-detects git worktrees vs main repo
-2. Assigns unique ports using hash(cwd) % 1000 + base_port, with separate ranges for main vs worktrees
+2. Assigns ports from the PANE_PORT environment variable that Pane injects into every pane terminal: each pane gets its own block of 10 ports starting at PANE_PORT, so PANE_PORT, PANE_PORT+1, ... PANE_PORT+9 are safe to use. Falls back to hash(cwd) % 1000 + base_port (separate ranges for main vs worktrees) only if PANE_PORT is unset
 ${depsStep}
 4. Auto-detects if build is stale (src mtime > dist mtime)
 5. Clean Ctrl+C termination (taskkill on Windows, SIGTERM on Unix)

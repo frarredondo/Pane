@@ -14,7 +14,7 @@ import { panelManager } from './panelManager';
 import { PathResolver } from '../utils/pathResolver';
 import type { DatabaseService } from '../database/database';
 import type { Project } from '../database/models';
-import { worktreeFileSyncService } from './worktreeFileSyncService';
+import { worktreeFileSyncService, type WorktreeFileSyncFailure } from './worktreeFileSyncService';
 import { terminalPanelManager } from './terminalPanelManager';
 import { detectProjectConfig } from './projectConfigDetector';
 import { emitFolderCreatedEvent } from './folderEvents';
@@ -44,6 +44,21 @@ interface CreateSessionJob {
 interface ContinueSessionJob {
   sessionId: string;
   prompt: string;
+}
+
+/**
+ * Builds a single shell-safe `echo` line summarizing worktree file sync
+ * failures, or null when nothing failed. Kept to one line even when many
+ * entries fail.
+ */
+function buildFileSyncWarningCommand(failures: WorktreeFileSyncFailure[]): string | null {
+  if (failures.length === 0) return null;
+  const sanitize = (text: string): string =>
+    text.split('\n')[0].replace(/["`$\\]/g, '').trim();
+  const first = failures[0];
+  const reason = sanitize(first.reason).slice(0, 120);
+  const rest = failures.length > 1 ? `; ${failures.length - 1} more failed` : '';
+  return `echo "[Pane] file sync: failed to copy ${sanitize(first.path)} (${reason})${rest}"`;
 }
 
 interface SendInputJob {
@@ -272,8 +287,14 @@ export class TaskQueue {
           ctx.commandRunner,
           ctx.pathResolver.environment,
           getRuntimeConfigManager().getWorktreeFileSyncEntries()
-        ).then(async (installCommand) => {
-          if (!installCommand) return;
+        ).then(async (syncResult) => {
+          const installCommand = syncResult.installCommand;
+          const warningCommand = buildFileSyncWarningCommand(syncResult.failures);
+          if (!installCommand && !warningCommand) return;
+          const commandsToWrite = [warningCommand, installCommand]
+            .filter((c): c is string => !!c)
+            .map(c => c + '\r')
+            .join('');
           // Find the default terminal panel — may not exist yet if sync finished before
           // the session-created event handler in events.ts created it. Retry briefly.
           let terminalPanel = panelManager.getPanelsForSession(capturedSessionId).find(p => p.type === 'terminal');
@@ -285,15 +306,15 @@ export class TaskQueue {
               if (terminalPanel) break;
             }
             if (!terminalPanel) {
-              console.warn(`[TaskQueue] No terminal panel found for session ${capturedSessionId}, skipping install command`);
+              console.warn(`[TaskQueue] No terminal panel found for session ${capturedSessionId}, skipping sync warning/install command`);
               return;
             }
           }
 
           if (terminalPanelManager.isTerminalInitialized(terminalPanel.id)) {
             // Terminal already running — write directly
-            terminalPanelManager.writeToTerminal(terminalPanel.id, installCommand + '\r');
-            console.log(`[TaskQueue] Wrote install command to terminal: ${installCommand}`);
+            terminalPanelManager.writeToTerminal(terminalPanel.id, commandsToWrite);
+            console.log(`[TaskQueue] Wrote to terminal: ${[warningCommand, installCommand].filter(Boolean).join(' | ')}`);
           } else {
             // Terminal not yet initialized — eagerly init it, then write the command
             // We don't store as initialCommand to avoid polluting panel state
@@ -301,8 +322,8 @@ export class TaskQueue {
             await terminalPanelManager.initializeTerminal(terminalPanel, worktreePath, wslContext);
             // Small delay for shell prompt to appear before writing
             await new Promise(resolve => setTimeout(resolve, 1000));
-            terminalPanelManager.writeToTerminal(terminalPanel.id, installCommand + '\r');
-            console.log(`[TaskQueue] Eagerly initialized terminal and wrote install command: ${installCommand}`);
+            terminalPanelManager.writeToTerminal(terminalPanel.id, commandsToWrite);
+            console.log(`[TaskQueue] Eagerly initialized terminal and wrote: ${[warningCommand, installCommand].filter(Boolean).join(' | ')}`);
           }
         }).catch((err) => {
           console.error('[TaskQueue] Worktree file sync failed (non-fatal):', err);

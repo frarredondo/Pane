@@ -147,7 +147,7 @@ export function setupEventListeners(services: AppServices): void {
   });
 
   // Listen to claudeCodeManager events
-  claudeCodeManager.on('output', async (output: {
+  claudeCodeManager.on('output', (output: {
     panelId: string;
     sessionId: string;
     type: 'json' | 'stdout' | 'stderr';
@@ -173,19 +173,6 @@ export function setupEventListeners(services: AppServices): void {
         data: output.data,
         timestamp: output.timestamp
       });
-    }
-
-    // In interactive Claude mode, the process stays alive between turns. Flip
-    // session status to 'waiting' when Claude emits a prompt so the UI
-    // re-enables git actions (SessionView gates on status === 'running').
-    if (
-      output.type === 'json' &&
-      typeof output.data === 'object' &&
-      output.data &&
-      'type' in output.data &&
-      (output.data as { type?: string }).type === 'prompt'
-    ) {
-      await sessionManager.updateSession(output.sessionId, { status: 'waiting' });
     }
 
     // Send real-time updates to renderer
