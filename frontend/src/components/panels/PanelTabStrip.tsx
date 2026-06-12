@@ -35,6 +35,12 @@ export interface PanelTabStripProps {
   isFocused?: boolean;
   /** Show shortcut hints (only for primary group in PanelTabBar). */
   showShortcutHints?: boolean;
+  /**
+   * Visual variant: 'bar' is the full-size strip used by the primary tab bar;
+   * 'pill' is the compact treatment used by the floating island on split
+   * groups (roughly half height, smaller type, shrink-wrapped tabs).
+   */
+  variant?: 'bar' | 'pill';
 
   // --- Drag-and-drop ---
   /** Called when a drag starts on a tab. */
@@ -53,26 +59,26 @@ export interface PanelTabStripProps {
 // Icon helper (existing icons from PanelTabBar)
 // ---------------------------------------------------------------------------
 
-function getPanelIcon(type: ToolPanelType, panel?: ToolPanel): React.ReactNode {
+function getPanelIcon(type: ToolPanelType, panel?: ToolPanel, iconClass = 'w-4 h-4'): React.ReactNode {
   switch (type) {
     case 'terminal': {
       if (panel?.title) {
         const lowerTitle = panel.title.toLowerCase();
-        if (lowerTitle.includes('claude')) return <ClaudeIcon className="w-4 h-4" />;
-        if (lowerTitle.includes('codex')) return <OpenAIIcon className="w-4 h-4" />;
+        if (lowerTitle.includes('claude')) return <ClaudeIcon className={iconClass} />;
+        if (lowerTitle.includes('codex')) return <OpenAIIcon className={iconClass} />;
       }
-      return <Terminal className="w-4 h-4" />;
+      return <Terminal className={iconClass} />;
     }
     case 'diff':
-      return <GitBranch className="w-4 h-4" />;
+      return <GitBranch className={iconClass} />;
     case 'explorer':
-      return <FolderTree className="w-4 h-4" />;
+      return <FolderTree className={iconClass} />;
     case 'logs':
-      return <FileCode className="w-4 h-4" />;
+      return <FileCode className={iconClass} />;
     case 'dashboard':
-      return <BarChart3 className="w-4 h-4" />;
+      return <BarChart3 className={iconClass} />;
     case 'browser':
-      return <Globe className="w-4 h-4" />;
+      return <Globe className={iconClass} />;
     default:
       return null;
   }
@@ -90,12 +96,14 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   isPrimary = false,
   isFocused = false,
   showShortcutHints = false,
+  variant = 'bar',
   onDragStart,
   onDragEnd,
   onStripDrop,
   isTabDragging = false,
   draggedPanelId = null,
 }) => {
+  const pill = variant === 'pill';
   const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -225,7 +233,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
 
   return (
     <div
-      className="flex items-center overflow-x-auto scrollbar-none min-w-0 flex-1"
+      className={cn(
+        "flex items-center overflow-x-auto scrollbar-none min-w-0",
+        pill ? "rounded-full" : "flex-1",
+      )}
       onDragLeave={handleStripDragLeave}
     >
       {panels.map((panel, index) => {
@@ -241,12 +252,22 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         const tab = (
           <div
             className={cn(
-              "group relative inline-flex items-center h-[var(--panel-tab-height)] justify-center whitespace-nowrap cursor-pointer select-none",
-              isCompactTab
-                ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-6")
-                : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-7"),
+              "group relative inline-flex items-center justify-center whitespace-nowrap cursor-pointer select-none",
+              pill
+                ? cn(
+                    "h-5 rounded-full text-[10px]",
+                    isPermanent ? "px-2" : "px-2 pr-5",
+                  )
+                : cn(
+                    "h-[var(--panel-tab-height)]",
+                    isCompactTab
+                      ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-6")
+                      : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-7"),
+                  ),
               isActive
-                ? "text-text-primary"
+                ? pill
+                  ? "text-text-primary bg-[color-mix(in_srgb,var(--color-surface-hover)_80%,transparent)]"
+                  : "text-text-primary"
                 : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover",
               isDragged && "opacity-50",
             )}
@@ -289,37 +310,47 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onKeyDown={handleRenameKeyDown}
                 onBlur={handleRenameSubmit}
-                className="px-1 text-sm bg-bg-primary border border-border-primary rounded outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus text-text-primary"
+                className={cn(
+                  "px-1 bg-bg-primary border border-border-primary rounded outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus text-text-primary",
+                  pill ? "text-[10px]" : "text-sm",
+                )}
                 onClick={(e) => e.stopPropagation()}
                 style={{ width: `${Math.max(50, editingTitle.length * 8)}px` }}
               />
             ) : (
-              <span className="inline-flex items-center justify-center gap-2 min-w-0">
+              <span className={cn(
+                "inline-flex items-center justify-center min-w-0",
+                pill ? "gap-1" : "gap-2",
+              )}>
                 {panel.type === 'terminal' && (
                   <span className={cn(
-                    "w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all",
+                    "rounded-full flex-shrink-0 transition-all",
+                    pill ? "w-1 h-1" : "w-1.5 h-1.5",
                     getPanelActivityStatus(panel.id) === 'active'
                       ? 'bg-status-info opacity-100 duration-150'
                       : 'bg-text-muted/20 opacity-40 duration-[3s]'
                   )} />
                 )}
-                {getPanelIcon(panel.type, panel)}
+                {getPanelIcon(panel.type, panel, pill ? 'w-3 h-3' : 'w-4 h-4')}
                 <span>{displayTitle}</span>
               </span>
             )}
 
             {!isPermanent && !isEditing && (
               <button
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                className={cn(
+                  "absolute top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  pill ? "right-1" : "right-1.5",
+                )}
                 onClick={(e) => handlePanelClose(e, panel)}
               >
-                <X className="w-2.5 h-2.5" />
+                <X className={pill ? "w-2 h-2" : "w-2.5 h-2.5"} />
               </button>
             )}
           </div>
         );
 
-        const showDividerAfter = panel.type === 'browser';
+        const showDividerAfter = !pill && panel.type === 'browser';
         const divider = showDividerAfter ? (
           <div className="h-4 w-px bg-border-primary mx-1 flex-shrink-0" aria-hidden="true" />
         ) : null;
