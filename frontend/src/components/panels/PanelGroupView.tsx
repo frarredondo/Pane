@@ -157,13 +157,13 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
     return group.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
   }, [group.panelIds, groupPanels]);
 
-  // The primary group's permanent tabs (Diff/Explorer/Browser) stay up in
-  // PanelTabBar; its strip carries only the working tabs. Secondary groups
-  // show their full membership (a permanent tab dragged into one lives there).
-  const stripPanels = useMemo(() => {
-    if (!isPrimary) return orderedPanels;
-    return orderedPanels.filter(p => p.metadata?.permanent !== true);
-  }, [isPrimary, orderedPanels]);
+  // Permanent tool tabs (Diff/Explorer/Browser) are hoisted to PanelTabBar
+  // from EVERY group while split, so strips carry only working tabs. Their
+  // content still renders inside whichever group owns them.
+  const stripPanels = useMemo(
+    () => orderedPanels.filter(p => p.metadata?.permanent !== true),
+    [orderedPanels],
+  );
 
   // Strip drop indexes are relative to the displayed subset; translate to the
   // group's full panel order before moving.

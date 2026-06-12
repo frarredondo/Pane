@@ -36,6 +36,7 @@ import {
   findGroup,
   primaryGroup,
   allGroups,
+  allPanelIds,
   findGroupInDirection,
   updateSizes,
   findGroupContainingPanel,
@@ -465,13 +466,18 @@ export const SessionView = memo(() => {
     return primaryGroupNode.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
   }, [primaryGroupNode, tabBarPanels]);
   const isSplitLayout = sessionLayout?.root.type === 'split';
-  /** What the top bar shows: everything when unsplit; only the primary
-      group's permanent tabs once split (working tabs live in group strips). */
+  /** What the top bar shows: everything when unsplit; once split, the
+      permanent tool tabs hoisted from EVERY group (in reading order), so the
+      defaults stay pinned to the top bar no matter which group owns them.
+      Clicking one routes to its owning group via handlePanelSelect. */
   const topBarPanels = useMemo(() => {
     if (!primaryGroupPanels) return undefined;
-    if (!isSplitLayout) return primaryGroupPanels;
-    return primaryGroupPanels.filter(p => p.metadata?.permanent === true);
-  }, [primaryGroupPanels, isSplitLayout]);
+    if (!isSplitLayout || !sessionLayout) return primaryGroupPanels;
+    const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
+    return allPanelIds(sessionLayout.root)
+      .map(id => panelMap.get(id))
+      .filter((p): p is ToolPanel => !!p && p.metadata?.permanent === true);
+  }, [primaryGroupPanels, isSplitLayout, sessionLayout, tabBarPanels]);
 
   const getPanelTabPresentation = useCallback<PanelTabPresentationResolver>((panel) => {
     if (panel.type !== 'diff') return undefined;
@@ -1113,10 +1119,12 @@ export const SessionView = memo(() => {
     const sid = activeSession.id;
     const currentLayout = usePanelStore.getState().layouts[sid];
     if (!currentLayout) return;
-    const fullIndex = isSplitLayout && topBarPanels
-      ? subsetInsertIndex(primaryGroupNode.panelIds, topBarPanels.map(p => p.id), insertIndex)
-      : insertIndex;
     const merged = mergeAllGroups(currentLayout.root);
+    // The top bar shows the hoisted permanent subset while split; translate
+    // its drop index against the merged (post-un-split) panel order.
+    const fullIndex = isSplitLayout && topBarPanels
+      ? subsetInsertIndex(merged.panelIds, topBarPanels.map(p => p.id), insertIndex)
+      : insertIndex;
     const newRoot = movePanelInLayout(merged, panelId, { groupId: merged.id, index: fullIndex });
     applyLayout(sid, {
       ...currentLayout,
@@ -1722,7 +1730,7 @@ export const SessionView = memo(() => {
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
           primaryGroupPanels={topBarPanels}
-          primaryGroupActivePanelId={primaryGroupNode?.activePanelId}
+          primaryGroupActivePanelId={isSplitLayout ? (currentActivePanel?.id ?? null) : primaryGroupNode?.activePanelId}
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
           tabsInGroups={isSplitLayout}
           onDragStart={handleDragStart}
