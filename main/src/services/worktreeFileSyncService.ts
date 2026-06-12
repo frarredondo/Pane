@@ -5,6 +5,21 @@ import type { ProjectEnvironment } from '../utils/pathResolver';
 import { posixJoin } from '../utils/wslUtils';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 
+export interface WorktreeFileSyncFailure {
+  path: string;
+  reason: string;
+}
+
+export interface WorktreeFileSyncResult {
+  installCommand: string | null;
+  failures: WorktreeFileSyncFailure[];
+}
+
+// Recursive node_modules copies on large repos can take far longer than the
+// 60s default exec timeout; give copy commands a generous ceiling instead of
+// killing them midway and leaving a partial node_modules behind.
+const COPY_TIMEOUT_MS = 600_000;
+
 /**
  * Joins path segments correctly for the target environment.
  * On WSL, Node's path.join uses backslashes (Windows host), but commands
@@ -261,7 +276,7 @@ async function execCopyCommand(
   environment: ProjectEnvironment,
 ): Promise<void> {
   try {
-    await commandRunner.execAsync(cmd, cwd);
+    await commandRunner.execAsync(cmd, cwd, { timeout: COPY_TIMEOUT_MS });
   } catch (err: unknown) {
     if (environment === 'windows' && err !== null && typeof err === 'object' && 'code' in err) {
       const code = (err as { code: unknown }).code;
@@ -302,9 +317,14 @@ async function copyRootEntry(
   await execCopyCommand(cmd, mainRepoPath, commandRunner, environment);
 }
 
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Finds all recursive matches of `entry.path` in the main repo and copies any
- * that are missing from the worktree.
+ * that are missing from the worktree. Returns the failures encountered so the
+ * caller can surface them; individual failures never abort remaining matches.
  */
 async function copyRecursiveMatches(
   mainRepoPath: string,
@@ -312,7 +332,7 @@ async function copyRecursiveMatches(
   entry: WorktreeFileSyncEntry,
   commandRunner: CommandRunner,
   environment: ProjectEnvironment,
-): Promise<void> {
+): Promise<WorktreeFileSyncFailure[]> {
   const matches = await findRecursiveMatches(
     mainRepoPath,
     entry.path,
@@ -320,9 +340,10 @@ async function copyRecursiveMatches(
     environment,
   );
 
+  const failures: WorktreeFileSyncFailure[] = [];
   for (const match of matches) {
+    const relativePath = envRelative(environment, mainRepoPath, match.path);
     try {
-      const relativePath = envRelative(environment, mainRepoPath, match.path);
       const destPath = envJoin(environment, worktreePath, relativePath);
 
       const destExists = await existsAt(destPath, commandRunner, environment, worktreePath);
@@ -333,9 +354,11 @@ async function copyRecursiveMatches(
       await execCopyCommand(cmd, mainRepoPath, commandRunner, environment);
     } catch (err) {
       console.error(`[WorktreeFileSync] Failed to copy match "${match.path}":`, err);
-      // Continue with remaining matches — best effort
+      failures.push({ path: relativePath, reason: describeError(err) });
+      // Continue with remaining matches, best effort
     }
   }
+  return failures;
 }
 
 /**
@@ -404,17 +427,27 @@ export function detectInstallCommandSync(cwd: string): string | null {
   return null;
 }
 
+/**
+ * Heavyweight entries (node_modules) can take tens of seconds to copy, so
+ * they must never delay small/critical entries like .env files.
+ */
+function isHeavyweightEntry(entry: WorktreeFileSyncEntry): boolean {
+  const name = entry.path.trim();
+  return name === 'node_modules' || name.endsWith('/node_modules');
+}
+
 export const worktreeFileSyncService = {
   /**
    * Copies all enabled sync entries from `mainRepoPath` into `worktreePath`,
    * then detects the package manager and returns its install command.
    *
-   * This method is best-effort: individual copy failures are caught and logged
-   * without aborting the rest of the sync. The method itself never throws — it
-   * returns `null` on any top-level failure.
+   * Small/critical entries (.env*, config dirs) are always copied before
+   * heavyweight directories like node_modules, regardless of the order in the
+   * persisted config, so credentials land quickly even on large repos.
    *
-   * @returns The detected install command (e.g. `"pnpm install"`) or `null`
-   *          if no lock file was found or the sync itself failed.
+   * This method is best-effort: individual copy failures are caught, logged,
+   * and reported in the returned `failures` array without aborting the rest
+   * of the sync. The method itself never throws.
    */
   async syncWorktree(
     mainRepoPath: string,
@@ -422,20 +455,26 @@ export const worktreeFileSyncService = {
     commandRunner: CommandRunner,
     environment: ProjectEnvironment,
     entries: WorktreeFileSyncEntry[],
-  ): Promise<string | null> {
+  ): Promise<WorktreeFileSyncResult> {
+    const failures: WorktreeFileSyncFailure[] = [];
     try {
       const enabledEntries = entries.filter((e) => e.enabled && e.path.trim().length > 0);
+      const orderedEntries = [
+        ...enabledEntries.filter((e) => !isHeavyweightEntry(e)),
+        ...enabledEntries.filter(isHeavyweightEntry),
+      ];
 
-      for (const entry of enabledEntries) {
+      for (const entry of orderedEntries) {
         try {
           if (entry.recursive) {
-            await copyRecursiveMatches(
+            const matchFailures = await copyRecursiveMatches(
               mainRepoPath,
               worktreePath,
               entry,
               commandRunner,
               environment,
             );
+            failures.push(...matchFailures);
           } else {
             await copyRootEntry(
               mainRepoPath,
@@ -447,14 +486,17 @@ export const worktreeFileSyncService = {
           }
         } catch (err) {
           console.error(`[WorktreeFileSync] Failed to sync entry "${entry.path}":`, err);
-          // Continue with next entry — best effort
+          failures.push({ path: entry.path, reason: describeError(err) });
+          // Continue with next entry, best effort
         }
       }
 
-      return await detectInstallCommand(mainRepoPath, commandRunner, environment);
+      const installCommand = await detectInstallCommand(mainRepoPath, commandRunner, environment);
+      return { installCommand, failures };
     } catch (err) {
       console.error('[WorktreeFileSync] syncWorktree failed:', err);
-      return null;
+      failures.push({ path: 'worktree files', reason: describeError(err) });
+      return { installCommand: null, failures };
     }
   },
 };

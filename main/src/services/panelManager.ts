@@ -430,8 +430,6 @@ export class PanelManager {
     
     // Also emit to frontend via IPC
     this.sendRendererEvent('panel:event', event);
-    
-    console.log(`[PanelManager] Emitted event ${eventType} from panel ${panelId}`);
   }
   
   private generatePanelTitle(sessionId: string, type: string): string {

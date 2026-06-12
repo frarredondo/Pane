@@ -1,6 +1,7 @@
 import { IpcMain, shell } from 'electron';
 import { execFile } from 'child_process';
 import type { AppServices } from './types';
+import { revealInFileManager } from '../utils/revealInFileManager';
 
 export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): void {
   const { app } = services;
@@ -40,28 +41,32 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
     }
   });
 
-  ipcMain.handle('app:showItemInFolder', async (_event, filePath: string) => {
+  ipcMain.handle('app:showItemInFolder', async (_event, filePath: string, sessionId?: string) => {
     try {
+      let targetPath = filePath;
+
+      // When the caller knows the session, convert stored paths (e.g. in-distro
+      // POSIX paths for WSL projects) to ones this process's fs can reach.
+      if (sessionId) {
+        try {
+          const ctx = services.sessionManager.getProjectContext(sessionId);
+          if (ctx) {
+            targetPath = ctx.pathResolver.toFileSystem(filePath);
+          }
+        } catch {
+          // Fall back to the raw path
+        }
+      }
+
       // Validate path exists before showing
       const fs = await import('fs/promises');
-      const exists = await fs.access(filePath).then(() => true).catch(() => false);
+      const exists = await fs.access(targetPath).then(() => true).catch(() => false);
 
       if (!exists) {
         return { success: false, error: 'File does not exist' };
       }
 
-      if (process.platform === 'darwin') {
-        // On macOS, shell.showItemInFolder can fail silently.
-        // Use `open -R` which reveals the file in Finder reliably.
-        await new Promise<void>((resolve, reject) => {
-          execFile('open', ['-R', filePath], (error) => {
-            if (error) reject(error);
-            else resolve();
-          });
-        });
-      } else {
-        shell.showItemInFolder(filePath);
-      }
+      await revealInFileManager(targetPath);
       return { success: true };
     } catch (error) {
       console.error('Failed to show item in folder:', error);

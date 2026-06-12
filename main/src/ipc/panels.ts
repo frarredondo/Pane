@@ -678,9 +678,10 @@ export function registerPanelHandlers(
     }
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // Backend size validation (10MB limit)
-    if (buffer.length > 10 * 1024 * 1024) {
-      throw new Error('Image too large');
+    // Backend size validation: same 50MB cap as terminal:paste-file, since this
+    // handler also just saves the bytes to disk and returns the resolved path
+    if (buffer.length > 50 * 1024 * 1024) {
+      throw new Error('Image too large (max 50 MB)');
     }
 
     const resolvedPath = await saveFileForSession(sessionId, 'images', filename, buffer);

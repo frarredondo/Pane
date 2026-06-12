@@ -30,25 +30,85 @@ interface WindowsBatchItem {
   MemoryMB: number;
 }
 
+export interface WslProcessSample {
+  sessionId: string;
+  pid: number;
+  name: string;
+  cpuTimeSeconds: number;
+  memoryMB: number;
+}
+
+/**
+ * Shell script run inside a WSL distro (one wsl.exe invocation per distro per
+ * poll). Scans /proc/<pid>/environ for processes carrying PANE_SESSION_ID
+ * (injected into every pane terminal and propagated via WSLENV) and emits one
+ * line per process: sessionId|pid|cpuSeconds|rssKB|comm
+ * Uses only POSIX sh + grep/tr/sed so it works on busybox-based distros too.
+ */
+const WSL_ENVIRON_SCAN_SCRIPT = [
+  'clk=$(getconf CLK_TCK 2>/dev/null); case "$clk" in ""|0|*[!0-9]*) clk=100;; esac',
+  'pg=$(getconf PAGESIZE 2>/dev/null); case "$pg" in ""|0|*[!0-9]*) pg=4096;; esac',
+  'for e in $(grep -slz PANE_SESSION_ID= /proc/[0-9]*/environ 2>/dev/null); do ' +
+    'p=${e#/proc/}; p=${p%/environ}; ' +
+    's=$({ tr "\\0" "\\n" < "$e" | sed -n "s/^PANE_SESSION_ID=//p" | head -n 1; } 2>/dev/null); ' +
+    '[ -n "$s" ] || continue; ' +
+    'st=$(cat "/proc/$p/stat" 2>/dev/null) || continue; ' +
+    '[ -n "$st" ] || continue; ' +
+    'c=${st#*(}; c=${c%%)*}; ' +
+    'rest=${st##*) }; ' +
+    'set -- $rest; ' +
+    '[ $# -ge 22 ] || continue; ' +
+    'cpu=$(( (${12} + ${13}) / clk )); ' +
+    'rss=$(( ${22} * (pg / 1024) )); ' +
+    'printf "%s|%s|%s|%s|%s\\n" "$s" "$p" "$cpu" "$rss" "$c"; ' +
+  'done',
+].join('; ');
+
+/**
+ * Parse the output of WSL_ENVIRON_SCAN_SCRIPT. Pure function, exported for tests.
+ * Lines are sessionId|pid|cpuSeconds|rssKB|comm; comm may itself contain pipes.
+ */
+export function parseWslEnvironScan(stdout: string): WslProcessSample[] {
+  const samples: WslProcessSample[] = [];
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split('|');
+    if (parts.length < 5) continue;
+    const sessionId = parts[0];
+    const pid = parseInt(parts[1], 10);
+    const cpuTimeSeconds = parseInt(parts[2], 10);
+    const rssKB = parseInt(parts[3], 10);
+    if (!sessionId || isNaN(pid) || isNaN(cpuTimeSeconds) || isNaN(rssKB)) continue;
+    const name = parts.slice(4).join('|').trim() || 'unknown';
+    samples.push({ sessionId, pid, name, cpuTimeSeconds, memoryMB: rssKB / 1024 });
+  }
+  return samples;
+}
+
 interface ResourceMonitorInitializationOptions {
   app?: App | null;
   getSessionById?: (sessionId: string) => { name?: string; initial_prompt?: string } | undefined;
+  getSessionWslDistro?: (sessionId: string) => string | null;
 }
 
 export class ResourceMonitorService extends EventEmitter {
   private app: App | null = null;
   private getSessionById: ((sessionId: string) => { name?: string; initial_prompt?: string } | undefined) | null = null;
+  private getSessionWslDistro: ((sessionId: string) => string | null) | null = null;
   private idleTimer: ReturnType<typeof setInterval> | null = null;
   private activeTimer: ReturnType<typeof setInterval> | null = null;
   private isActivePolling = false;
   private pollInProgress = false;
-  private previousCpuSamples = new Map<number, CpuSample>();
+  private previousCpuSamples = new Map<string, CpuSample>();
   private isHidden = false;
   private needsCpuWarmup = false;
+  private wslScanFailedDistros = new Set<string>();
 
   initialize(options: ResourceMonitorInitializationOptions = {}): void {
     this.app = options.app ?? null;
     this.getSessionById = options.getSessionById ?? null;
+    this.getSessionWslDistro = options.getSessionWslDistro ?? null;
   }
 
   private getElectronMetrics(): ElectronProcessInfo[] {
@@ -127,12 +187,14 @@ export class ResourceMonitorService extends EventEmitter {
   }
 
   /**
-   * Compute delta-based CPU percentage for a PID using cached previous samples.
+   * Compute delta-based CPU percentage for a process using cached previous samples.
+   * Keys are String(pid) for native processes and wsl:<distro>:<pid> for WSL
+   * processes so Linux pids cannot collide with Windows pids.
    * Returns 0 on first observation (no previous sample to compare against).
    */
-  private computeDeltaCpu(pid: number, currentCpuTimeSeconds: number, currentTimestamp: number): number {
-    const prev = this.previousCpuSamples.get(pid);
-    this.previousCpuSamples.set(pid, { cpuTimeSeconds: currentCpuTimeSeconds, timestamp: currentTimestamp });
+  private computeDeltaCpu(key: string, currentCpuTimeSeconds: number, currentTimestamp: number): number {
+    const prev = this.previousCpuSamples.get(key);
+    this.previousCpuSamples.set(key, { cpuTimeSeconds: currentCpuTimeSeconds, timestamp: currentTimestamp });
 
     if (!prev) return 0;
 
@@ -146,12 +208,12 @@ export class ResourceMonitorService extends EventEmitter {
   }
 
   /**
-   * Remove stale entries from the CPU sample cache for PIDs no longer being tracked.
+   * Remove stale entries from the CPU sample cache for keys no longer being tracked.
    */
-  private cleanupCpuSampleCache(activePids: Set<number>): void {
-    for (const pid of this.previousCpuSamples.keys()) {
-      if (!activePids.has(pid)) {
-        this.previousCpuSamples.delete(pid);
+  private cleanupCpuSampleCache(activeKeys: Set<string>): void {
+    for (const key of this.previousCpuSamples.keys()) {
+      if (!activeKeys.has(key)) {
+        this.previousCpuSamples.delete(key);
       }
     }
   }
@@ -234,10 +296,59 @@ export class ResourceMonitorService extends EventEmitter {
     return pids
       .map(pid => {
         const raw = rawStats.get(pid) || { name: 'unknown', cpuTimeSeconds: 0, memoryMB: 0 };
-        const cpuPercent = this.computeDeltaCpu(pid, raw.cpuTimeSeconds, now);
+        const cpuPercent = this.computeDeltaCpu(String(pid), raw.cpuTimeSeconds, now);
         return { pid, name: raw.name, cpuPercent, memoryMB: raw.memoryMB };
       })
       .filter(c => c.cpuPercent > 0 || c.memoryMB > 0.1);
+  }
+
+  /**
+   * On Windows hosts, sessions running inside WSL hide behind a single wsl.exe
+   * relay pid; the Windows process-tree walk cannot see into the distro. This
+   * runs one batched environ scan per distro that has live WSL sessions and
+   * groups the resulting samples by sessionId. Any failure (wsl.exe missing,
+   * distro stopped, parse error) is swallowed so native polling is unaffected.
+   */
+  private async getWslSamplesBySession(sessionIds: string[]): Promise<Map<string, { distro: string; sample: WslProcessSample }[]>> {
+    const result = new Map<string, { distro: string; sample: WslProcessSample }[]>();
+    if (os.platform() !== 'win32' || !this.getSessionWslDistro) return result;
+
+    const sessionDistro = new Map<string, string>();
+    for (const sessionId of sessionIds) {
+      try {
+        const distro = this.getSessionWslDistro(sessionId);
+        if (distro) sessionDistro.set(sessionId, distro);
+      } catch {
+        // Resolver failure: treat session as non-WSL
+      }
+    }
+    if (sessionDistro.size === 0) return result;
+
+    const distros = [...new Set(sessionDistro.values())];
+    await Promise.all(distros.map(async distro => {
+      let stdout: string;
+      try {
+        ({ stdout } = await execFileAsync(
+          'wsl.exe',
+          ['-d', distro, '--', 'sh', '-c', WSL_ENVIRON_SCAN_SCRIPT],
+          { encoding: 'utf8', timeout: 4000 }
+        ));
+        this.wslScanFailedDistros.delete(distro);
+      } catch (error) {
+        if (!this.wslScanFailedDistros.has(distro)) {
+          this.wslScanFailedDistros.add(distro);
+          console.warn(`[ResourceMonitor] WSL process scan failed for distro ${distro}, skipping:`, error instanceof Error ? error.message : error);
+        }
+        return;
+      }
+      for (const sample of parseWslEnvironScan(stdout)) {
+        if (sessionDistro.get(sample.sessionId) !== distro) continue;
+        const list = result.get(sample.sessionId) || [];
+        list.push({ distro, sample });
+        result.set(sample.sessionId, list);
+      }
+    }));
+    return result;
   }
 
   private async getSessionMetrics(): Promise<SessionResourceInfo[]> {
@@ -272,7 +383,10 @@ export class ResourceMonitorService extends EventEmitter {
     }
 
     const sessions: SessionResourceInfo[] = [];
-    const allTrackedPids = new Set<number>();
+    const allTrackedKeys = new Set<string>();
+
+    // WSL sessions on Windows: one batched in-distro scan per distro
+    const wslSamplesBySession = await this.getWslSamplesBySession([...sessionPids.keys()]);
 
     for (const [sessionId, ptyPids] of sessionPids) {
       const session = this.getSessionById?.(sessionId);
@@ -285,7 +399,7 @@ export class ResourceMonitorService extends EventEmitter {
       }
 
       // Track all PIDs for cache cleanup
-      for (const pid of allPids) allTrackedPids.add(pid);
+      for (const pid of allPids) allTrackedKeys.add(String(pid));
 
       let children: ChildProcessInfo[];
       if (os.platform() === 'win32') {
@@ -294,6 +408,19 @@ export class ResourceMonitorService extends EventEmitter {
       } else {
         const rawStats = await this.getUnixBatchRawStats(allPids);
         children = this.resolveProcessStats(allPids, rawStats, now);
+      }
+
+      // WSL processes appear alongside the wsl.exe relay already attributed above
+      const wslEntries = wslSamplesBySession.get(sessionId);
+      if (wslEntries) {
+        for (const { distro, sample } of wslEntries) {
+          const key = `wsl:${distro}:${sample.pid}`;
+          allTrackedKeys.add(key);
+          const cpuPercent = this.computeDeltaCpu(key, sample.cpuTimeSeconds, now);
+          if (cpuPercent > 0 || sample.memoryMB > 0.1) {
+            children.push({ pid: sample.pid, name: `${sample.name} (${distro})`, cpuPercent, memoryMB: sample.memoryMB });
+          }
+        }
       }
 
       const totalCpu = children.reduce((sum, c) => sum + c.cpuPercent, 0);
@@ -309,7 +436,7 @@ export class ResourceMonitorService extends EventEmitter {
     }
 
     // Clean up stale CPU samples for processes that no longer exist
-    this.cleanupCpuSampleCache(allTrackedPids);
+    this.cleanupCpuSampleCache(allTrackedKeys);
 
     return sessions;
   }

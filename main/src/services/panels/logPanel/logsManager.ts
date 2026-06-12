@@ -6,7 +6,7 @@ import { panelManager } from '../../panelManager';
 import { addSessionLog, cleanupSessionLogs } from '../../../ipc/logs';
 import { getShellPath } from '../../../utils/shellPath';
 import type { AnalyticsManager } from '../../analyticsManager';
-import { WSLContext } from '../../../utils/wslUtils';
+import { WSLContext, buildWSLENV } from '../../../utils/wslUtils';
 
 export class LogsManager {
   private static instance: LogsManager;
@@ -156,8 +156,16 @@ export class LogsManager {
     let childProcess: ChildProcess;
 
     if (wslContext) {
+      // Env vars set on the wsl.exe Windows process do not cross into the distro shell;
+      // WSLENV tells WSL to copy the listed vars into the Linux env (see buildWSLENV docs)
       childProcess = spawn('wsl.exe', ['-d', wslContext.distribution, '--', 'bash', '-c', `cd '${cwd}' && ${command}`], {
-        env: { ...process.env, PATH: shellPath, PANE_PORT: panePort, PANE_WORKSPACE_PATH: cwd }
+        env: {
+          ...process.env,
+          PATH: shellPath,
+          PANE_PORT: panePort,
+          PANE_WORKSPACE_PATH: cwd,
+          WSLENV: buildWSLENV(['PANE_PORT', 'PANE_WORKSPACE_PATH'])
+        }
       });
     } else {
       childProcess = spawn(command, [], {

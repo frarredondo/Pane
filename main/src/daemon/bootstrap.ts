@@ -254,6 +254,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   resourceMonitorService.initialize({
     app: options.app,
     getSessionById: (sessionId) => sessionManager.getSession(sessionId),
+    getSessionWslDistro: (sessionId) => {
+      const projectId = sessionManager.getSession(sessionId)?.projectId;
+      if (!projectId) return null;
+      const project = databaseService.getProject(projectId);
+      return project?.wsl_enabled && project.wsl_distribution ? project.wsl_distribution : null;
+    },
   });
 
   if (options.restoreSpotlights !== false) {

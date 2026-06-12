@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Copy, ExternalLink, FolderOpen, Globe } from 'lucide-react';
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
+import { InterceptorToast } from './InterceptorToast';
 import { isWindows } from '../../utils/platformUtils';
 
 export interface SelectionPopoverProps {
@@ -16,7 +18,6 @@ export interface SelectionPopoverProps {
 }
 
 const URL_PATTERN = /https?:\/\/[^\s<>"{}|\\^`[\]]+/;
-const LOCALHOST_URL_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/.*)?$/;
 
 // File path patterns - detect Unix paths, Windows paths, and relative paths with extensions
 const FILE_PATH_PATTERNS = [
@@ -63,14 +64,14 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   onOpenInBrowser,
   onClose,
 }) => {
-  // Early return when not visible to avoid unnecessary computation
-  if (!visible) return null;
+  // Stays mounted while hidden so the error toast can outlive the popover
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
-  const trimmedText = text.trim();
-  const urlMatch = trimmedText.match(URL_PATTERN);
+  // Skip computation when not visible
+  const trimmedText = visible ? text.trim() : '';
+  const urlMatch = visible ? trimmedText.match(URL_PATTERN) : null;
   const isUrl = urlMatch !== null;
-  const isLocalhostUrl = urlMatch ? LOCALHOST_URL_PATTERN.test(urlMatch[0]) : false;
-  const isFile = !isUrl && isFilePath(trimmedText);
+  const isFile = visible && !isUrl && isFilePath(trimmedText);
 
   const handleCopy = async () => {
     try {
@@ -117,15 +118,24 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
 
       const resolvedPath = resolveFilePath(trimmedText, workingDirectory);
       try {
-        await window.electronAPI.invoke('app:showItemInFolder', resolvedPath);
+        const result: { success: boolean; error?: string } = await window.electronAPI.invoke(
+          'app:showItemInFolder',
+          resolvedPath,
+          sessionId
+        );
+        if (!result?.success) {
+          setErrorToast(result?.error || 'Failed to show in file manager');
+        }
       } catch (error) {
         console.error('Failed to show in explorer:', error);
+        setErrorToast('Failed to show in file manager');
       }
       onClose();
     }
   };
 
   return (
+    <>
     <TerminalPopover visible={visible} x={x} y={y} onClose={onClose}>
       <PopoverButton onClick={handleCopy}>
         <span className="flex items-center gap-2">
@@ -133,7 +143,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
           Copy
         </span>
       </PopoverButton>
-      {isLocalhostUrl && sessionId && (
+      {isUrl && sessionId && (
         <PopoverButton onClick={handleOpenInBrowser}>
           <span className="flex items-center gap-2">
             <Globe className="w-4 h-4" />
@@ -162,5 +172,16 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         </PopoverButton>
       )}
     </TerminalPopover>
+    {errorToast && createPortal(
+      <div className="fixed inset-0 z-[10002] pointer-events-none">
+        <InterceptorToast
+          visible={!!errorToast}
+          message={errorToast}
+          onHide={() => setErrorToast(null)}
+        />
+      </div>,
+      document.body
+    )}
+    </>
   );
 };

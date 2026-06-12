@@ -187,13 +187,20 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     }
 
     try {
-      await window.electronAPI.invoke('app:showItemInFolder', path);
+      const result: { success: boolean; error?: string } = await window.electronAPI.invoke(
+        'app:showItemInFolder',
+        path,
+        config.sessionId
+      );
+      if (!result?.success) {
+        console.error('Failed to show item in folder:', result?.error);
+      }
     } catch (error) {
       console.error('Failed to show item in folder:', error);
     }
 
     setFilePopover((prev) => ({ ...prev, visible: false }));
-  }, [filePopover, isRemoteMode]);
+  }, [filePopover, isRemoteMode, config.sessionId]);
 
   const handleOpenInBrowser = useCallback(async (url: string) => {
     const panels = usePanelStore.getState().getSessionPanels(config.sessionId);
