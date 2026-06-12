@@ -271,6 +271,9 @@ importers:
       vite:
         specifier: ^6.0.6
         version: 6.3.5(@types/node@22.16.5)(jiti@2.6.0)(yaml@2.8.0)
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.16.5)
 
   main:
     dependencies:
