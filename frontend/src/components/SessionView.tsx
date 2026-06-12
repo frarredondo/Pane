@@ -275,7 +275,7 @@ export const SessionView = memo(() => {
     return () => {
       flushLayoutPersist();
     };
-  }, [activeSession?.id, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSession?.id, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
   
   // Listen for panel updates from the backend
   useEffect(() => {
@@ -986,6 +986,12 @@ export const SessionView = memo(() => {
     setDropZones(new Map());
   }, [activeSession, applyLayout]);
 
+  // Stable identity for the primary strip's drop handler so memo(PanelTabBar) holds
+  const primaryGroupId = primaryGroupNode?.id;
+  const handlePrimaryStripDrop = useCallback((panelId: string, insertIndex: number) => {
+    if (primaryGroupId) handleStripDrop(primaryGroupId, panelId, insertIndex);
+  }, [primaryGroupId, handleStripDrop]);
+
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
     if (!sessionLayout || !activeSession) return null;
@@ -1583,7 +1589,7 @@ export const SessionView = memo(() => {
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
-          onStripDrop={primaryGroupNode ? (panelId, idx) => handleStripDrop(primaryGroupNode.id, panelId, idx) : undefined}
+          onStripDrop={primaryGroupNode ? handlePrimaryStripDrop : undefined}
           isTabDragging={isTabDragging}
           draggedPanelId={draggedPanelId}
         />

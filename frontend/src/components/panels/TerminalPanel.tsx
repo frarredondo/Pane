@@ -11,6 +11,7 @@ import { TerminalPanelProps } from '../../types/panelComponents';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
 import { getTerminalTheme } from '../../utils/terminalTheme';
+import { isMac } from '../../utils/platformUtils';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
@@ -650,8 +651,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'e') return false;
 
           // Split tab groups: Mod+\ and Mod+Shift+\ (Ctrl+\ is SIGQUIT - must release!)
-          // ISO/international keyboards report the key as IntlBackslash
-          if (ctrlOrMeta && (e.code === 'Backslash' || e.code === 'IntlBackslash')) return false;
+          // ISO/international keyboards report the key as IntlBackslash.
+          // On macOS the app hotkey is Cmd+\, so only release metaKey there
+          // and let Ctrl+\ keep delivering SIGQUIT to the PTY.
+          if ((isMac() ? e.metaKey : e.ctrlKey) && (e.code === 'Backslash' || e.code === 'IntlBackslash')) return false;
           // Zoom toggle: Mod+Shift+Z
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z') return false;
           // Directional group focus: Mod+Alt+Arrows (all four directions)
