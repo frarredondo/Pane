@@ -2,9 +2,10 @@
  * PanelGroupView: renders a single tab group within the split layout.
  *
  * Each group has:
- * - A floating glassmorphic pill (top-center) holding the group's tabs in a
- *   compact PanelTabStrip. The primary group has no pill; its tabs live in
- *   PanelTabBar.
+ * - A slim centered tab strip row (compact pill-style tabs) once the pane is
+ *   split. It occupies a layout row so it pushes content down instead of
+ *   covering it. Single-group panes render no strip here; their tabs live in
+ *   PanelTabBar (the pixel-identical rule).
  * - An absolute-positioned panel stack (the editor-stage pattern: inactive
  *   terminals stay mounted behind display:none so xterm never reflows).
  * - A DropOverlay when a tab drag is in progress.
@@ -160,41 +161,35 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
       )}
       onMouseDownCapture={handleMouseDownCapture}
     >
+      {/* Slim centered tab strip row: once the pane is split, every group
+          (primary included) owns its tabs in a compact full-width row that
+          pushes content down so it never covers it. */}
+      {multiGroup && (
+        <div
+          role="tablist"
+          className="flex-shrink-0 flex justify-center bg-bg-chrome border-b border-border-primary px-2 py-0.5"
+        >
+          <PanelTabStrip
+            panels={orderedPanels}
+            activePanelId={group.activePanelId}
+            onPanelSelect={onPanelSelect}
+            onPanelClose={onPanelClose}
+            isPrimary={isPrimary}
+            isFocused={isFocusedGroup}
+            showShortcutHints={isPrimary}
+            variant="pill"
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onStripDrop={onStripDrop}
+            isTabDragging={isTabDragging}
+            draggedPanelId={draggedPanelId}
+          />
+        </div>
+      )}
+
       {/* Panel content stack: only the active tab is displayed; terminals
           stay mounted behind display:none so xterm never reflows */}
       <div className="flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
-        {/* Floating island pill: split groups carry their tabs in a compact
-            glassmorphic pill hovering top-center instead of a second
-            full-size tab bar row. z-30 keeps it interactive above the drop
-            overlay (z-20) so between-tab reorder drops still hit the strip
-            mid-drag. */}
-        {!isPrimary && (
-          <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-30 max-w-[calc(100%-1rem)]">
-            <div
-              role="tablist"
-              className={cn(
-                "flex items-center rounded-full border bg-[color-mix(in_srgb,var(--color-bg-chrome)_60%,transparent)] backdrop-blur-md shadow-lg shadow-black/20 px-1 py-0.5 transition-colors",
-                isFocusedGroup
-                  ? "border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)]"
-                  : "border-[color-mix(in_srgb,var(--color-border-primary)_50%,transparent)]",
-              )}
-            >
-              <PanelTabStrip
-                panels={orderedPanels}
-                activePanelId={group.activePanelId}
-                onPanelSelect={onPanelSelect}
-                onPanelClose={onPanelClose}
-                isFocused={isFocusedGroup}
-                variant="pill"
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                onStripDrop={onStripDrop}
-                isTabDragging={isTabDragging}
-                draggedPanelId={draggedPanelId}
-              />
-            </div>
-          </div>
-        )}
         {orderedPanels.map(panel => {
           const isActiveTab = panel.id === group.activePanelId;
           const keepAlive = panel.type === 'terminal';

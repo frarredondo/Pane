@@ -235,7 +235,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     <div
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
-        pill ? "rounded-full" : "flex-1",
+        pill ? "rounded-full max-w-full" : "flex-1",
       )}
       onDragLeave={handleStripDragLeave}
     >

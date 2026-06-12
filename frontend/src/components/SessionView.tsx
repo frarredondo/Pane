@@ -1587,6 +1587,7 @@ export const SessionView = memo(() => {
           primaryGroupPanels={primaryGroupPanels}
           primaryGroupActivePanelId={primaryGroupNode?.activePanelId}
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
+          tabsInGroups={sessionLayout?.root.type === 'split'}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onStripDrop={primaryGroupNode ? handlePrimaryStripDrop : undefined}

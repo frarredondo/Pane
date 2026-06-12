@@ -71,6 +71,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   primaryGroupPanels,
   primaryGroupActivePanelId,
   primaryGroupFocused,
+  tabsInGroups = false,
   onDragStart,
   onDragEnd,
   onStripDrop,
@@ -480,21 +481,27 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         role="tablist"
         aria-label="Panel Tabs"
       >
-        {/* Scrollable tab area — delegated to PanelTabStrip */}
-        <PanelTabStrip
-          panels={primaryGroupPanels ?? sortedPanels}
-          activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
-          onPanelSelect={handlePanelClick}
-          onPanelClose={handlePanelClose}
-          isPrimary
-          isFocused={primaryGroupFocused ?? true}
-          showShortcutHints
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onStripDrop={onStripDrop}
-          isTabDragging={isTabDragging}
-          draggedPanelId={draggedPanelId}
-        />
+        {/* Scrollable tab area — delegated to PanelTabStrip. When the pane is
+            split, tabs live in the group strips instead and the bar keeps
+            only its controls (a spacer preserves their right alignment). */}
+        {tabsInGroups ? (
+          <div className="flex-1 min-w-0" />
+        ) : (
+          <PanelTabStrip
+            panels={primaryGroupPanels ?? sortedPanels}
+            activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
+            onPanelSelect={handlePanelClick}
+            onPanelClose={handlePanelClose}
+            isPrimary
+            isFocused={primaryGroupFocused ?? true}
+            showShortcutHints
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onStripDrop={onStripDrop}
+            isTabDragging={isTabDragging}
+            draggedPanelId={draggedPanelId}
+          />
+        )}
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>
