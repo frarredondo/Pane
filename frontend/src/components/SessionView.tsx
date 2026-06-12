@@ -263,10 +263,10 @@ export const SessionView = memo(() => {
         const pinned = loadedPanels.find(p => p.type === 'terminal');
         const livePanels = pinned ? loadedPanels.filter(p => p.id !== pinned.id) : loadedPanels;
 
-        // Sort for initial layout creation (diff first, explorer second, then position)
+        // Sort for initial layout creation (explorer first, diff second, then position)
         const typeOrder = (type: string) => {
-          if (type === 'diff') return 0;
-          if (type === 'explorer') return 1;
+          if (type === 'explorer') return 0;
+          if (type === 'diff') return 1;
           return 2;
         };
         const sortedLive = [...livePanels].sort((a, b) => {
@@ -415,11 +415,11 @@ export const SessionView = memo(() => {
     [sessionPanels, defaultTerminalPanel]
   );
 
-  // Sort tab bar panels same as PanelTabBar: diff first, explorer second, then by position
+  // Sort tab bar panels same as PanelTabBar: explorer first, diff second, then by position
   const sortedSessionPanels = useMemo(() => {
     const typeOrder = (type: string) => {
-      if (type === 'diff') return 0;
-      if (type === 'explorer') return 1;
+      if (type === 'explorer') return 0;
+      if (type === 'diff') return 1;
       return 2;
     };
     return [...tabBarPanels].sort((a, b) => {
