@@ -3,21 +3,21 @@
 </p>
 
 <p align="center">
-  <strong>Run Pane with any agent. Any OS.</strong><br>
-  <em>just terminals. no abstractions.</em>
+  <strong>Run any coding agent, on any OS, from desktop or phone.</strong><br>
+  <em>real terminals. isolated worktrees. mobile Remote Pane.</em>
 </p>
 
 <div align="center">
 
 <a href="https://runpane.com" title="Click on this image to see more themes and demo">
-  <img src="assets/screenshot-dark.png" alt="Click on this image to see more themes and demo" title="Click on this image to see more themes and demo" width="100%">
+  <img src="assets/readme-remote-pane.png" alt="Pane desktop app and Remote Pane mobile browser app" title="Pane desktop app and Remote Pane mobile browser app" width="100%">
 </a>
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
 [![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane)
-[![Latest Release](https://img.shields.io/github/v/release/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases/latest)
-[![Commit Activity](https://img.shields.io/github/commit-activity/m/dcouple/Pane?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/graphs/commit-activity)
+[![GitHub](https://img.shields.io/badge/GitHub-source-555555?labelColor=333333&color=666666&logo=github&logoColor=white)](https://github.com/dcouple/Pane)
+[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases/latest)
+[![Changelog](https://img.shields.io/badge/Changelog-runpane.com-555555?labelColor=333333&color=666666)](https://runpane.com/changelog)
 [![Active Users](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/installs&labelColor=333333)](https://runpane.com)
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
 
@@ -50,11 +50,33 @@
 <br />
 <br />
 
-[Installation](#installation) · [What Flying Feels Like](#what-flying-feels-like) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Building from Source](#building-from-source)
+[Installation](#installation) · [Remote Pane](#remote-pane) · [What Flying Feels Like](#what-flying-feels-like) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Building from Source](#building-from-source)
 
 </div>
 
-> **Experimental:** Remote Pane is now available for running Pane against a remote workstation or VM from the desktop app or the browser app at [runpane.com/app](https://runpane.com/app/). This is a large runtime split and still experimental; see the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) before using it for critical work.
+## Remote Pane
+
+Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: you run a small Pane daemon on the host, copy one `pane-remote://...` connection code, then connect from desktop Pane or the free browser app at [runpane.com/app](https://runpane.com/app/).
+
+**Remote host setup:**
+
+```bash
+curl -fsSL https://runpane.com/install-remote.sh | sh -s -- --label "My Server"
+```
+
+**Windows PowerShell remote host setup:**
+
+```powershell
+& ([scriptblock]::Create((irm https://runpane.com/install-remote.ps1))) -Label "My Server"
+```
+
+Prefer SSH instead of Tailscale:
+
+```bash
+pnpm remote:setup -- --label "My Server" --prefer-tunnel ssh
+```
+
+The setup command prints the connection code and, for SSH mode, the forwarding command. Import the code in `Settings > Remote Pane`, or paste it into [runpane.com/app](https://runpane.com/app/) on your phone. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the step-by-step setup, mobile install instructions, API key notes, and security model.
 
 ---
 
@@ -91,7 +113,7 @@ Each of these is a small thing. Together they compound fast.
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
 | **Status Dots** | Activity indicators at the tab, pane, and project level tell you which agent is idle, working, or waiting without you having to look. | <img src="images/qol-status-dots.png" alt="Session activity status dots" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
-| **Remote Pane** | Experimental remote daemon support lets desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/) connect to a remote workstation or VM. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for setup and current limits. | |
+| **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Auto Secrets Copy** | Every pane automatically mirrors `.env` files and secrets from your root project so your worktree is runnable the moment it's created. | |
 | **Isolated Ports** | Each pane runs on its own port range automatically, so you can spin up five dev servers in parallel without a single conflict. | |
 | **Terminal Rendering Patches** | Claude Code's scroll-jump bug (long conversations snapping to top when you scroll up) is fixed here, even though it's still broken in Claude Code itself. | |
