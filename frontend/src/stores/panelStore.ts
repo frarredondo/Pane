@@ -10,6 +10,8 @@ export const usePanelStore = create<PanelStore>()(
     activePanels: {},
     activityStatus: {},
     lastActivityAt: {},
+    layouts: {},
+    focusedGroupIds: {},
 
     // Pure synchronous state updates
     setPanels: (sessionId, panels) => {
@@ -81,6 +83,26 @@ export const usePanelStore = create<PanelStore>()(
       });
     },
 
+    // Layout actions
+    setLayout: (sessionId, layout) => {
+      set((state) => {
+        state.layouts[sessionId] = layout;
+      });
+    },
+
+    clearLayout: (sessionId) => {
+      set((state) => {
+        delete state.layouts[sessionId];
+        delete state.focusedGroupIds[sessionId];
+      });
+    },
+
+    setFocusedGroup: (sessionId, groupId) => {
+      set((state) => {
+        state.focusedGroupIds[sessionId] = groupId;
+      });
+    },
+
     // Getters remain the same
     getSessionPanels: (sessionId) => get().panels[sessionId] || [],
     getActivePanel: (sessionId) => {
@@ -93,5 +115,9 @@ export const usePanelStore = create<PanelStore>()(
       const actStatus = get().activityStatus;
       return sessionPanels.some((p) => actStatus[p.id] === 'active') ? 'active' : 'idle';
     },
+
+    // Layout getters
+    getLayout: (sessionId) => get().layouts[sessionId],
+    getFocusedGroupId: (sessionId) => get().focusedGroupIds[sessionId],
   }))
 );

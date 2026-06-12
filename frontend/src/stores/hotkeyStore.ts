@@ -118,6 +118,12 @@ function normalizeKeyEvent(e: KeyboardEvent): string {
   if (digitMatch) {
     key = digitMatch[1];
   }
+  // Use e.code for Backslash — Shift+\ produces '|' on US layout, breaking
+  // registration of mod+shift+\ if we use e.key. ISO/international keyboards
+  // report the physical key as IntlBackslash instead.
+  if (e.code === 'Backslash' || e.code === 'IntlBackslash') {
+    key = '\\';
+  }
   parts.push(key);
   return parts.join('+');
 }

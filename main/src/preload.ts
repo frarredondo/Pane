@@ -819,6 +819,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('panel:updated', wrappedCallback);
       return () => ipcRenderer.removeListener('panel:updated', wrappedCallback);
     },
+    onPanelDeleted: (callback: (data: { panelId: string; sessionId: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { panelId: string; sessionId: string }) => callback(data);
+      ipcRenderer.on('panel:deleted', wrappedCallback);
+      return () => ipcRenderer.removeListener('panel:deleted', wrappedCallback);
+    },
     onPanelActivityStatus: (callback: (data: { panelId: string; sessionId: string; status: 'active' | 'idle'; lastActivityAt?: string }) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { panelId: string; sessionId: string; status: 'active' | 'idle'; lastActivityAt?: string }) => callback(data);
       ipcRenderer.on('panel:activityStatus', wrappedCallback);

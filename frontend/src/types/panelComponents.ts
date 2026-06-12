@@ -16,6 +16,24 @@ export interface PanelTabBarProps {
   context?: PanelContext;  // Optional context to filter available panels
   onToggleDetailPanel?: () => void;
   detailPanelVisible?: boolean;
+
+  // --- Optional split tab group integration ---
+  /** Panels in layout order for the primary group (overrides internal sort). */
+  primaryGroupPanels?: ToolPanel[];
+  /** Active panel id for the primary group (overrides activePanel check). */
+  primaryGroupActivePanelId?: string | null;
+  /** Whether the primary group is the focused group (gates shortcut hints). */
+  primaryGroupFocused?: boolean;
+  /** Called when a drag starts on a tab. */
+  onDragStart?: (panelId: string) => void;
+  /** Called when a drag ends. */
+  onDragEnd?: () => void;
+  /** Called when a tab is dropped onto the strip. */
+  onStripDrop?: (panelId: string, insertIndex: number) => void;
+  /** Whether a tab drag is currently in progress. */
+  isTabDragging?: boolean;
+  /** The panel id being dragged. */
+  draggedPanelId?: string | null;
 }
 
 export interface PanelContainerProps {

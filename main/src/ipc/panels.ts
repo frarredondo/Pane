@@ -10,7 +10,7 @@ import { getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService } from '../services/database';
-import { CreatePanelRequest, PanelEventType, ToolPanel } from '../../../shared/types/panels';
+import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { getWSLHome, linuxToUNCPath, posixJoin } from '../utils/wslUtils';
@@ -352,6 +352,8 @@ const DAEMON_PANEL_CHANNELS = [
   'panels:list',
   'panels:set-active',
   'panels:getActive',
+  'panels:get-layout',
+  'panels:set-layout',
   'panels:initialize',
   'panels:checkInitialized',
   'panels:emitEvent',
@@ -449,7 +451,80 @@ export function registerPanelHandlers(
   commandRegistry.register('panels:getActive', async (sessionId: string) => {
     return databaseService.getActivePanel(sessionId);
   });
-  
+
+  // Layout get/set for split tab groups
+  commandRegistry.register('panels:get-layout', async (sessionId: string) => {
+    try {
+      const raw = databaseService.getSessionPanelLayout(sessionId);
+      if (!raw) return { success: true, data: null };
+      try {
+        const parsed = JSON.parse(raw) as SessionPanelLayout;
+        return { success: true, data: parsed };
+      } catch {
+        // Malformed JSON should never brick a session
+        console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
+        return { success: true, data: null };
+      }
+    } catch (error) {
+      console.error('[IPC] Failed to get panel layout:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  commandRegistry.register('panels:set-layout', async (sessionId: string, layout: SessionPanelLayout | null) => {
+    try {
+      if (layout === null) {
+        databaseService.setSessionPanelLayout(sessionId, null);
+        return { success: true };
+      }
+
+      // Server-side validation: strip panel ids that don't exist in this session
+      const livePanels = databaseService.getPanelsForSession(sessionId);
+      const liveIds = new Set(livePanels.map(p => p.id));
+
+      function stripUnknownIds(node: SessionPanelLayout['root']): SessionPanelLayout['root'] | null {
+        if (node.type === 'group') {
+          const filtered = node.panelIds.filter(id => liveIds.has(id));
+          if (filtered.length === 0) return null;
+          return {
+            ...node,
+            panelIds: filtered,
+            activePanelId: filtered.includes(node.activePanelId ?? '') ? node.activePanelId : filtered[0],
+          };
+        }
+        // Split node: recurse into children
+        const children: SessionPanelLayout['root'][] = [];
+        const sizes: number[] = [];
+        for (let i = 0; i < node.children.length; i++) {
+          const cleaned = stripUnknownIds(node.children[i]);
+          if (cleaned) {
+            children.push(cleaned);
+            sizes.push(node.sizes[i] ?? 1);
+          }
+        }
+        if (children.length === 0) return null;
+        if (children.length === 1) return children[0];
+        return { ...node, children, sizes };
+      }
+
+      const cleanedRoot = stripUnknownIds(layout.root);
+      if (!cleanedRoot) {
+        databaseService.setSessionPanelLayout(sessionId, null);
+        return { success: true };
+      }
+
+      const cleanedLayout: SessionPanelLayout = {
+        ...layout,
+        root: cleanedRoot,
+      };
+      databaseService.setSessionPanelLayout(sessionId, JSON.stringify(cleanedLayout));
+      return { success: true };
+    } catch (error) {
+      console.error('[IPC] Failed to set panel layout:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
   // Panel initialization (lazy loading)
   commandRegistry.register('panels:initialize', async (panelId: string, options?: { cwd?: string; sessionId?: string; cols?: number; rows?: number }) => {
 

@@ -584,7 +584,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           // xterm.js ignores shiftKey on Enter, so Shift+Enter = Enter by default.
           // Alt+Enter natively sends \x1b\r which CLI tools recognize as "insert newline".
           // Block both keydown and keyup to fully suppress xterm's default \r.
-          if (e.shiftKey && e.key === 'Enter') {
+          // Guard: skip when Ctrl/Cmd is held so Ctrl+Shift+Enter chords are not swallowed.
+          if (e.shiftKey && !ctrlOrMeta && e.key === 'Enter') {
             if (e.type === 'keydown') {
               window.electronAPI.invoke('terminal:input', panel.id, '\x1b\r');
             }
@@ -647,6 +648,14 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           if (ctrlOrMeta && e.key === ',') return false;
           // Ctrl/Cmd+Shift+E: focus sidebar
           if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'e') return false;
+
+          // Split tab groups: Mod+\ and Mod+Shift+\ (Ctrl+\ is SIGQUIT - must release!)
+          // ISO/international keyboards report the key as IntlBackslash
+          if (ctrlOrMeta && (e.code === 'Backslash' || e.code === 'IntlBackslash')) return false;
+          // Zoom toggle: Mod+Shift+Z
+          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z') return false;
+          // Directional group focus: Mod+Alt+Arrows (all four directions)
+          if (ctrlOrMeta && e.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return false;
 
           // Detect AltGr+key producing '@' (e.g. German AltGr+Q) — set flag so the
           // interceptor skips activation for this keystroke. AltGr sets both ctrlKey+altKey
