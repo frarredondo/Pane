@@ -132,7 +132,43 @@ export function registerConfigHandlers(
           return [...families].sort((a, b) => a.localeCompare(b));
         };
 
-        // Try fc-list first (Linux natively, macOS/Windows via Homebrew or package managers)
+        const enumerateWindowsFonts = (): void => {
+          const psCommand = `[System.Reflection.Assembly]::LoadWithPartialName('System.Drawing') | Out-Null; (New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }`;
+          execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], { timeout: 10000 }, (psError, psStdout) => {
+            if (psError) {
+              console.warn('[Config] PowerShell font enumeration failed:', psError.message);
+              resolve([]);
+              return;
+            }
+            const monoKeywords = ['mono', 'courier', 'console', 'code', 'fixed', 'terminal', 'cascadia', 'fira', 'jetbrains', 'hack', 'iosevka', 'inconsolata', 'source code'];
+            const isLikelyMonoFont = (name: string): boolean => {
+              const lowerName = name.toLowerCase();
+              return monoKeywords.some(k => lowerName.includes(k));
+            };
+            const families = new Set<string>();
+            for (const line of psStdout.split('\n')) {
+              const name = line.trim();
+              if (name) {
+                families.add(name);
+              }
+            }
+            resolve([...families].sort((a, b) => {
+              const aLikelyMono = isLikelyMonoFont(a);
+              const bLikelyMono = isLikelyMonoFont(b);
+              if (aLikelyMono !== bLikelyMono) {
+                return aLikelyMono ? -1 : 1;
+              }
+              return a.localeCompare(b);
+            }));
+          });
+        };
+
+        if (process.platform === 'win32') {
+          enumerateWindowsFonts();
+          return;
+        }
+
+        // Try fc-list first (Linux natively, macOS via Homebrew or package managers)
         execFile('fc-list', [':spacing=mono', 'family'], { timeout: 5000 }, (fcError, fcStdout) => {
           if (!fcError && fcStdout.trim()) {
             resolve(parseFcList(fcStdout));
@@ -162,25 +198,6 @@ export function registerConfigHandlers(
               } catch {
                 resolve([]);
               }
-            });
-          } else if (process.platform === 'win32') {
-            // Windows: use PowerShell to enumerate font families
-            const psCommand = `[System.Reflection.Assembly]::LoadWithPartialName('System.Drawing') | Out-Null; (New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }`;
-            execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], { timeout: 10000 }, (psError, psStdout) => {
-              if (psError) {
-                console.warn('[Config] PowerShell font enumeration failed:', psError.message);
-                resolve([]);
-                return;
-              }
-              const families = new Set<string>();
-              const monoKeywords = ['mono', 'courier', 'console', 'code', 'fixed', 'terminal', 'cascadia', 'fira', 'jetbrains', 'hack', 'iosevka', 'inconsolata', 'source code'];
-              for (const line of psStdout.split('\n')) {
-                const name = line.trim();
-                if (name && monoKeywords.some(k => name.toLowerCase().includes(k))) {
-                  families.add(name);
-                }
-              }
-              resolve([...families].sort((a, b) => a.localeCompare(b)));
             });
           } else {
             console.warn('[Config] fc-list failed, no platform fallback for', process.platform);
