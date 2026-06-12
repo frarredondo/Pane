@@ -29,6 +29,7 @@ import {
   groupRects,
   findGroupInDirection,
   dropZoneFor,
+  subsetInsertIndex,
 } from './panelLayout';
 
 // ---------------------------------------------------------------------------
@@ -426,6 +427,37 @@ describe('directional focus geometry', () => {
     expect(findGroupInDirection(grid, 'g1', 'left')).toBeNull();
     expect(findGroupInDirection(grid, 'g1', 'up')).toBeNull();
     expect(findGroupInDirection(grid, 'g4', 'right')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// subsetInsertIndex
+// ---------------------------------------------------------------------------
+
+describe('subsetInsertIndex', () => {
+  // Full group order: permanent tabs (d, e) interleaved with working tabs
+  const full = ['d', 't1', 'e', 't2', 't3'];
+
+  it('maps a subset index to the position of that panel in the full order', () => {
+    const working = ['t1', 't2', 't3'];
+    expect(subsetInsertIndex(full, working, 0)).toBe(1); // before t1
+    expect(subsetInsertIndex(full, working, 1)).toBe(3); // before t2
+    expect(subsetInsertIndex(full, working, 2)).toBe(4); // before t3
+  });
+
+  it('maps an end-of-subset drop to just after the last subset panel', () => {
+    const working = ['t1', 't2', 't3'];
+    expect(subsetInsertIndex(full, working, 3)).toBe(5);
+    expect(subsetInsertIndex(['d', 't1', 'e'], ['t1'], 1)).toBe(2);
+  });
+
+  it('appends to the full list when the subset is empty', () => {
+    expect(subsetInsertIndex(full, [], 0)).toBe(5);
+  });
+
+  it('falls back to the end for unknown subset ids', () => {
+    expect(subsetInsertIndex(full, ['zzz'], 0)).toBe(5);
+    expect(subsetInsertIndex(full, ['zzz'], 1)).toBe(5);
   });
 });
 

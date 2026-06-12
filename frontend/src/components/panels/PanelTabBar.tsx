@@ -71,6 +71,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   primaryGroupPanels,
   primaryGroupActivePanelId,
   primaryGroupFocused,
+  tabsInGroups = false,
   onDragStart,
   onDragEnd,
   onStripDrop,
@@ -480,7 +481,11 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         role="tablist"
         aria-label="Panel Tabs"
       >
-        {/* Scrollable tab area — delegated to PanelTabStrip */}
+        {/* Scrollable tab area — delegated to PanelTabStrip. When the pane is
+            split, SessionView passes only the primary group's permanent tabs
+            here (working tabs live in the group strips); shortcut hints are
+            disabled then because the strip shows a subset and the 1-9 indexes
+            would lie. */}
         <PanelTabStrip
           panels={primaryGroupPanels ?? sortedPanels}
           activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
@@ -488,7 +493,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           onPanelClose={handlePanelClose}
           isPrimary
           isFocused={primaryGroupFocused ?? true}
-          showShortcutHints
+          showShortcutHints={!tabsInGroups}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onStripDrop={onStripDrop}

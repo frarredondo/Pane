@@ -38,6 +38,7 @@ import {
   findGroupInDirection,
   updateSizes,
   findGroupContainingPanel,
+  subsetInsertIndex,
   type DropZone,
 } from '../utils/panelLayout';
 import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, X } from 'lucide-react';
@@ -419,10 +420,47 @@ export const SessionView = memo(() => {
     const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
     return primaryGroupNode.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
   }, [primaryGroupNode, tabBarPanels]);
+  const isSplitLayout = sessionLayout?.root.type === 'split';
+  /** What the top bar shows: everything when unsplit; only the primary
+      group's permanent tabs once split (working tabs live in group strips). */
+  const topBarPanels = useMemo(() => {
+    if (!primaryGroupPanels) return undefined;
+    if (!isSplitLayout) return primaryGroupPanels;
+    return primaryGroupPanels.filter(p => p.metadata?.permanent === true);
+  }, [primaryGroupPanels, isSplitLayout]);
   // --- Drag & drop state ---
   const [draggedPanelId, setDraggedPanelId] = useState<string | null>(null);
   const [dropZones, setDropZones] = useState<Map<string, DropZone | null>>(new Map());
   const isTabDragging = draggedPanelId !== null;
+
+  // When a split or cross-group move takes a group's ACTIVE panel away, the
+  // pure layer falls back to the first remaining id, which is usually a
+  // permanent tab (Diff). Prefer the first working tab instead: when split,
+  // permanent tabs live in the top bar, so a group flipping to the Diff view
+  // under a terminal strip reads as wrong. Callers gate on the moved panel
+  // having been the group's active so a deliberately-active Diff stays put.
+  const preferWorkingActive = useCallback((
+    root: SessionPanelLayout['root'],
+    sourceGroupId: string | undefined,
+  ): SessionPanelLayout['root'] => {
+    if (!sourceGroupId || !activeSession) return root;
+    const g = findGroup(root, sourceGroupId);
+    if (!g || !g.activePanelId) return root;
+    const panelMap = new Map(
+      (usePanelStore.getState().panels[activeSession.id] || []).map(p => [p.id, p])
+    );
+    if (panelMap.get(g.activePanelId)?.metadata?.permanent !== true) return root;
+    const firstWorking = g.panelIds.find(id => panelMap.get(id)?.metadata?.permanent !== true);
+    if (!firstWorking) return root;
+    const nextActive: string = firstWorking;
+    function fix(node: SessionPanelLayout['root']): SessionPanelLayout['root'] {
+      if (node.type === 'group') {
+        return node.id === sourceGroupId ? { ...node, activePanelId: nextActive } : node;
+      }
+      return { ...node, children: node.children.map(fix) };
+    }
+    return fix(root);
+  }, [activeSession]);
 
   // Track current session/panel in history when they change
   useEffect(() => {
@@ -651,7 +689,10 @@ export const SessionView = memo(() => {
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
       if (!currentLayout) return;
-      const newRoot = splitGroup(currentLayout.root, focusedGroup.id, focusedGroup.activePanelId, 'row', true);
+      const newRoot = preferWorkingActive(
+        splitGroup(currentLayout.root, focusedGroup.id, focusedGroup.activePanelId, 'row', true),
+        focusedGroup.id,
+      );
       // Find the new group (the one containing the moved panel)
       const newGroup = findGroupContainingPanel(newRoot, focusedGroup.activePanelId);
       const next: SessionPanelLayout = {
@@ -682,7 +723,10 @@ export const SessionView = memo(() => {
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
       if (!currentLayout) return;
-      const newRoot = splitGroup(currentLayout.root, focusedGroup.id, focusedGroup.activePanelId, 'column', true);
+      const newRoot = preferWorkingActive(
+        splitGroup(currentLayout.root, focusedGroup.id, focusedGroup.activePanelId, 'column', true),
+        focusedGroup.id,
+      );
       const newGroup = findGroupContainingPanel(newRoot, focusedGroup.activePanelId);
       const next: SessionPanelLayout = {
         ...currentLayout,
@@ -957,12 +1001,15 @@ export const SessionView = memo(() => {
     } else {
       newRoot = movePanelInLayout(currentLayout.root, draggedPanelId, { groupId, edge: zone });
     }
+    if (sourceGroup && sourceGroup.activePanelId === draggedPanelId) {
+      newRoot = preferWorkingActive(newRoot, sourceGroup.id);
+    }
 
     const next: SessionPanelLayout = { ...currentLayout, root: newRoot };
     applyLayout(sid, next);
     setDraggedPanelId(null);
     setDropZones(new Map());
-  }, [activeSession, draggedPanelId, applyLayout]);
+  }, [activeSession, draggedPanelId, applyLayout, preferWorkingActive]);
 
   const handleDragStart = useCallback((panelId: string) => {
     setDraggedPanelId(panelId);
@@ -979,18 +1026,28 @@ export const SessionView = memo(() => {
     const currentLayout = usePanelStore.getState().layouts[sid];
     if (!currentLayout) return;
 
-    const newRoot = movePanelInLayout(currentLayout.root, panelId, { groupId, index: insertIndex });
+    const sourceGroup = findGroupContainingPanel(currentLayout.root, panelId);
+    let newRoot = movePanelInLayout(currentLayout.root, panelId, { groupId, index: insertIndex });
+    if (sourceGroup && sourceGroup.id !== groupId && sourceGroup.activePanelId === panelId) {
+      newRoot = preferWorkingActive(newRoot, sourceGroup.id);
+    }
     const next: SessionPanelLayout = { ...currentLayout, root: newRoot };
     applyLayout(sid, next);
     setDraggedPanelId(null);
     setDropZones(new Map());
-  }, [activeSession, applyLayout]);
+  }, [activeSession, applyLayout, preferWorkingActive]);
 
-  // Stable identity for the primary strip's drop handler so memo(PanelTabBar) holds
+  // Stable identity for the primary strip's drop handler so memo(PanelTabBar)
+  // holds. When split, the top bar shows only the permanent subset, so its
+  // drop indexes must translate to the group's full panel order.
   const primaryGroupId = primaryGroupNode?.id;
   const handlePrimaryStripDrop = useCallback((panelId: string, insertIndex: number) => {
-    if (primaryGroupId) handleStripDrop(primaryGroupId, panelId, insertIndex);
-  }, [primaryGroupId, handleStripDrop]);
+    if (!primaryGroupId || !primaryGroupNode) return;
+    const fullIndex = isSplitLayout && topBarPanels
+      ? subsetInsertIndex(primaryGroupNode.panelIds, topBarPanels.map(p => p.id), insertIndex)
+      : insertIndex;
+    handleStripDrop(primaryGroupId, panelId, fullIndex);
+  }, [primaryGroupId, primaryGroupNode, isSplitLayout, topBarPanels, handleStripDrop]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1584,9 +1641,10 @@ export const SessionView = memo(() => {
           onPanelCreate={handlePanelCreate}
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
-          primaryGroupPanels={primaryGroupPanels}
+          primaryGroupPanels={topBarPanels}
           primaryGroupActivePanelId={primaryGroupNode?.activePanelId}
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
+          tabsInGroups={isSplitLayout}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onStripDrop={primaryGroupNode ? handlePrimaryStripDrop : undefined}
