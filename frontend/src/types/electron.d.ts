@@ -436,6 +436,26 @@ interface ElectronAPI {
   // Onboarding
   onboarding: {
     detectEnvironment: () => Promise<IPCResponse>;
+    getGitHubAuthCommand: () => Promise<IPCResponse<{ command: string; reason: 'login' | 'refresh' | 'install-gh' | 'ready' }>>;
+    openGitHubAuthTerminal: () => Promise<IPCResponse<{
+      command: string;
+      reason: 'login' | 'refresh' | 'install-gh' | 'ready';
+      copied: boolean;
+      openedTerminal: boolean;
+      platform: NodeJS.Platform;
+    }>>;
+    startGitHubAuthTerminal: (cols?: number, rows?: number) => Promise<IPCResponse<{
+      terminalId: string;
+      command: string;
+      reason: 'login' | 'refresh' | 'install-gh' | 'ready';
+      cols: number;
+      rows: number;
+    }>>;
+    writeGitHubAuthTerminal: (terminalId: string, data: string) => Promise<IPCResponse>;
+    resizeGitHubAuthTerminal: (terminalId: string, cols: number, rows: number) => Promise<IPCResponse>;
+    killGitHubAuthTerminal: (terminalId: string) => Promise<IPCResponse>;
+    onGitHubAuthTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void) => () => void;
+    onGitHubAuthTerminalExit: (callback: (data: { terminalId: string; exitCode: number; signal: number | null }) => void) => () => void;
     setupDefaultRepo: () => Promise<IPCResponse>;
     supportProject: () => Promise<IPCResponse>;
   };

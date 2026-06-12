@@ -1,8 +1,10 @@
-import { IpcMain } from 'electron';
+import { clipboard, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { mkdir } from 'fs/promises';
-import { execSync } from 'child_process';
+import { execFile, execSync, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
+import * as pty from '@lydell/node-pty';
 import type { AppServices } from './types';
 import { getAppDirectory } from '../utils/appDirectory';
 import { CommandRunner } from '../utils/commandRunner';
@@ -16,15 +18,60 @@ function shellExecOpts(extra?: Record<string, unknown>): Record<string, unknown>
 const PANE_REPO = 'dcouple/Pane';
 const PANE_REPO_URL = `https://github.com/${PANE_REPO}.git`;
 const SUPPORT_GITHUB_USER = 'parsakhaz';
+const GITHUB_HOST = 'github.com';
+const GH_INSTALL_URL = 'https://cli.github.com/';
+const REQUIRED_GITHUB_SCOPES = ['user'] as const;
+const GH_LOGIN_COMMAND = `gh auth login -h ${GITHUB_HOST} -s ${REQUIRED_GITHUB_SCOPES.join(',')}`;
+const GH_REFRESH_COMMAND = `gh auth refresh -h ${GITHUB_HOST} -s ${REQUIRED_GITHUB_SCOPES.join(',')}`;
 
 interface EnvironmentInfo {
   gitInstalled: boolean;
   ghInstalled: boolean;
   ghAuthenticated: boolean;
+  ghReady: boolean;
+  ghScopes: string[];
+  requiredGhScopes: string[];
+  missingGhScopes: string[];
+  ghAuthCommand?: string;
+  ghInstallUrl: string;
 }
 
+interface GitHubAuthCommandResult {
+  command: string;
+  reason: 'login' | 'refresh' | 'install-gh' | 'ready';
+}
+
+interface GitHubAuthTerminalResult extends GitHubAuthCommandResult {
+  copied: boolean;
+  openedTerminal: boolean;
+  platform: NodeJS.Platform;
+}
+
+interface GitHubAuthPtyStartResult extends GitHubAuthCommandResult {
+  terminalId: string;
+  cols: number;
+  rows: number;
+}
+
+interface GitHubAuthPtySession {
+  pty: pty.IPty;
+  ownerWebContentsId: number;
+}
+
+const githubAuthPtySessions = new Map<string, GitHubAuthPtySession>();
+
 function detectEnvironment(): EnvironmentInfo {
-  const result: EnvironmentInfo = { gitInstalled: false, ghInstalled: false, ghAuthenticated: false };
+  const result: EnvironmentInfo = {
+    gitInstalled: false,
+    ghInstalled: false,
+    ghAuthenticated: false,
+    ghReady: false,
+    ghScopes: [],
+    requiredGhScopes: [...REQUIRED_GITHUB_SCOPES],
+    missingGhScopes: [...REQUIRED_GITHUB_SCOPES],
+    ghAuthCommand: GH_LOGIN_COMMAND,
+    ghInstallUrl: GH_INSTALL_URL,
+  };
 
   // Check git (use shell-aware PATH so packaged apps find Homebrew/nvm binaries)
   try {
@@ -39,18 +86,228 @@ function detectEnvironment(): EnvironmentInfo {
     execSync('gh --version', shellExecOpts({ stdio: 'ignore' }));
     result.ghInstalled = true;
   } catch {
+    result.ghAuthCommand = undefined;
     return result;
   }
 
   // Check gh authentication
+  let authStatusOutput = '';
   try {
-    execSync('gh auth status', shellExecOpts({ stdio: 'ignore' }));
+    authStatusOutput = execSync(
+      `gh auth status -h ${GITHUB_HOST}`,
+      shellExecOpts({ encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }) as { encoding: 'utf-8'; stdio: ['pipe', 'pipe', 'pipe']; env: NodeJS.ProcessEnv }
+    );
     result.ghAuthenticated = true;
   } catch {
     // gh installed but not authenticated
+    result.ghAuthCommand = GH_LOGIN_COMMAND;
+    return result;
   }
 
+  result.ghScopes = getGitHubCliScopes(authStatusOutput);
+  result.missingGhScopes = getMissingGitHubScopes(result.ghScopes);
+  result.ghReady = result.missingGhScopes.length === 0;
+  result.ghAuthCommand = result.ghReady ? undefined : GH_REFRESH_COMMAND;
+
   return result;
+}
+
+function getGitHubAuthCommand(env: EnvironmentInfo = detectEnvironment()): GitHubAuthCommandResult {
+  if (!env.ghInstalled) {
+    return { command: '', reason: 'install-gh' };
+  }
+
+  if (!env.ghAuthenticated) {
+    return { command: GH_LOGIN_COMMAND, reason: 'login' };
+  }
+
+  if (env.ghReady) {
+    return { command: '', reason: 'ready' };
+  }
+
+  return { command: GH_REFRESH_COMMAND, reason: 'refresh' };
+}
+
+function getGitHubAuthSpawnArgs(reason: GitHubAuthCommandResult['reason']): string[] {
+  const scopes = REQUIRED_GITHUB_SCOPES.join(',');
+  if (reason === 'login') {
+    return ['auth', 'login', '-h', GITHUB_HOST, '-s', scopes];
+  }
+
+  if (reason === 'refresh') {
+    return ['auth', 'refresh', '-h', GITHUB_HOST, '-s', scopes];
+  }
+
+  return [];
+}
+
+function getMissingGitHubScopes(scopes: string[]): string[] {
+  const granted = new Set(scopes.map(scope => scope.toLowerCase()));
+  return REQUIRED_GITHUB_SCOPES.filter(scope => !granted.has(scope.toLowerCase()));
+}
+
+function getGitHubCliScopes(authStatusOutput: string): string[] {
+  try {
+    const apiOutput = execSync(
+      `gh api -i /user --silent --hostname ${GITHUB_HOST}`,
+      shellExecOpts({ encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000 }) as { encoding: 'utf-8'; stdio: ['pipe', 'pipe', 'pipe']; timeout: number; env: NodeJS.ProcessEnv }
+    );
+    const scopes = parseScopesFromHeaders(apiOutput);
+    if (scopes.length > 0) return scopes;
+  } catch {
+    // Fall back to auth status output below.
+  }
+
+  return parseScopesFromAuthStatus(authStatusOutput);
+}
+
+function parseScopesFromHeaders(output: string): string[] {
+  const line = output
+    .split(/\r?\n/)
+    .find(headerLine => /^x-oauth-scopes:/i.test(headerLine));
+  if (!line) return [];
+
+  return parseScopeList(line.slice(line.indexOf(':') + 1));
+}
+
+function parseScopesFromAuthStatus(output: string): string[] {
+  const line = output
+    .split(/\r?\n/)
+    .find(statusLine => /Token scopes:/i.test(statusLine));
+  if (!line) return [];
+
+  return parseScopeList(line.slice(line.indexOf(':') + 1));
+}
+
+function parseScopeList(value: string): string[] {
+  return value
+    .split(',')
+    .map(scope => scope.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean);
+}
+
+function execFileAsync(command: string, args: string[], options?: { env?: NodeJS.ProcessEnv }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function spawnDetached(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, PATH: getShellPath() },
+    });
+
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function buildUnixInteractiveCommand(command: string): string {
+  return `${command}; status=$?; printf '\\nGitHub setup finished. You can return to Pane. Press Enter to close this terminal...'; read _; exit $status`;
+}
+
+function buildWindowsInteractiveCommand(command: string): string {
+  return `${command} & echo. & echo GitHub setup finished. You can return to Pane. & pause`;
+}
+
+function normalizeTerminalDimensions(cols: unknown, rows: unknown): { cols: number; rows: number } {
+  const parsedCols = typeof cols === 'number' && Number.isFinite(cols) ? Math.floor(cols) : 80;
+  const parsedRows = typeof rows === 'number' && Number.isFinite(rows) ? Math.floor(rows) : 18;
+
+  return {
+    cols: Math.min(Math.max(parsedCols, 20), 240),
+    rows: Math.min(Math.max(parsedRows, 6), 80),
+  };
+}
+
+function buildGitHubAuthPtyEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') {
+      env[key] = value;
+    }
+  }
+
+  return {
+    ...env,
+    PATH: getShellPath(),
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    LANG: process.env.LANG || 'en_US.UTF-8',
+  };
+}
+
+function stopGitHubAuthPtySession(terminalId: string, ownerWebContentsId: number): boolean {
+  const session = githubAuthPtySessions.get(terminalId);
+  if (!session || session.ownerWebContentsId !== ownerWebContentsId) return false;
+
+  githubAuthPtySessions.delete(terminalId);
+  try {
+    session.pty.kill();
+  } catch {
+    // Already exited.
+  }
+  return true;
+}
+
+async function openGitHubAuthTerminal(command: string): Promise<boolean> {
+  if (!command) return false;
+
+  if (process.platform === 'darwin') {
+    const terminalCommand = buildUnixInteractiveCommand(command);
+    await execFileAsync('osascript', [
+      '-e',
+      'tell application "Terminal" to activate',
+      '-e',
+      `tell application "Terminal" to do script "${escapeAppleScriptString(terminalCommand)}"`,
+    ], { env: { ...process.env, PATH: getShellPath() } });
+    return true;
+  }
+
+  if (process.platform === 'win32') {
+    await spawnDetached('cmd.exe', [
+      '/c',
+      'start',
+      'GitHub CLI Setup',
+      'cmd.exe',
+      '/k',
+      buildWindowsInteractiveCommand(command),
+    ]);
+    return true;
+  }
+
+  const terminalCommand = buildUnixInteractiveCommand(command);
+  const candidates: Array<{ command: string; args: string[] }> = [
+    { command: 'x-terminal-emulator', args: ['-e', 'sh', '-lc', terminalCommand] },
+    { command: 'gnome-terminal', args: ['--', 'sh', '-lc', terminalCommand] },
+    { command: 'konsole', args: ['-e', 'sh', '-lc', terminalCommand] },
+    { command: 'xfce4-terminal', args: ['-e', 'sh', '-lc', terminalCommand] },
+    { command: 'xterm', args: ['-e', 'sh', '-lc', terminalCommand] },
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await spawnDetached(candidate.command, candidate.args);
+      return true;
+    } catch {
+      // Try the next installed terminal.
+    }
+  }
+
+  return false;
 }
 
 function starPaneRepo(): boolean {
@@ -113,6 +370,133 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
     }
   });
 
+  ipcMain.handle('onboarding:get-github-auth-command', async () => {
+    try {
+      return { success: true, data: getGitHubAuthCommand() };
+    } catch (error) {
+      console.error('[Onboarding] Failed to build GitHub auth command:', error);
+      return { success: false, error: 'Failed to build GitHub auth command' };
+    }
+  });
+
+  ipcMain.handle('onboarding:open-github-auth-terminal', async () => {
+    try {
+      const commandResult = getGitHubAuthCommand();
+
+      if (!commandResult.command) {
+        const error = commandResult.reason === 'install-gh'
+          ? 'GitHub CLI is not installed'
+          : 'GitHub CLI is already configured';
+        return { success: false, error, data: commandResult };
+      }
+
+      clipboard.writeText(commandResult.command);
+      const openedTerminal = await openGitHubAuthTerminal(commandResult.command);
+      const data: GitHubAuthTerminalResult = {
+        ...commandResult,
+        copied: true,
+        openedTerminal,
+        platform: process.platform,
+      };
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('[Onboarding] Failed to open GitHub auth terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to open GitHub auth terminal' };
+    }
+  });
+
+  ipcMain.handle('onboarding:start-github-auth-pty', async (event: IpcMainInvokeEvent, cols?: number, rows?: number) => {
+    try {
+      const commandResult = getGitHubAuthCommand();
+      const args = getGitHubAuthSpawnArgs(commandResult.reason);
+
+      if (!commandResult.command || args.length === 0) {
+        const error = commandResult.reason === 'install-gh'
+          ? 'GitHub CLI is not installed'
+          : 'GitHub CLI is already configured';
+        return { success: false, error, data: commandResult };
+      }
+
+      const dimensions = normalizeTerminalDimensions(cols, rows);
+      const terminalId = randomUUID();
+      const ownerWebContentsId = event.sender.id;
+      const ptyProcess = pty.spawn('gh', args, {
+        name: 'xterm-256color',
+        cols: dimensions.cols,
+        rows: dimensions.rows,
+        cwd: process.env.HOME || process.cwd(),
+        env: buildGitHubAuthPtyEnv(),
+      });
+
+      githubAuthPtySessions.set(terminalId, {
+        pty: ptyProcess,
+        ownerWebContentsId,
+      });
+
+      const cleanupOnDestroyed = () => {
+        stopGitHubAuthPtySession(terminalId, ownerWebContentsId);
+      };
+      event.sender.once('destroyed', cleanupOnDestroyed);
+
+      ptyProcess.onData((data: string) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('onboarding:github-auth-pty-output', { terminalId, data });
+        }
+      });
+
+      ptyProcess.onExit(({ exitCode, signal }) => {
+        githubAuthPtySessions.delete(terminalId);
+        event.sender.removeListener('destroyed', cleanupOnDestroyed);
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('onboarding:github-auth-pty-exit', {
+            terminalId,
+            exitCode,
+            signal: signal ?? null,
+          });
+        }
+      });
+
+      const data: GitHubAuthPtyStartResult = {
+        ...commandResult,
+        terminalId,
+        cols: dimensions.cols,
+        rows: dimensions.rows,
+      };
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('[Onboarding] Failed to start GitHub auth PTY:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to start GitHub CLI setup terminal' };
+    }
+  });
+
+  ipcMain.handle('onboarding:write-github-auth-pty', async (event: IpcMainInvokeEvent, terminalId: string, data: string) => {
+    const session = githubAuthPtySessions.get(terminalId);
+    if (!session || session.ownerWebContentsId !== event.sender.id) {
+      return { success: false, error: 'GitHub CLI setup terminal is not running' };
+    }
+
+    session.pty.write(data);
+    return { success: true };
+  });
+
+  ipcMain.handle('onboarding:resize-github-auth-pty', async (event: IpcMainInvokeEvent, terminalId: string, cols: number, rows: number) => {
+    const session = githubAuthPtySessions.get(terminalId);
+    if (!session || session.ownerWebContentsId !== event.sender.id) {
+      return { success: false, error: 'GitHub CLI setup terminal is not running' };
+    }
+
+    const dimensions = normalizeTerminalDimensions(cols, rows);
+    session.pty.resize(dimensions.cols, dimensions.rows);
+    return { success: true };
+  });
+
+  ipcMain.handle('onboarding:kill-github-auth-pty', async (event: IpcMainInvokeEvent, terminalId: string) => {
+    stopGitHubAuthPtySession(terminalId, event.sender.id);
+    return { success: true };
+  });
+
   // Fork+clone or clone the Pane repo, register as project
   ipcMain.handle('onboarding:setup-default-repo', async () => {
     try {
@@ -140,7 +524,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
           return { success: false, error: 'Git is not installed' };
         }
 
-        if (env.ghAuthenticated) {
+        if (env.ghReady) {
           // Try fork + clone
           try {
             const commandRunner = new CommandRunner({ path: projectsDir, wsl_enabled: false, wsl_distribution: null });
