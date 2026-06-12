@@ -173,20 +173,32 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     setStripDropIndex(null);
   }, [onDragEnd]);
 
+  // VS Code midpoint rule: the cursor's half of the hovered tab decides
+  // whether the drop inserts before (left half) or after (right half) it.
   const handleStripDragOver = useCallback((e: React.DragEvent, index: number) => {
     if (!isTabDragging) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setStripDropIndex(index);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const after = e.clientX > rect.left + rect.width / 2;
+    setStripDropIndex(index + (after ? 1 : 0));
   }, [isTabDragging]);
 
-  const handleStripDrop = useCallback((e: React.DragEvent, index: number) => {
+  // The empty space after the last tab appends to the strip.
+  const handleTrailingDragOver = useCallback((e: React.DragEvent) => {
+    if (!isTabDragging) return;
     e.preventDefault();
-    if (draggedPanelId && onStripDrop) {
-      onStripDrop(draggedPanelId, index);
+    e.dataTransfer.dropEffect = 'move';
+    setStripDropIndex(panels.length);
+  }, [isTabDragging, panels.length]);
+
+  const handleStripDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (draggedPanelId && onStripDrop && stripDropIndex !== null) {
+      onStripDrop(draggedPanelId, stripDropIndex);
     }
     setStripDropIndex(null);
-  }, [draggedPanelId, onStripDrop]);
+  }, [draggedPanelId, onStripDrop, stripDropIndex]);
 
   const handleStripDragLeave = useCallback(() => {
     setStripDropIndex(null);
@@ -242,7 +254,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             onDragStart={(e) => handleDragStart(e, panel.id)}
             onDragEnd={handleDragEnd}
             onDragOver={(e) => handleStripDragOver(e, index)}
-            onDrop={(e) => handleStripDrop(e, index)}
+            onDrop={handleStripDrop}
             onClick={() => !isEditing && onPanelSelect(panel)}
             onDoubleClick={(e) => {
               if (!isEditing && !isPermanent && !isDiffPanel) {
@@ -260,9 +272,13 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               }
             }}
           >
-            {/* Strip drop indicator line */}
+            {/* Strip drop indicator line. Between-tab boundaries render as the
+                next tab's left edge; only the strip's end renders a right edge. */}
             {isTabDragging && stripDropIndex === index && (
               <div className="absolute left-0 top-1 bottom-1 w-0.5 bg-interactive z-10" />
+            )}
+            {isTabDragging && stripDropIndex === index + 1 && index === panels.length - 1 && (
+              <div className="absolute right-0 top-1 bottom-1 w-0.5 bg-interactive z-10" />
             )}
 
             {isEditing ? (
@@ -325,6 +341,14 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           </React.Fragment>
         ) : <React.Fragment key={panel.id}>{tab}{divider}</React.Fragment>;
       })}
+      {/* Trailing drop target: the strip's empty space appends after the last tab */}
+      {isTabDragging && (
+        <div
+          className="flex-1 self-stretch min-w-8"
+          onDragOver={handleTrailingDragOver}
+          onDrop={handleStripDrop}
+        />
+      )}
     </div>
   );
 });
