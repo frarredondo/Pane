@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Run any coding agent, on any OS, from desktop or phone.</strong><br>
-  <em>real terminals. isolated worktrees. mobile Remote Pane.</em>
+  <strong>Run any coding agent, on any OS, from desktop <a href="#remote-pane">or phone</a>.</strong><br>
+  <em>just terminals. no abstractions.</em>
 </p>
 
 <div align="center">
@@ -50,35 +50,9 @@
 <br />
 <br />
 
-[Installation](#installation) · [Remote Pane](#remote-pane) · [What Flying Feels Like](#what-flying-feels-like) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Building from Source](#building-from-source)
+[Installation](#installation) · [What Flying Feels Like](#what-flying-feels-like) · [Remote Pane](#remote-pane) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Building from Source](#building-from-source)
 
 </div>
-
-## Remote Pane
-
-Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: you run a small Pane daemon on the host, copy one `pane-remote://...` connection code, then connect from desktop Pane or the free browser app at [runpane.com/app](https://runpane.com/app/).
-
-**Remote host setup:**
-
-```bash
-curl -fsSL https://runpane.com/install-remote.sh | sh -s -- --label "My Server"
-```
-
-**Windows PowerShell remote host setup:**
-
-```powershell
-& ([scriptblock]::Create((irm https://runpane.com/install-remote.ps1))) -Label "My Server"
-```
-
-Prefer SSH instead of Tailscale:
-
-```bash
-pnpm remote:setup -- --label "My Server" --prefer-tunnel ssh
-```
-
-The setup command prints the connection code and, for SSH mode, the forwarding command. Import the code in `Settings > Remote Pane`, or paste it into [runpane.com/app](https://runpane.com/app/) on your phone. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the step-by-step setup, mobile install instructions, API key notes, and security model.
-
----
 
 Not an IDE. Not a terminal emulator. **Vim for agent management.**
 
@@ -106,6 +80,7 @@ Each of these is a small thing. Together they compound fast.
 
 | Feature | | |
 |---|---|---|
+| **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
@@ -113,11 +88,36 @@ Each of these is a small thing. Together they compound fast.
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
 | **Status Dots** | Activity indicators at the tab, pane, and project level tell you which agent is idle, working, or waiting without you having to look. | <img src="images/qol-status-dots.png" alt="Session activity status dots" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
-| **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Auto Secrets Copy** | Every pane automatically mirrors `.env` files and secrets from your root project so your worktree is runnable the moment it's created. | |
 | **Isolated Ports** | Each pane runs on its own port range automatically, so you can spin up five dev servers in parallel without a single conflict. | |
 | **Terminal Rendering Patches** | Claude Code's scroll-jump bug (long conversations snapping to top when you scroll up) is fixed here, even though it's still broken in Claude Code itself. | |
 | **Drag and Drop** | Drop any file up to 50MB into a terminal and it lands exactly where you need it. | |
+
+---
+
+## Remote Pane
+
+Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: you run a small Pane daemon on the host, copy one `pane-remote://...` connection code, then connect from desktop Pane or the free browser app at [runpane.com/app](https://runpane.com/app/).
+
+**Remote host setup:**
+
+```bash
+curl -fsSL https://runpane.com/install-remote.sh | sh -s -- --label "My Server"
+```
+
+**Windows PowerShell remote host setup:**
+
+```powershell
+& ([scriptblock]::Create((irm https://runpane.com/install-remote.ps1))) -Label "My Server"
+```
+
+Prefer SSH instead of Tailscale:
+
+```bash
+pnpm remote:setup -- --label "My Server" --prefer-tunnel ssh
+```
+
+The setup command prints the connection code and, for SSH mode, the forwarding command. Import the code in `Settings > Remote Pane`, or paste it into [runpane.com/app](https://runpane.com/app/) on your phone. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the step-by-step setup, mobile install instructions, API key notes, and security model.
 
 ---
 
