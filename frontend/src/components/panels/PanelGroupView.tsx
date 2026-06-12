@@ -160,7 +160,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
     >
       {/* Tab strip for secondary groups */}
       {!isPrimary && (
-        <div className="flex-shrink-0 bg-bg-chrome border-b border-border-primary">
+        <div className="flex-shrink-0 bg-bg-chrome border-b border-border-primary" role="tablist">
           <PanelTabStrip
             panels={orderedPanels}
             activePanelId={group.activePanelId}

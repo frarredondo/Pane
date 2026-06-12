@@ -126,17 +126,15 @@ export const SessionView = memo(() => {
   const debouncedPersist = useCallback((sessionId: string, layout: SessionPanelLayout) => {
     pendingLayoutRef.current = { sessionId, layout };
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = setTimeout(() => {
-      persistTimerRef.current = null;
-      const pending = pendingLayoutRef.current;
-      if (pending) {
-        pendingLayoutRef.current = null;
-        panelApi.setLayout(pending.sessionId, pending.layout).catch(err => {
-          console.warn('[SessionView] Failed to persist layout:', err);
-        });
-      }
-    }, 500);
-  }, []);
+    persistTimerRef.current = setTimeout(flushLayoutPersist, 500);
+  }, [flushLayoutPersist]);
+
+  // Flush a pending layout write before the window closes: the debounce would
+  // otherwise lose a split made just before quit.
+  useEffect(() => {
+    window.addEventListener('beforeunload', flushLayoutPersist);
+    return () => window.removeEventListener('beforeunload', flushLayoutPersist);
+  }, [flushLayoutPersist]);
 
   // --- Layout application helper ---
   // Self-healing: every mutation funnels through here, so focus and zoom are
@@ -793,8 +791,10 @@ export const SessionView = memo(() => {
         const updated = removePanelFromLayout(currentLayout.root, panel.id);
         if (updated) {
           const next: SessionPanelLayout = { ...currentLayout, root: updated };
-          // Find the next panel in the same group
-          if (group) {
+          // Pick a successor only when the closed panel WAS the group's
+          // active tab; closing a background tab keeps the current one
+          // (matching VS Code).
+          if (group && group.activePanelId === panel.id) {
             const remainingInGroup = group.panelIds.filter(id => id !== panel.id);
             const panelIndex = group.panelIds.indexOf(panel.id);
             const nextInGroup = remainingInGroup[Math.min(panelIndex, remainingInGroup.length - 1)];
