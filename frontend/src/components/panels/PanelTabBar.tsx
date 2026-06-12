@@ -482,26 +482,24 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         aria-label="Panel Tabs"
       >
         {/* Scrollable tab area — delegated to PanelTabStrip. When the pane is
-            split, tabs live in the group strips instead and the bar keeps
-            only its controls (a spacer preserves their right alignment). */}
-        {tabsInGroups ? (
-          <div className="flex-1 min-w-0" />
-        ) : (
-          <PanelTabStrip
-            panels={primaryGroupPanels ?? sortedPanels}
-            activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
-            onPanelSelect={handlePanelClick}
-            onPanelClose={handlePanelClose}
-            isPrimary
-            isFocused={primaryGroupFocused ?? true}
-            showShortcutHints
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            onStripDrop={onStripDrop}
-            isTabDragging={isTabDragging}
-            draggedPanelId={draggedPanelId}
-          />
-        )}
+            split, SessionView passes only the primary group's permanent tabs
+            here (working tabs live in the group strips); shortcut hints are
+            disabled then because the strip shows a subset and the 1-9 indexes
+            would lie. */}
+        <PanelTabStrip
+          panels={primaryGroupPanels ?? sortedPanels}
+          activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
+          onPanelSelect={handlePanelClick}
+          onPanelClose={handlePanelClose}
+          isPrimary
+          isFocused={primaryGroupFocused ?? true}
+          showShortcutHints={!tabsInGroups}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onStripDrop={onStripDrop}
+          isTabDragging={isTabDragging}
+          draggedPanelId={draggedPanelId}
+        />
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>

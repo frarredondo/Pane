@@ -25,8 +25,10 @@ export interface PanelTabBarProps {
   /** Whether the primary group is the focused group (gates shortcut hints). */
   primaryGroupFocused?: boolean;
   /**
-   * When the pane is split, every group (primary included) renders its own
-   * strip, so the top bar hides its tab strip and keeps only the controls.
+   * When the pane is split, working tabs live in the group strips and the
+   * top bar shows only the primary group's permanent tabs (passed via
+   * primaryGroupPanels). Disables shortcut hints since the bar then shows a
+   * subset and the 1-9 indexes would be wrong.
    */
   tabsInGroups?: boolean;
   /** Called when a drag starts on a tab. */

@@ -530,6 +530,31 @@ export function reconcile(
 }
 
 // ---------------------------------------------------------------------------
+// Subset index translation
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate an insertion index within a displayed subset of a group's tabs
+ * (e.g. a strip showing only non-permanent tabs while the permanent ones stay
+ * in the top bar) into an insertion index in the group's full panel order.
+ * The subset must preserve the full order's relative ordering.
+ */
+export function subsetInsertIndex(
+  fullIds: string[],
+  subsetIds: string[],
+  subsetIndex: number,
+): number {
+  if (subsetIndex >= subsetIds.length) {
+    const last = subsetIds[subsetIds.length - 1];
+    if (last === undefined) return fullIds.length;
+    const i = fullIds.indexOf(last);
+    return i === -1 ? fullIds.length : i + 1;
+  }
+  const i = fullIds.indexOf(subsetIds[subsetIndex]);
+  return i === -1 ? fullIds.length : i;
+}
+
+// ---------------------------------------------------------------------------
 // Update sizes
 // ---------------------------------------------------------------------------
 

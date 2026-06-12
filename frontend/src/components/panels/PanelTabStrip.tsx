@@ -37,10 +37,10 @@ export interface PanelTabStripProps {
   showShortcutHints?: boolean;
   /**
    * Visual variant: 'bar' is the full-size strip used by the primary tab bar;
-   * 'pill' is the compact treatment used by the floating island on split
-   * groups (roughly half height, smaller type, shrink-wrapped tabs).
+   * 'compact' is the slim treatment used by the group strip rows on split
+   * panes (roughly half height, smaller type, shrink-wrapped tabs).
    */
-  variant?: 'bar' | 'pill';
+  variant?: 'bar' | 'compact';
 
   // --- Drag-and-drop ---
   /** Called when a drag starts on a tab. */
@@ -103,7 +103,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   isTabDragging = false,
   draggedPanelId = null,
 }) => {
-  const pill = variant === 'pill';
+  const compact = variant === 'compact';
   const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -235,7 +235,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     <div
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
-        pill ? "rounded-full max-w-full" : "flex-1",
+        compact ? "max-w-full" : "flex-1",
       )}
       onDragLeave={handleStripDragLeave}
     >
@@ -253,9 +253,9 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           <div
             className={cn(
               "group relative inline-flex items-center justify-center whitespace-nowrap cursor-pointer select-none",
-              pill
+              compact
                 ? cn(
-                    "h-5 rounded-full text-[10px]",
+                    "h-6 text-[11px]",
                     isPermanent ? "px-2" : "px-2 pr-5",
                   )
                 : cn(
@@ -265,9 +265,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                       : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-7"),
                   ),
               isActive
-                ? pill
-                  ? "text-text-primary bg-[color-mix(in_srgb,var(--color-surface-hover)_80%,transparent)]"
-                  : "text-text-primary"
+                ? "text-text-primary"
                 : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover",
               isDragged && "opacity-50",
             )}
@@ -312,7 +310,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 onBlur={handleRenameSubmit}
                 className={cn(
                   "px-1 bg-bg-primary border border-border-primary rounded outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus text-text-primary",
-                  pill ? "text-[10px]" : "text-sm",
+                  compact ? "text-[11px]" : "text-sm",
                 )}
                 onClick={(e) => e.stopPropagation()}
                 style={{ width: `${Math.max(50, editingTitle.length * 8)}px` }}
@@ -320,18 +318,17 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             ) : (
               <span className={cn(
                 "inline-flex items-center justify-center min-w-0",
-                pill ? "gap-1" : "gap-2",
+                compact ? "gap-1" : "gap-2",
               )}>
                 {panel.type === 'terminal' && (
                   <span className={cn(
-                    "rounded-full flex-shrink-0 transition-all",
-                    pill ? "w-1 h-1" : "w-1.5 h-1.5",
+                    "w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all",
                     getPanelActivityStatus(panel.id) === 'active'
                       ? 'bg-status-info opacity-100 duration-150'
                       : 'bg-text-muted/20 opacity-40 duration-[3s]'
                   )} />
                 )}
-                {getPanelIcon(panel.type, panel, pill ? 'w-3 h-3' : 'w-4 h-4')}
+                {getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5' : 'w-4 h-4')}
                 <span>{displayTitle}</span>
               </span>
             )}
@@ -340,17 +337,17 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               <button
                 className={cn(
                   "absolute top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
-                  pill ? "right-1" : "right-1.5",
+                  compact ? "right-1" : "right-1.5",
                 )}
                 onClick={(e) => handlePanelClose(e, panel)}
               >
-                <X className={pill ? "w-2 h-2" : "w-2.5 h-2.5"} />
+                <X className="w-2.5 h-2.5" />
               </button>
             )}
           </div>
         );
 
-        const showDividerAfter = !pill && panel.type === 'browser';
+        const showDividerAfter = !compact && panel.type === 'browser';
         const divider = showDividerAfter ? (
           <div className="h-4 w-px bg-border-primary mx-1 flex-shrink-0" aria-hidden="true" />
         ) : null;

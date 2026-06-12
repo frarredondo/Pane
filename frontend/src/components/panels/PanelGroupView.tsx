@@ -2,10 +2,11 @@
  * PanelGroupView: renders a single tab group within the split layout.
  *
  * Each group has:
- * - A slim centered tab strip row (compact pill-style tabs) once the pane is
- *   split. It occupies a layout row so it pushes content down instead of
- *   covering it. Single-group panes render no strip here; their tabs live in
- *   PanelTabBar (the pixel-identical rule).
+ * - A slim centered tab strip row (compact tabs) once the pane is split. It
+ *   occupies a layout row so it pushes content down instead of covering it.
+ *   The primary group's permanent tabs (Diff/Explorer/Browser) stay in
+ *   PanelTabBar; only working tabs appear in strips. Single-group panes
+ *   render no strip here at all (the pixel-identical rule).
  * - An absolute-positioned panel stack (the editor-stage pattern: inactive
  *   terminals stay mounted behind display:none so xterm never reflows).
  * - A DropOverlay when a tab drag is in progress.
@@ -16,7 +17,7 @@ import React, { useCallback, useMemo } from 'react';
 import { PanelTabStrip } from './PanelTabStrip';
 import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
-import { dropZoneFor, type DropZone } from '../../utils/panelLayout';
+import { dropZoneFor, subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
 import { cn } from '../../utils/cn';
 
 // ---------------------------------------------------------------------------
@@ -153,6 +154,25 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
     return group.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
   }, [group.panelIds, groupPanels]);
 
+  // The primary group's permanent tabs (Diff/Explorer/Browser) stay up in
+  // PanelTabBar; its strip carries only the working tabs. Secondary groups
+  // show their full membership (a permanent tab dragged into one lives there).
+  const stripPanels = useMemo(() => {
+    if (!isPrimary) return orderedPanels;
+    return orderedPanels.filter(p => p.metadata?.permanent !== true);
+  }, [isPrimary, orderedPanels]);
+
+  // Strip drop indexes are relative to the displayed subset; translate to the
+  // group's full panel order before moving.
+  const handleStripDrop = useCallback((panelId: string, subsetIndex: number) => {
+    if (!onStripDrop) return;
+    onStripDrop(panelId, subsetInsertIndex(
+      group.panelIds,
+      stripPanels.map(p => p.id),
+      subsetIndex,
+    ));
+  }, [onStripDrop, group.panelIds, stripPanels]);
+
   return (
     <div
       className={cn(
@@ -161,26 +181,25 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
       )}
       onMouseDownCapture={handleMouseDownCapture}
     >
-      {/* Slim centered tab strip row: once the pane is split, every group
-          (primary included) owns its tabs in a compact full-width row that
-          pushes content down so it never covers it. */}
-      {multiGroup && (
+      {/* Slim centered tab strip row: once the pane is split, each group owns
+          its working tabs in a compact full-width row that pushes content
+          down so it never covers it. Hidden when the group has nothing to
+          show (e.g. the primary group holding only permanent tabs). */}
+      {multiGroup && stripPanels.length > 0 && (
         <div
           role="tablist"
           className="flex-shrink-0 flex justify-center bg-bg-chrome border-b border-border-primary px-2 py-0.5"
         >
           <PanelTabStrip
-            panels={orderedPanels}
+            panels={stripPanels}
             activePanelId={group.activePanelId}
             onPanelSelect={onPanelSelect}
             onPanelClose={onPanelClose}
-            isPrimary={isPrimary}
             isFocused={isFocusedGroup}
-            showShortcutHints={isPrimary}
-            variant="pill"
+            variant="compact"
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
-            onStripDrop={onStripDrop}
+            onStripDrop={handleStripDrop}
             isTabDragging={isTabDragging}
             draggedPanelId={draggedPanelId}
           />
