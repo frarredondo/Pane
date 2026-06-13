@@ -3,7 +3,8 @@ import { ArrowLeft, ArrowRight, Loader2, RotateCw } from 'lucide-react';
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
 import { usePanelStore } from '../../../stores/panelStore';
-import { useSessionStore } from '../../../stores/sessionStore';
+
+const SHARED_PANE_BROWSER_PARTITION = 'persist:pane-browser';
 
 interface BrowserSurfaceProps {
   panelId: string;
@@ -26,11 +27,6 @@ export const BrowserSurface: React.FC<BrowserSurfaceProps> = ({
   const [canGoForward, setCanGoForward] = useState(false);
   const addPanel = usePanelStore((state) => state.addPanel);
   const setActivePanelInStore = usePanelStore((state) => state.setActivePanel);
-
-  const projectId = useSessionStore((state) => {
-    const session = state.sessions.find(s => s.id === sessionId);
-    return session?.projectId;
-  });
 
   const handleBack = useCallback(() => {
     webviewRef.current?.goBack();
@@ -173,7 +169,8 @@ export const BrowserSurface: React.FC<BrowserSurfaceProps> = ({
       <webview
         ref={webviewRef}
         src={url}
-        partition={`persist:project-${projectId ?? sessionId}`}
+        // Review uses a shared Pane browser profile so GitHub auth persists across panes.
+        partition={SHARED_PANE_BROWSER_PARTITION}
         allowpopups={'true' as unknown as boolean}
         className="flex-1 border-0"
         style={{ display: 'inline-flex' }}

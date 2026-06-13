@@ -8,6 +8,7 @@ import type { CommandRunner } from '../utils/commandRunner';
 import { GitStatusLogger } from './gitStatusLogger';
 import { GitFileWatcher } from './gitFileWatcher';
 import { fastCheckWorkingDirectory, fastGetAheadBehind, fastGetDiffStats } from './gitPlumbingCommands';
+import { escapeShellArg } from '../utils/shellEscape';
 
 interface GitStatusCache {
   [sessionId: string]: {
@@ -50,7 +51,8 @@ export class GitStatusManager extends EventEmitter {
 
   // PR data cache
   private prCache = new Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>();
-  private readonly PR_CACHE_TTL = 2.5 * 60 * 1000;
+  private readonly PR_HIT_CACHE_TTL = 2.5 * 60 * 1000;
+  private readonly PR_MISS_CACHE_TTL = 20 * 1000;
 
   constructor(
     private sessionManager: SessionManager,
@@ -178,10 +180,17 @@ export class GitStatusManager extends EventEmitter {
     // If window becomes visible and we have an active session, restart the
     // watcher and do one authoritative refresh for any changes missed while hidden.
     if (this.activeSessionId) {
-      this.startWatchingSession(this.activeSessionId);
-      this.refreshSessionGitStatus(this.activeSessionId, false).catch(error => {
-        console.warn(`[GitStatus] Failed to refresh active session on focus:`, error);
-      });
+      void this.refreshActiveSessionAfterFocus(this.activeSessionId);
+    }
+  }
+
+  private async refreshActiveSessionAfterFocus(sessionId: string): Promise<void> {
+    try {
+      await this.startWatchingSession(sessionId);
+      await this.invalidatePrMissCacheForSession(sessionId);
+      await this.refreshSessionGitStatus(sessionId, false);
+    } catch (error) {
+      console.warn(`[GitStatus] Failed to refresh active session on focus:`, error);
     }
   }
 
@@ -499,13 +508,14 @@ export class GitStatusManager extends EventEmitter {
   ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }> {
     const cacheKey = `${projectPath}:${branchName}`;
     const cached = this.prCache.get(cacheKey);
-    if (cached && Date.now() - cached.fetchedAt < this.PR_CACHE_TTL) {
+    const cacheTtl = cached?.prNumber !== undefined ? this.PR_HIT_CACHE_TTL : this.PR_MISS_CACHE_TTL;
+    if (cached && Date.now() - cached.fetchedAt < cacheTtl) {
       return { prNumber: cached.prNumber, prUrl: cached.prUrl, prTitle: cached.prTitle, prState: cached.prState, prBody: cached.prBody };
     }
 
     try {
       const result = await commandRunner.execAsync(
-        `gh pr list --head "${branchName}" --state all --json number,url,title,state,body --limit 1`,
+        `gh pr list --head ${escapeShellArg(branchName)} --state all --json number,url,title,state,body --limit 1`,
         projectPath,
         { timeout: 5000 }
       );
@@ -539,20 +549,51 @@ export class GitStatusManager extends EventEmitter {
     }
   }
 
+  private async invalidatePrMissCacheForSession(sessionId: string): Promise<void> {
+    const session = await this.sessionManager.getSession(sessionId);
+    if (!session?.worktreePath) return;
+
+    const project = this.sessionManager.getProjectForSession(sessionId);
+    if (!project?.path) return;
+
+    const ctx = this.sessionManager.getProjectContext(sessionId);
+    if (!ctx) return;
+
+    const branchName = this.getCurrentBranchName(session.worktreePath, ctx.commandRunner);
+    if (!branchName) return;
+
+    const cacheKey = `${project.path}:${branchName}`;
+    const cached = this.prCache.get(cacheKey);
+    if (cached && cached.prNumber === undefined) {
+      this.prCache.delete(cacheKey);
+    }
+  }
+
+  private getCurrentBranchName(worktreePath: string, commandRunner: CommandRunner): string | null {
+    try {
+      const branchName = commandRunner.exec('git branch --show-current', worktreePath, { silent: true }).trim();
+      if (branchName) return branchName;
+    } catch {
+      // Fall back to the worktree folder name below.
+    }
+
+    return worktreePath.replace(/\\/g, '/').split('/').pop() || null;
+  }
+
   private enrichWithPrData(sessionId: string): void {
     setImmediate(async () => {
       try {
         const session = await this.sessionManager.getSession(sessionId);
         if (!session?.worktreePath) return;
 
-        const branchName = session.worktreePath.replace(/\\/g, '/').split('/').pop();
-        if (!branchName) return;
-
         const project = this.sessionManager.getProjectForSession(sessionId);
         if (!project?.path) return;
 
         const ctx = this.sessionManager.getProjectContext(sessionId);
         if (!ctx) return;
+
+        const branchName = this.getCurrentBranchName(session.worktreePath, ctx.commandRunner);
+        if (!branchName) return;
 
         const prData = await this.fetchPrForSession(branchName, project.path, ctx.commandRunner);
 

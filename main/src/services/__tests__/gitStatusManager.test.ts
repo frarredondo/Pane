@@ -8,11 +8,20 @@ import type { GitDiffManager } from '../gitDiffManager';
 import type { Logger } from '../../utils/logger';
 import type { GitStatus } from '../../types/session';
 import type { GitIndexStatus } from '../gitPlumbingCommands';
+import type { CommandRunner } from '../../utils/commandRunner';
 
 // Type for accessing private members in tests
 interface GitStatusManagerPrivates {
   fetchGitStatus(sessionId: string): Promise<GitStatus | null>;
+  fetchPrForSession(
+    branchName: string,
+    projectPath: string,
+    commandRunner: CommandRunner
+  ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }>;
+  enrichWithPrData(sessionId: string): void;
   cache: Record<string, { status: GitStatus; lastChecked: number }>;
+  prCache: Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>;
+  activeSessionId: string | null;
 }
 
 // Mock modules
@@ -303,6 +312,112 @@ describe('GitStatusManager', () => {
       const result = await gitStatusManager.getGitStatus('test-session');
 
       expect(result).toEqual(freshStatus);
+    });
+  });
+
+  describe('PR enrichment', () => {
+    it('caches PR misses for 20 seconds', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      const commandRunner = mockProjectContext.commandRunner;
+      (commandRunner.execAsync as Mock).mockResolvedValue({ stdout: '[]' });
+
+      await privates.fetchPrForSession('feature-branch', mockProject.path, commandRunner);
+      await privates.fetchPrForSession('feature-branch', mockProject.path, commandRunner);
+
+      expect(commandRunner.execAsync).toHaveBeenCalledTimes(1);
+
+      privates.prCache.set(`${mockProject.path}:feature-branch`, { fetchedAt: Date.now() - 20_001 });
+
+      await privates.fetchPrForSession('feature-branch', mockProject.path, commandRunner);
+
+      expect(commandRunner.execAsync).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps PR hits cached longer than misses', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      const commandRunner = mockProjectContext.commandRunner;
+      (commandRunner.execAsync as Mock).mockResolvedValue({
+        stdout: JSON.stringify([{
+          number: 12,
+          url: 'https://github.com/example/repo/pull/12',
+          title: 'Ready review',
+          state: 'OPEN',
+          body: 'Body',
+        }]),
+      });
+
+      await privates.fetchPrForSession('feature-branch', mockProject.path, commandRunner);
+      privates.prCache.set(`${mockProject.path}:feature-branch`, {
+        prNumber: 12,
+        prUrl: 'https://github.com/example/repo/pull/12',
+        prTitle: 'Ready review',
+        prState: 'OPEN',
+        prBody: 'Body',
+        fetchedAt: Date.now() - 20_001,
+      });
+
+      const result = await privates.fetchPrForSession('feature-branch', mockProject.path, commandRunner);
+
+      expect(commandRunner.execAsync).toHaveBeenCalledTimes(1);
+      expect(result.prNumber).toBe(12);
+    });
+
+    it('invalidates active-session PR misses when the app regains focus', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      privates.activeSessionId = 'test-session';
+      privates.prCache.set(`${mockProject.path}:feature-branch`, { fetchedAt: Date.now() });
+      (mockProjectContext.commandRunner.exec as Mock).mockReturnValue('feature-branch\n');
+      const refreshSpy = vi
+        .spyOn(gitStatusManager, 'refreshSessionGitStatus')
+        .mockResolvedValue({ state: 'clean', lastChecked: new Date().toISOString() });
+
+      gitStatusManager.handleVisibilityChange(false);
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(privates.prCache.has(`${mockProject.path}:feature-branch`)).toBe(false);
+      expect(refreshSpy).toHaveBeenCalledWith('test-session', false);
+    });
+
+    it('uses the checked-out git branch when enriching PR data', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      privates.cache['test-session'] = {
+        status: { state: 'ahead', lastChecked: new Date().toISOString() },
+        lastChecked: Date.now(),
+      };
+      (mockSessionManager.getSession as Mock).mockResolvedValue({
+        ...mockSession,
+        worktreePath: '/test/worktrees/not-the-branch',
+      });
+      (mockProjectContext.commandRunner.exec as Mock).mockReturnValue('real-feature-branch\n');
+      (mockProjectContext.commandRunner.execAsync as Mock).mockResolvedValue({
+        stdout: JSON.stringify([{
+          number: 12,
+          url: 'https://github.com/example/repo/pull/12',
+          title: 'Ready review',
+          state: 'OPEN',
+          body: 'Body',
+        }]),
+      });
+
+      const updated = new Promise<GitStatus>((resolve) => {
+        gitStatusManager.once('git-status-updated', (_sessionId, status) => resolve(status));
+      });
+      privates.enrichWithPrData('test-session');
+      const status = await updated;
+
+      expect(mockProjectContext.commandRunner.exec).toHaveBeenCalledWith(
+        'git branch --show-current',
+        '/test/worktrees/not-the-branch',
+        { silent: true }
+      );
+      expect(mockProjectContext.commandRunner.execAsync).toHaveBeenCalledWith(
+        expect.stringContaining('real-feature-branch'),
+        mockProject.path,
+        { timeout: 5000 }
+      );
+      expect((mockProjectContext.commandRunner.execAsync as Mock).mock.calls[0][0]).not.toContain('not-the-branch');
+      expect(status.prNumber).toBe(12);
+      expect(status.prUrl).toBe('https://github.com/example/repo/pull/12');
     });
   });
 
