@@ -23,6 +23,67 @@ function run(command, options = {}) {
   return result ? result.trim() : '';
 }
 
+function parseSemver(version) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
+  if (!match) {
+    return null;
+  }
+
+  return match.slice(1).map(Number);
+}
+
+function compareSemver(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) {
+      return a[i] - b[i];
+    }
+  }
+
+  return 0;
+}
+
+function formatSemver(parts) {
+  return parts.join('.');
+}
+
+function getLatestReleaseTag() {
+  const tagOutput = run('git tag --list "v[0-9]*.[0-9]*.[0-9]*"');
+  const parsedTags = tagOutput
+    .split('\n')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .map((tag) => ({ tag, version: parseSemver(tag) }))
+    .filter((entry) => entry.version);
+
+  if (parsedTags.length === 0) {
+    return null;
+  }
+
+  parsedTags.sort((a, b) => compareSemver(b.version, a.version));
+  return parsedTags[0];
+}
+
+function incrementVersion(version, bump) {
+  const parts = parseSemver(version);
+  if (!parts) {
+    console.error(`Invalid package.json version: ${version}`);
+    process.exit(1);
+  }
+
+  if (bump === 'patch') {
+    parts[2]++;
+  } else if (bump === 'minor') {
+    parts[1]++;
+    parts[2] = 0;
+  } else if (bump === 'major') {
+    parts[0]++;
+    parts[1] = 0;
+    parts[2] = 0;
+  }
+
+  return formatSemver(parts);
+}
+
 const input = process.argv[2];
 if (!input) {
   console.error('Usage: node scripts/release.js <patch|minor|major|version>');
@@ -33,31 +94,6 @@ if (!input) {
   console.error('  node scripts/release.js 0.1.0   # explicit version');
   process.exit(1);
 }
-
-let cleanVersion;
-
-if (['patch', 'minor', 'major'].includes(input)) {
-  const parts = pkg.version.split('.').map(Number);
-  if (input === 'patch') {
-    parts[2]++;
-  } else if (input === 'minor') {
-    parts[1]++;
-    parts[2] = 0;
-  } else if (input === 'major') {
-    parts[0]++;
-    parts[1] = 0;
-    parts[2] = 0;
-  }
-  cleanVersion = parts.join('.');
-} else {
-  cleanVersion = input.replace(/^v/, '');
-  if (!/^\d+\.\d+\.\d+$/.test(cleanVersion)) {
-    console.error(`Invalid version format: ${cleanVersion}`);
-    process.exit(1);
-  }
-}
-
-console.log(`Releasing v${cleanVersion} (was ${pkg.version})...`);
 
 const status = run('git status --porcelain');
 if (status) {
@@ -75,6 +111,46 @@ if (head !== originMain) {
   console.error(`origin/main: ${originMain}`);
   console.error('Update this worktree to origin/main or create a clean temp worktree from origin/main.');
   process.exit(1);
+}
+
+const latestRelease = getLatestReleaseTag();
+const latestVersion = latestRelease ? formatSemver(latestRelease.version) : null;
+let cleanVersion;
+
+if (['patch', 'minor', 'major'].includes(input)) {
+  if (!latestRelease) {
+    console.error(`Cannot infer a ${input} release because no v* semver tags exist.`);
+    console.error('Use an explicit version, for example: pnpm run release 1.0.0');
+    process.exit(1);
+  }
+
+  if (pkg.version !== latestVersion) {
+    console.error(`Cannot infer a ${input} release because package.json and the latest release tag disagree.`);
+    console.error(`package.json: ${pkg.version}`);
+    console.error(`latest tag:   ${latestRelease.tag}`);
+    console.error('Use an explicit version after deciding the intended next release, for example:');
+    console.error(`  pnpm run release ${latestVersion.split('.').slice(0, 2).join('.')}.${latestRelease.version[2] + 1}`);
+    process.exit(1);
+  }
+
+  cleanVersion = incrementVersion(pkg.version, input);
+} else {
+  cleanVersion = input.replace(/^v/, '');
+  if (!/^\d+\.\d+\.\d+$/.test(cleanVersion)) {
+    console.error(`Invalid version format: ${cleanVersion}`);
+    process.exit(1);
+  }
+
+  const requestedVersion = parseSemver(cleanVersion);
+  if (latestRelease && compareSemver(requestedVersion, latestRelease.version) <= 0) {
+    console.error(`Requested release v${cleanVersion} must be newer than latest tag ${latestRelease.tag}.`);
+    process.exit(1);
+  }
+}
+
+console.log(`Releasing v${cleanVersion} (was ${pkg.version})...`);
+if (latestRelease) {
+  console.log(`Latest release tag: ${latestRelease.tag}`);
 }
 
 const tagName = `v${cleanVersion}`;

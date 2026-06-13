@@ -1,176 +1,134 @@
 # Pane Release Instructions
 
-This document outlines the process for releasing new versions of Pane for macOS with automatic updates.
+Pane releases are cut from a clean `main` checkout with `scripts/release.js`.
+The script updates `package.json`, commits `release: vX.Y.Z`, tags the same
+commit, pushes `HEAD:main`, and pushes the tag.
 
-## Prerequisites
+## Mechanical Invariants
 
-Configure these secrets in your GitHub repository (Settings → Secrets and variables → Actions):
+Before a release, these facts must be true:
 
-**Required for macOS Signing & Notarization:**
-- `APPLE_CERTIFICATE`: Base64-encoded .p12 certificate
-- `APPLE_CERTIFICATE_PASSWORD`: Certificate password
-- `APPLE_ID`: Apple Developer account email
-- `APPLE_APP_PASSWORD`: App-specific password for notarization
-- `APPLE_TEAM_ID`: Apple Developer Team ID
+- The worktree is clean.
+- `HEAD` matches `origin/main`.
+- For inferred bumps (`patch`, `minor`, `major`), `package.json` version matches
+  the latest `v*` semver tag.
+- The release tag does not already exist locally or on `origin`.
 
-**To encode your certificate for GitHub secrets:**
+If `package.json` and the latest release tag disagree, do not run an inferred
+patch. Decide the intended next version and run an explicit release instead:
+
 ```bash
-base64 -i certificate.p12 -o certificate_base64.txt
+pnpm run release 2.2.1
 ```
-Copy the contents of the base64 file to the GitHub secret.
 
-**Note:** The `GITHUB_TOKEN` is automatically provided by GitHub Actions.
-
-## Release Process
-
-### 1. Prepare the Release
+## Happy Path
 
 ```bash
-# Ensure you're on the main branch
-git checkout main
-git pull origin main
+git switch main
+git pull --ff-only origin main
+git status --porcelain
+git tag --list 'v*' --sort=-v:refname | head -5
+node -p "require('./package.json').version"
 
-# Run tests and ensure everything passes
-pnpm test
 pnpm typecheck
+pnpm lint
+pnpm test:ci:minimal
+
+pnpm run release patch
 ```
 
-### 2. Update Version
-
-Edit `package.json` and update the version number:
-```json
-{
-  "version": "0.1.2"  // Update this
-}
-```
-
-### 3. Update Changelog
-
-Create or update `CHANGELOG.md` with release notes:
-```markdown
-## v0.1.2 - 2024-06-14
-
-### Added
-- Feature X
-- Feature Y
-
-### Fixed
-- Bug A
-- Bug B
-
-### Changed
-- Improvement C
-```
-
-### 4. Commit Version Changes
+Use `minor`, `major`, or an explicit version when that is the intended release:
 
 ```bash
-git add package.json CHANGELOG.md
-git commit -m "chore: bump version to 0.1.2"
-git push origin main
+pnpm run release minor
+pnpm run release major
+pnpm run release 2.3.0
 ```
 
-### 5. Create and Push Git Tag
+## GitHub Workflows
+
+Pull requests to `main` run:
+
+- `Code Quality`
+  - typecheck
+  - lint
+  - main process tests on Linux, macOS, and Windows
+  - frontend unit tests
+  - maintained Playwright smoke tests
+
+Pushes to `main` run:
+
+- `Code Quality`
+- `Deploy Remote PWA Preview`
+
+`v*` tag pushes run:
+
+- `Build & Release`
+  - macOS universal installer
+  - Linux installer artifacts
+  - Windows x64 installer
+  - Windows arm64 installer
+  - GitHub release publishing
+  - `SHA256SUMS.txt`
+- `Notify website on release`
+
+The release is not considered complete until the tag-triggered `Build & Release`
+run succeeds and the GitHub release is published.
+
+## Verification
+
+After `pnpm run release ...` finishes:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git fetch origin main --tags
+git rev-parse HEAD
+git rev-parse origin/main
+git tag --points-at HEAD
+gh run list --limit 10
+gh release view vX.Y.Z
 ```
 
-### 6. Automated Release
+Confirm:
 
-Once you push the tag, GitHub Actions will automatically:
-- Build the macOS application
-- Sign and notarize the app (if certificates are configured)
-- Generate auto-update metadata files (`latest-mac.yml`)
-- Create a GitHub release with the .dmg file
+- `HEAD` and `origin/main` point at the release commit.
+- The release commit has the expected `vX.Y.Z` tag.
+- `Build & Release` succeeded for the tag.
+- `Notify website on release` succeeded for the tag.
+- `Code Quality` succeeded for the release commit on `main`.
+- `Deploy Remote PWA Preview` succeeded for the release commit on `main`.
 
-**No manual action needed** - just wait for the workflow to complete.
+## Required Secrets
 
-### 7. Verify Release
+GitHub Actions provides `GITHUB_TOKEN` automatically.
 
-1. Go to https://github.com/dcouple/Pane/releases
-2. Verify the new release is created with:
-   - Proper version tag
-   - Release notes from the commit history
-   - macOS .dmg file
-   - Auto-update metadata file (`latest-mac.yml`)
+The release and preview workflows also depend on repository secrets and
+variables configured in GitHub Actions. Relevant examples include:
+
+- `SITE_REPO_DISPATCH_TOKEN` for website release notification.
+- Google Cloud workload identity, service account, project, and region values
+  for the remote PWA preview deploy.
+- Platform signing or publishing credentials if signing is re-enabled.
 
 ## Auto-Update Files
 
-The build process automatically generates these files required for auto-updates:
+The build process generates update metadata and installers under
+`dist-electron/` in the release workflow:
 
-- **latest-mac.yml** - macOS update metadata
-- **pane-[version]-mac.zip** - macOS update package
-- **pane-[version].dmg** - macOS installer
+- `latest-mac.yml`
+- `latest-linux.yml`
+- `latest-linux-arm64.yml`
+- `latest.yml`
+- macOS `.dmg` and `.zip`
+- Linux `.deb` and `.AppImage`
+- Windows `.exe`
 
-## Build Configuration
+## Rollback
 
-The release configuration is defined in `package.json`:
+Do not retag an existing version. If a release has a critical issue:
 
-```json
-{
-  "build": {
-    "appId": "com.dcouple.pane",
-    "productName": "Pane",
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "notarize": true
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "stravu",
-      "repo": "Pane"
-    }
-  }
-}
-```
+1. Fix the issue on `main`.
+2. Cut a new patch version.
+3. Leave the broken tag/release history intact unless maintainers explicitly
+   decide to remove it.
 
-## Troubleshooting
-
-### Auto-update not working
-
-1. **Missing update files**: Ensure the GitHub Actions workflow completed successfully
-2. **Certificate issues**: Check that all Apple certificates are properly configured in GitHub secrets
-3. **Notarization fails**: Verify Apple credentials are correct and the app-specific password is valid
-
-### Build fails
-
-1. **Native dependencies**: The workflow runs `pnpm electron:rebuild` automatically
-2. **Certificate not found**: Ensure the certificate is properly base64 encoded
-3. **Version conflicts**: Make sure the version in package.json matches the git tag
-
-## Testing Updates
-
-To test auto-updates:
-
-1. Install an older version of Pane
-2. Pane will automatically check for updates on startup
-3. When an update is found, the in-app dialog will appear
-4. Click "Download Update" to test the auto-update process
-
-## Best Practices
-
-1. **Semantic Versioning**: Follow semver (MAJOR.MINOR.PATCH)
-2. **Release Notes**: Keep CHANGELOG.md updated with user-friendly notes
-3. **Testing**: Test the release workflow on a test repository first
-4. **Incremental Updates**: Avoid jumping multiple major versions
-
-## Emergency Rollback
-
-If a release has critical issues:
-
-1. Delete the problematic release and tag from GitHub
-2. Fix the issue in the code
-3. Create a new version (e.g., if 0.1.2 was bad, release 0.1.3)
-4. Follow the normal release process
-
-## Additional Notes
-
-- Auto-updates only work for signed and notarized applications
-- Development builds cannot auto-update
-- Users can always manually download from GitHub releases if auto-update fails
-- Settings and data are preserved during updates
-- Pane checks for updates on startup and every 24 hours
+Users can always manually download the latest good release from GitHub Releases.

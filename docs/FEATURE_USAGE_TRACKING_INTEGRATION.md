@@ -4,6 +4,11 @@ This document provides guidance on integrating the remaining feature usage track
 
 ## Overview
 
+Before adding or changing tracking, read
+[Analytics Invariants](ANALYTICS_INVARIANTS.md). Consent, identity, attribution,
+and version fields have ordering requirements that keep PostHog funnels
+person-stitchable.
+
 The following feature usage events have been fully implemented:
 - ✅ `run_script_executed` - Tracked in backend (logsManager)
 - ✅ `notification_shown` - Tracked in frontend (useNotifications hook)

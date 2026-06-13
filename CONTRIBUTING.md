@@ -103,11 +103,45 @@ Fixes #42
    - Clear title and description
    - Link to related issues
    - Screenshots for UI changes
+   - Testing notes that list the commands you ran
+
+### PR and Release Workflows
+
+Pull requests to `main` run the `Code Quality` workflow. That workflow covers
+typecheck, lint, main process tests on Linux/macOS/Windows, frontend unit tests,
+and the maintained Playwright smoke suite.
+
+Pushes to `main` run `Code Quality` and `Deploy Remote PWA Preview`. `v*` tags
+run `Build & Release` plus website notification. See
+[docs/RELEASE_INSTRUCTIONS.md](docs/RELEASE_INSTRUCTIONS.md) before cutting a
+release.
 
 ## Testing
 
-### Current Status
-Pane doesn't have automated tests yet - we welcome contributions to add them! If you'd like to help set up a testing framework, please open an issue to discuss the approach.
+### Automated Checks
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm --filter main test
+pnpm --filter frontend test
+pnpm test:ci:minimal
+```
+
+For focused Playwright work, run the relevant spec directly:
+
+```bash
+pnpm test -- tests/smoke.spec.ts
+pnpm test -- tests/analytics-consent.spec.ts
+```
+
+Playwright starts the Electron dev app on port `4521` by default. Do not run
+multiple Playwright invocations concurrently on the same port. Run suites
+sequentially, or assign separate ports:
+
+```bash
+PLAYWRIGHT_PORT=4522 pnpm test -- tests/analytics-consent.spec.ts
+```
 
 ### Manual Testing Requirements
 
@@ -175,6 +209,6 @@ Feel free to:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the AGPL-3.0 License.
 
 Thank you for contributing to Pane! 🎉
