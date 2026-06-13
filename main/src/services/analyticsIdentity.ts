@@ -1,6 +1,8 @@
 import { execFileSync } from 'child_process';
 import * as crypto from 'crypto';
+import * as fsSync from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 import { getShellPath } from '../utils/shellPath';
 import type { AnalyticsIdentity } from '../types/config';
 
@@ -58,4 +60,23 @@ export function resolveAnalyticsIdentity(existingDistinctId?: string): Analytics
     gitEmailHash,
     gitUserName,
   };
+}
+
+export function readWebAttribution(appDir: string): string | undefined {
+  try {
+    const token = fsSync.readFileSync(path.join(appDir, 'attribution_ref'), 'utf8').trim();
+    if (!token) return undefined;
+
+    const decoded = Buffer.from(token, 'base64url').toString('utf8');
+    const separatorIndex = decoded.lastIndexOf('|');
+    if (separatorIndex <= 0) return undefined;
+
+    const distinctId = decoded.slice(0, separatorIndex);
+    const issuedAt = decoded.slice(separatorIndex + 1);
+    if (!/^\d+$/.test(issuedAt)) return undefined;
+
+    return distinctId.length > 0 && distinctId.length <= 64 ? distinctId : undefined;
+  } catch {
+    return undefined;
+  }
 }

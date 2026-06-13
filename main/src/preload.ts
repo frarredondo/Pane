@@ -1049,6 +1049,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncDistinctId: (distinctId: string): void => {
       ipcRenderer.send('analytics:sync-distinct-id', distinctId);
     },
+    redeemAttribution: (): Promise<IPCResponse<void>> => invokeIpc('analytics:redeem-attribution'),
   },
 
   // Spotlight

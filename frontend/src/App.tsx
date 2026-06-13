@@ -35,7 +35,14 @@ import { CloudWidget } from './components/CloudWidget';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
 import { useNavigationStore } from './stores/navigationStore';
-import { initPostHog, capture, captureUnconditionally, posthog } from './services/posthog';
+import {
+  aliasWebVisitor,
+  capture,
+  captureUnconditionally,
+  initPostHog,
+  posthog,
+  queuePendingEvent,
+} from './services/posthog';
 import type { VersionUpdateInfo } from './types/session';
 import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
@@ -279,6 +286,14 @@ function App() {
     const initializeAnalytics = async () => {
       let identity: AnalyticsIdentity | undefined;
       const analyticsEnabled = appConfig.analytics?.enabled ?? false;
+      let consentDecided = false;
+
+      try {
+        const consentResult = await window.electron?.invoke?.('preferences:get', 'analytics_consent_shown') as IPCResponse<string> | undefined;
+        consentDecided = consentResult?.data === 'true';
+      } catch (error) {
+        console.error('[App] Error resolving analytics consent state:', error);
+      }
 
       if (analyticsEnabled) {
         try {
@@ -300,6 +315,11 @@ function App() {
         identity,
       });
 
+      if (analyticsEnabled && identity?.webDistinctId) {
+        aliasWebVisitor(identity.webDistinctId);
+        void window.electronAPI?.analytics?.redeemAttribution?.();
+      }
+
       // Sync distinct ID to main process so shutdown analytics use the same identity
       const distinctId = identity?.distinctId || posthog.get_distinct_id();
       if (distinctId) {
@@ -310,7 +330,11 @@ function App() {
       // The preload buffers any events that arrived before this point and replays them.
       if (!window.electronAPI?.analytics?.onMainEvent) return;
       cleanup = window.electronAPI.analytics.onMainEvent((event) => {
-        capture(event.eventName, event.properties);
+        if (analyticsEnabled) {
+          capture(event.eventName, event.properties);
+        } else if (!consentDecided) {
+          queuePendingEvent(event);
+        }
       });
     };
 

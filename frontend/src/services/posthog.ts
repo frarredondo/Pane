@@ -1,25 +1,25 @@
 import posthog from 'posthog-js';
+import type { AnalyticsIdentity } from '../types/config';
 
 const DEFAULT_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
-const DEFAULT_HOST = 'https://us.i.posthog.com';
+const DEFAULT_HOST = 'https://runpane.com/api/c';
 
 let currentApiKey: string | undefined;
 let currentHost: string | undefined;
 let currentEnabled: boolean | undefined;
 
+export interface PendingAnalyticsEvent {
+  eventName: string;
+  properties?: Record<string, unknown>;
+}
+
+let pendingEvents: PendingAnalyticsEvent[] = [];
+
 export interface PostHogConfig {
   enabled: boolean;
   posthogApiKey?: string;
   posthogHost?: string;
-  identity?: {
-    distinctId: string;
-    identitySource: string;
-    githubUsername?: string;
-    githubEmail?: string;
-    gitEmail?: string;
-    gitEmailHash?: string;
-    gitUserName?: string;
-  };
+  identity?: AnalyticsIdentity;
 }
 
 function identifyUser(config: PostHogConfig): void {
@@ -37,6 +37,19 @@ function identifyUser(config: PostHogConfig): void {
   posthog.identify(config.identity.distinctId, Object.fromEntries(
     Object.entries(properties).filter(([, value]) => value !== undefined)
   ));
+}
+
+function directCaptureTarget(): { token: string; host: string; distinctId: string } {
+  const distinctId = posthog.get_distinct_id?.();
+
+  return {
+    token: currentApiKey || DEFAULT_API_KEY,
+    host: currentHost || DEFAULT_HOST,
+    distinctId:
+      typeof distinctId === 'string' && distinctId.length > 0
+        ? distinctId
+        : `anon_${crypto.randomUUID()}`,
+  };
 }
 
 export function initPostHog(config: PostHogConfig): void {
@@ -82,6 +95,10 @@ export function initPostHog(config: PostHogConfig): void {
   }
 
   identifyUser(config);
+
+  if (config.enabled) {
+    flushPendingEvents();
+  }
 }
 
 export function optIn(): void {
@@ -92,6 +109,34 @@ export function optOut(): void {
   posthog.opt_out_capturing();
 }
 
+export function queuePendingEvent(event: PendingAnalyticsEvent): void {
+  pendingEvents.push({
+    eventName: event.eventName,
+    properties: event.properties,
+  });
+}
+
+export function flushPendingEvents(): void {
+  const eventsToSend = pendingEvents;
+  pendingEvents = [];
+
+  for (const event of eventsToSend) {
+    capture(event.eventName, event.properties);
+  }
+}
+
+export function discardPendingEvents(): void {
+  pendingEvents = [];
+}
+
+export function aliasWebVisitor(webDistinctId: string): void {
+  try {
+    posthog.alias(webDistinctId);
+  } catch (error) {
+    console.error('[PostHog] Failed to alias web visitor:', error);
+  }
+}
+
 /**
  * Capture a single event and then opt out of capturing.
  *
@@ -100,11 +145,7 @@ export function optOut(): void {
  * during the flush window.
  */
 export function captureAndOptOut(eventName: string, properties?: Record<string, unknown>): void {
-  const token = posthog.get_property?.('$token') as string | undefined
-    || posthog.config?.token
-    || DEFAULT_API_KEY;
-  const host = posthog.config?.api_host || DEFAULT_HOST;
-  const distinctId = posthog.get_distinct_id();
+  const { token, host, distinctId } = directCaptureTarget();
 
   const payload = {
     api_key: token,
@@ -114,6 +155,7 @@ export function captureAndOptOut(eventName: string, properties?: Record<string, 
       distinct_id: distinctId,
       token,
       $lib: 'posthog-js',
+      $process_person_profile: false,
     },
     timestamp: new Date().toISOString(),
   };
@@ -158,11 +200,7 @@ export function capture(eventName: string, properties?: Record<string, unknown>)
  * opted_in + opted_out lower bound).
  */
 export function captureUnconditionally(eventName: string, properties?: Record<string, unknown>): void {
-  const token = (posthog.get_property?.('$token') as string | undefined)
-    || posthog.config?.token
-    || DEFAULT_API_KEY;
-  const host = posthog.config?.api_host || DEFAULT_HOST;
-  const distinctId = posthog.get_distinct_id();
+  const { token, host, distinctId } = directCaptureTarget();
 
   const payload = {
     api_key: token,
@@ -172,6 +210,7 @@ export function captureUnconditionally(eventName: string, properties?: Record<st
       distinct_id: distinctId,
       token,
       $lib: 'posthog-js',
+      $process_person_profile: false,
     },
     timestamp: new Date().toISOString(),
   };
