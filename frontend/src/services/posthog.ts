@@ -39,6 +39,19 @@ function identifyUser(config: PostHogConfig): void {
   ));
 }
 
+function directCaptureTarget(): { token: string; host: string; distinctId: string } {
+  const distinctId = posthog.get_distinct_id?.();
+
+  return {
+    token: currentApiKey || DEFAULT_API_KEY,
+    host: currentHost || DEFAULT_HOST,
+    distinctId:
+      typeof distinctId === 'string' && distinctId.length > 0
+        ? distinctId
+        : `anon_${crypto.randomUUID()}`,
+  };
+}
+
 export function initPostHog(config: PostHogConfig): void {
   const apiKey = config.posthogApiKey || DEFAULT_API_KEY;
   const host = config.posthogHost || DEFAULT_HOST;
@@ -132,11 +145,7 @@ export function aliasWebVisitor(webDistinctId: string): void {
  * during the flush window.
  */
 export function captureAndOptOut(eventName: string, properties?: Record<string, unknown>): void {
-  const token = posthog.get_property?.('$token') as string | undefined
-    || posthog.config?.token
-    || DEFAULT_API_KEY;
-  const host = posthog.config?.api_host || DEFAULT_HOST;
-  const distinctId = posthog.get_distinct_id();
+  const { token, host, distinctId } = directCaptureTarget();
 
   const payload = {
     api_key: token,
@@ -191,11 +200,7 @@ export function capture(eventName: string, properties?: Record<string, unknown>)
  * opted_in + opted_out lower bound).
  */
 export function captureUnconditionally(eventName: string, properties?: Record<string, unknown>): void {
-  const token = (posthog.get_property?.('$token') as string | undefined)
-    || posthog.config?.token
-    || DEFAULT_API_KEY;
-  const host = posthog.config?.api_host || DEFAULT_HOST;
-  const distinctId = posthog.get_distinct_id();
+  const { token, host, distinctId } = directCaptureTarget();
 
   const payload = {
     api_key: token,
