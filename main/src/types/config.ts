@@ -21,18 +21,26 @@ export type TerminalPowerMode = 'performance' | 'batterySaver';
 export interface AnalyticsIdentity {
   distinctId: string;
   identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
+  installId?: string;
+  appVersion?: string;
+  platform?: string;
+  electronVersion?: string;
+  webDistinctId?: string;
+  webAttributionPresent?: boolean;
+  isFirstLaunch?: boolean;
+  previousVersion?: string | null;
   githubUsername?: string;
   githubEmail?: string;
   gitEmail?: string;
   gitEmailHash?: string;
   gitUserName?: string;
-  webDistinctId?: string;
 }
 
 export interface AnalyticsConfig {
   enabled: boolean;
   posthogApiKey?: string;
   posthogHost?: string;
+  installId?: string;
   distinctId?: string;
   identitySource?: AnalyticsIdentity['identitySource'];
   githubUsername?: string;

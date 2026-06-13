@@ -8,12 +8,21 @@ import fs from 'fs/promises';
 import { watch, type FSWatcher } from 'fs';
 import path from 'path';
 import os from 'os';
+import { randomUUID } from 'crypto';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
 
 const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
 const LEGACY_POSTHOG_HOST = 'https://us.i.posthog.com';
 const DEFAULT_POSTHOG_HOST = 'https://runpane.com/api/c';
+
+function defaultAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
+  return {
+    enabled: false,
+    posthogApiKey: DEFAULT_POSTHOG_API_KEY,
+    posthogHost: DEFAULT_POSTHOG_HOST
+  };
+}
 
 export class ConfigManager extends EventEmitter {
   private config: AppConfig;
@@ -62,11 +71,7 @@ export class ConfigManager extends EventEmitter {
         },
         showAdvanced: false
       },
-      analytics: {
-        enabled: false, // Opt-in: disabled by default until user consents
-        posthogApiKey: DEFAULT_POSTHOG_API_KEY,
-        posthogHost: DEFAULT_POSTHOG_HOST
-      },
+      analytics: defaultAnalyticsConfig(),
       remoteDaemon: createDefaultRemoteDaemonConfig(),
       terminalShortcuts: [
         {
@@ -277,9 +282,19 @@ export class ConfigManager extends EventEmitter {
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
+    const analytics =
+      updates.analytics !== undefined
+        ? {
+            ...defaultAnalyticsConfig(),
+            ...this.config.analytics,
+            ...updates.analytics
+          }
+        : this.config.analytics;
+
     this.config = {
       ...this.config,
       ...updates,
+      analytics,
       cloud: 'cloud' in updates
         ? (updates.cloud === undefined ? undefined : normalizeCloudVmConfig(updates.cloud))
         : this.config.cloud,
@@ -362,11 +377,7 @@ export class ConfigManager extends EventEmitter {
   }
 
   getAnalyticsSettings() {
-    return this.config.analytics || {
-      enabled: false, // Opt-in: disabled by default until user consents
-      posthogApiKey: DEFAULT_POSTHOG_API_KEY,
-      posthogHost: DEFAULT_POSTHOG_HOST
-    };
+    return this.config.analytics || defaultAnalyticsConfig();
   }
 
   isAnalyticsEnabled(): boolean {
@@ -377,33 +388,38 @@ export class ConfigManager extends EventEmitter {
     return this.config.analytics?.distinctId;
   }
 
-  async setAnalyticsDistinctId(distinctId: string): Promise<void> {
+  private ensureAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
     if (!this.config.analytics) {
-      this.config.analytics = {
-        enabled: false,
-        posthogApiKey: DEFAULT_POSTHOG_API_KEY,
-        posthogHost: DEFAULT_POSTHOG_HOST
-      };
+      this.config.analytics = defaultAnalyticsConfig();
     }
-    this.config.analytics.distinctId = distinctId;
+    return this.config.analytics;
+  }
+
+  async getOrCreateAnalyticsInstallId(): Promise<string> {
+    const analytics = this.ensureAnalyticsConfig();
+    if (!analytics.installId) {
+      analytics.installId = `install_${randomUUID()}`;
+      await this.saveConfig();
+    }
+    return analytics.installId;
+  }
+
+  async setAnalyticsDistinctId(distinctId: string): Promise<void> {
+    const analytics = this.ensureAnalyticsConfig();
+    analytics.distinctId = distinctId;
     await this.saveConfig();
   }
 
   async setAnalyticsIdentity(identity: AnalyticsIdentity): Promise<void> {
-    if (!this.config.analytics) {
-      this.config.analytics = {
-        enabled: false,
-        posthogApiKey: DEFAULT_POSTHOG_API_KEY,
-        posthogHost: DEFAULT_POSTHOG_HOST
-      };
-    }
-    this.config.analytics.distinctId = identity.distinctId;
-    this.config.analytics.identitySource = identity.identitySource;
-    this.config.analytics.githubUsername = identity.githubUsername;
-    this.config.analytics.githubEmail = identity.githubEmail;
-    this.config.analytics.gitEmail = identity.gitEmail;
-    this.config.analytics.gitEmailHash = identity.gitEmailHash;
-    this.config.analytics.gitUserName = identity.gitUserName;
+    const analytics = this.ensureAnalyticsConfig();
+    analytics.distinctId = identity.distinctId;
+    analytics.identitySource = identity.identitySource;
+    analytics.installId = identity.installId ?? analytics.installId;
+    analytics.githubUsername = identity.githubUsername;
+    analytics.githubEmail = identity.githubEmail;
+    analytics.gitEmail = identity.gitEmail;
+    analytics.gitEmailHash = identity.gitEmailHash;
+    analytics.gitUserName = identity.gitUserName;
     await this.saveConfig();
   }
 

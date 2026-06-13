@@ -4,14 +4,32 @@ import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { useConfigStore } from '../stores/configStore';
-import { optIn, capture, captureAndOptOut, discardPendingEvents, flushPendingEvents } from '../services/posthog';
+import {
+  aliasWebVisitor,
+  aliasWebVisitorDirect,
+  captureAndOptOut,
+  captureUnconditionally,
+  discardPendingEvents,
+  flushPendingEvents,
+  initPostHog,
+} from '../services/posthog';
+import type { AnalyticsIdentity } from '../types/config';
 
 interface AnalyticsConsentDialogProps {
   isOpen: boolean;
   onClose: (accepted: boolean) => void;
+  analyticsIdentity?: AnalyticsIdentity;
+  onResolveAnalyticsIdentity: () => Promise<AnalyticsIdentity | undefined>;
+  onCaptureFirstOpen: (identity?: AnalyticsIdentity) => Promise<void>;
 }
 
-export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsConsentDialogProps) {
+export default function AnalyticsConsentDialog({
+  isOpen,
+  onClose,
+  analyticsIdentity,
+  onResolveAnalyticsIdentity,
+  onCaptureFirstOpen,
+}: AnalyticsConsentDialogProps) {
   const paneLogo = usePaneLogo();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const { config, updateConfig } = useConfigStore();
@@ -19,7 +37,8 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
   const handleAccept = async () => {
     setIsSubmitting(true);
     try {
-      // Enable analytics
+      const identity = analyticsIdentity ?? await onResolveAnalyticsIdentity();
+
       await updateConfig({
         analytics: {
           ...config?.analytics,
@@ -27,10 +46,21 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
         },
       });
 
-      // Track opt-in event
-      optIn();
+      initPostHog({
+        enabled: true,
+        posthogApiKey: config?.analytics?.posthogApiKey,
+        posthogHost: config?.analytics?.posthogHost,
+        identity,
+      }, { flushPendingEvents: false });
+
+      if (identity?.webDistinctId) {
+        aliasWebVisitor(identity.webDistinctId, identity.distinctId);
+        void window.electronAPI?.analytics?.redeemAttribution?.();
+      }
+
+      await captureUnconditionally('analytics_opted_in', undefined, identity);
+      await onCaptureFirstOpen(identity);
       flushPendingEvents();
-      capture('analytics_opted_in');
 
       // Mark consent as shown
       if (window.electron?.invoke) {
@@ -48,9 +78,22 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
   const handleDecline = async () => {
     setIsSubmitting(true);
     try {
-      // Track opt-out event FIRST (before disabling analytics)
-      // Uses captureAndOptOut to ensure the event is flushed before disabling
-      captureAndOptOut('analytics_opted_out');
+      const identity = analyticsIdentity ?? await onResolveAnalyticsIdentity();
+
+      initPostHog({
+        enabled: false,
+        posthogApiKey: config?.analytics?.posthogApiKey,
+        posthogHost: config?.analytics?.posthogHost,
+        identity,
+      }, { flushPendingEvents: false });
+
+      if (identity?.webDistinctId) {
+        await aliasWebVisitorDirect(identity);
+        void window.electronAPI?.analytics?.redeemAttribution?.();
+      }
+
+      await onCaptureFirstOpen(identity);
+      await captureAndOptOut('analytics_opted_out', undefined, identity);
       discardPendingEvents();
 
       // Mark consent as shown before the config update re-registers analytics listeners.

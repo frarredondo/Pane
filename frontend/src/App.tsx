@@ -38,7 +38,9 @@ import { useNavigationStore } from './stores/navigationStore';
 import {
   aliasWebVisitor,
   capture,
+  captureAppFirstOpened,
   captureUnconditionally,
+  flushPendingEvents,
   initPostHog,
   posthog,
   queuePendingEvent,
@@ -77,7 +79,11 @@ function App() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
   const [completedOnboardingThisSession, setCompletedOnboardingThisSession] = useState(false);
+  const [analyticsIdentity, setAnalyticsIdentity] = useState<AnalyticsIdentity | undefined>();
   const analyticsCheckStarted = useRef(false);
+  const analyticsIdentityPromise = useRef<Promise<AnalyticsIdentity | undefined> | null>(null);
+  const analyticsConsentOpenRef = useRef(false);
+  const appFirstOpenedCaptured = useRef(false);
   const onboardingCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -125,6 +131,10 @@ function App() {
   
   useIPCEvents();
   const { showNotification } = useNotifications();
+
+  useEffect(() => {
+    analyticsConsentOpenRef.current = isAnalyticsConsentOpen;
+  }, [isAnalyticsConsentOpen]);
 
   // Global panel activity status listener
   useEffect(() => {
@@ -240,9 +250,38 @@ function App() {
     return projects.find(p => p.active) || projects[0];
   }, [projects, activeProjectId]);
 
+  const resolveAnalyticsIdentity = useCallback(async (): Promise<AnalyticsIdentity | undefined> => {
+    if (!analyticsIdentityPromise.current) {
+      analyticsIdentityPromise.current = (async () => {
+        try {
+          const identityResult = await window.electronAPI?.analytics?.getIdentity?.();
+          if (identityResult?.success && identityResult.data) {
+            setAnalyticsIdentity(identityResult.data);
+            return identityResult.data;
+          }
+        } catch (error) {
+          console.error('[App] Error resolving analytics identity:', error);
+        }
+        return undefined;
+      })();
+    }
+
+    const identity = await analyticsIdentityPromise.current;
+    if (!identity) {
+      analyticsIdentityPromise.current = null;
+    }
+    return identity;
+  }, []);
+
+  const captureFirstOpenOnce = useCallback(async (identity?: AnalyticsIdentity): Promise<void> => {
+    if (!identity || appFirstOpenedCaptured.current) return;
+    appFirstOpenedCaptured.current = true;
+    await captureAppFirstOpened(identity);
+  }, []);
+
   // Check if analytics consent dialog should be shown (before other dialogs)
   useEffect(() => {
-    if (hasCheckedAnalyticsConsent || analyticsCheckStarted.current) return;
+    if (!appConfig || hasCheckedAnalyticsConsent || analyticsCheckStarted.current) return;
     analyticsCheckStarted.current = true;
 
     const checkAnalyticsConsent = async () => {
@@ -256,13 +295,21 @@ function App() {
         const hasShownConsent = consentResult?.data === 'true';
 
         if (!hasShownConsent) {
+          const identity = await resolveAnalyticsIdentity();
+          initPostHog({
+            enabled: false,
+            posthogApiKey: appConfig.analytics?.posthogApiKey,
+            posthogHost: appConfig.analytics?.posthogHost,
+            identity,
+          }, { flushPendingEvents: false });
           // Fire consent_dialog_shown BEFORE the user can opt in/out, so we
           // have a true "saw the dialog" denominator for funnel math instead
           // of the conservative opted_in + opted_out lower bound. Uses direct
           // HTTP via captureUnconditionally so it bypasses the opt-in gate.
           // See docs/analytics-attribution.md in runpane-website repo for
           // the funnel formula this event enables.
-          captureUnconditionally('consent_dialog_shown');
+          await captureUnconditionally('consent_dialog_shown', undefined, identity);
+          await captureFirstOpenOnce(identity);
           setIsAnalyticsConsentOpen(true);
         }
       } catch (error) {
@@ -273,7 +320,7 @@ function App() {
     };
 
     checkAnalyticsConsent();
-  }, [hasCheckedAnalyticsConsent]);
+  }, [appConfig, captureFirstOpenOnce, hasCheckedAnalyticsConsent, resolveAnalyticsIdentity]);
 
   // Initialize PostHog after config loads, then start forwarding main-process events.
   // Both must live in the same effect so buffered events aren't replayed before init.
@@ -284,7 +331,6 @@ function App() {
     let cancelled = false;
 
     const initializeAnalytics = async () => {
-      let identity: AnalyticsIdentity | undefined;
       const analyticsEnabled = appConfig.analytics?.enabled ?? false;
       let consentDecided = false;
 
@@ -295,16 +341,7 @@ function App() {
         console.error('[App] Error resolving analytics consent state:', error);
       }
 
-      if (analyticsEnabled) {
-        try {
-          const identityResult = await window.electronAPI?.analytics?.getIdentity?.();
-          if (identityResult?.success) {
-            identity = identityResult.data;
-          }
-        } catch (error) {
-          console.error('[App] Error resolving analytics identity:', error);
-        }
-      }
+      const identity = await resolveAnalyticsIdentity();
 
       if (cancelled) return;
 
@@ -313,10 +350,10 @@ function App() {
         posthogApiKey: appConfig.analytics?.posthogApiKey,
         posthogHost: appConfig.analytics?.posthogHost,
         identity,
-      });
+      }, { flushPendingEvents: false });
 
       if (analyticsEnabled && identity?.webDistinctId) {
-        aliasWebVisitor(identity.webDistinctId);
+        aliasWebVisitor(identity.webDistinctId, identity.distinctId);
         void window.electronAPI?.analytics?.redeemAttribution?.();
       }
 
@@ -336,6 +373,11 @@ function App() {
           queuePendingEvent(event);
         }
       });
+
+      if (analyticsEnabled && !analyticsConsentOpenRef.current) {
+        await captureFirstOpenOnce(identity);
+        flushPendingEvents();
+      }
     };
 
     void initializeAnalytics();
@@ -344,7 +386,7 @@ function App() {
       cancelled = true;
       cleanup?.();
     };
-  }, [appConfig]);
+  }, [appConfig, captureFirstOpenOnce, resolveAnalyticsIdentity]);
 
   // CRITICAL PERFORMANCE FIX: Cleanup to prevent V8 array iteration issues
   // Uses visibility-aware interval: 60s when active, 600s when hidden
@@ -661,6 +703,9 @@ function App() {
         <AnalyticsConsentDialog
           isOpen={isAnalyticsConsentOpen}
           onClose={() => setIsAnalyticsConsentOpen(false)}
+          analyticsIdentity={analyticsIdentity}
+          onResolveAnalyticsIdentity={resolveAnalyticsIdentity}
+          onCaptureFirstOpen={captureFirstOpenOnce}
         />
         <OnboardingDialog
           isOpen={isOnboardingOpen}
