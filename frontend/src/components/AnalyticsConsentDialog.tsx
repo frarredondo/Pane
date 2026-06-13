@@ -4,7 +4,7 @@ import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { useConfigStore } from '../stores/configStore';
-import { optIn, capture, captureAndOptOut } from '../services/posthog';
+import { optIn, capture, captureAndOptOut, discardPendingEvents, flushPendingEvents } from '../services/posthog';
 
 interface AnalyticsConsentDialogProps {
   isOpen: boolean;
@@ -29,6 +29,7 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
 
       // Track opt-in event
       optIn();
+      flushPendingEvents();
       capture('analytics_opted_in');
 
       // Mark consent as shown
@@ -50,6 +51,12 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
       // Track opt-out event FIRST (before disabling analytics)
       // Uses captureAndOptOut to ensure the event is flushed before disabling
       captureAndOptOut('analytics_opted_out');
+      discardPendingEvents();
+
+      // Mark consent as shown before the config update re-registers analytics listeners.
+      if (window.electron?.invoke) {
+        await window.electron.invoke('preferences:set', 'analytics_consent_shown', 'true');
+      }
 
       // Disable analytics (keep it disabled since it's opt-in)
       await updateConfig({
@@ -58,11 +65,6 @@ export default function AnalyticsConsentDialog({ isOpen, onClose }: AnalyticsCon
           enabled: false,
         },
       });
-
-      // Mark consent as shown
-      if (window.electron?.invoke) {
-        await window.electron.invoke('preferences:set', 'analytics_consent_shown', 'true');
-      }
 
       onClose(false);
     } catch (error) {

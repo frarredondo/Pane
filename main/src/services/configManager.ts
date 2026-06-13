@@ -11,6 +11,10 @@ import os from 'os';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
 
+const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
+const LEGACY_POSTHOG_HOST = 'https://us.i.posthog.com';
+const DEFAULT_POSTHOG_HOST = 'https://runpane.com/api/c';
+
 export class ConfigManager extends EventEmitter {
   private config: AppConfig;
   private configPath: string;
@@ -60,8 +64,8 @@ export class ConfigManager extends EventEmitter {
       },
       analytics: {
         enabled: false, // Opt-in: disabled by default until user consents
-        posthogApiKey: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
-        posthogHost: 'https://us.i.posthog.com'
+        posthogApiKey: DEFAULT_POSTHOG_API_KEY,
+        posthogHost: DEFAULT_POSTHOG_HOST
       },
       remoteDaemon: createDefaultRemoteDaemonConfig(),
       terminalShortcuts: [
@@ -151,6 +155,11 @@ export class ConfigManager extends EventEmitter {
           ? loadedConfig.worktreeFileSync
           : DEFAULT_WORKTREE_FILE_SYNC_ENTRIES
       };
+
+      if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
+        this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
+        await this.saveConfig();
+      }
     } catch (error: unknown) {
       const isNotFound = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
       if (isNotFound) {
@@ -355,8 +364,8 @@ export class ConfigManager extends EventEmitter {
   getAnalyticsSettings() {
     return this.config.analytics || {
       enabled: false, // Opt-in: disabled by default until user consents
-      posthogApiKey: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
-      posthogHost: 'https://us.i.posthog.com'
+      posthogApiKey: DEFAULT_POSTHOG_API_KEY,
+      posthogHost: DEFAULT_POSTHOG_HOST
     };
   }
 
@@ -372,8 +381,8 @@ export class ConfigManager extends EventEmitter {
     if (!this.config.analytics) {
       this.config.analytics = {
         enabled: false,
-        posthogApiKey: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
-        posthogHost: 'https://us.i.posthog.com'
+        posthogApiKey: DEFAULT_POSTHOG_API_KEY,
+        posthogHost: DEFAULT_POSTHOG_HOST
       };
     }
     this.config.analytics.distinctId = distinctId;
@@ -384,8 +393,8 @@ export class ConfigManager extends EventEmitter {
     if (!this.config.analytics) {
       this.config.analytics = {
         enabled: false,
-        posthogApiKey: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
-        posthogHost: 'https://us.i.posthog.com'
+        posthogApiKey: DEFAULT_POSTHOG_API_KEY,
+        posthogHost: DEFAULT_POSTHOG_HOST
       };
     }
     this.config.analytics.distinctId = identity.distinctId;

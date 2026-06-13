@@ -44,7 +44,7 @@ import type { VersionChecker } from './services/versionChecker';
 import type { Logger } from './utils/logger';
 import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
-import { resolveAnalyticsIdentity } from './services/analyticsIdentity';
+import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory, getAppDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
@@ -958,11 +958,29 @@ async function initializeServices() {
   ipcMain.handle('analytics:get-identity', async () => {
     try {
       const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId());
+      const webDistinctId = readWebAttribution(getAppDirectory());
+      if (webDistinctId) {
+        identity.webDistinctId = webDistinctId;
+      }
       await configManager.setAnalyticsIdentity(identity);
       return { success: true, data: identity };
     } catch (error) {
       console.error('[Analytics] Failed to resolve identity:', error);
       return { success: false, error: 'Failed to resolve analytics identity' };
+    }
+  });
+
+  ipcMain.handle('analytics:redeem-attribution', async () => {
+    try {
+      await fs.promises.unlink(path.join(getAppDirectory(), 'attribution_ref')).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') {
+          throw error;
+        }
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('[Analytics] Failed to redeem attribution:', error);
+      return { success: false, error: 'Failed to redeem analytics attribution' };
     }
   });
 

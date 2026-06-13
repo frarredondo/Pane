@@ -26,6 +26,7 @@ export interface AnalyticsIdentity {
   gitEmail?: string;
   gitEmailHash?: string;
   gitUserName?: string;
+  webDistinctId?: string;
 }
 
 export interface AnalyticsConfig {
