@@ -319,15 +319,14 @@ function HeadlessFileTree({
     setContextMenu(null);
   }, [contextMenu, isRemoteMode, sessionId]);
 
-  // Delete handler
-  const handleDelete = useCallback(async (file: FileItem) => {
+  const handleDelete = useCallback(async (file: FileItem, options: { skipConfirm?: boolean } = {}) => {
     const files = getSelectedFilesForAction(file);
     const confirmMessage = files.length > 1
       ? `Move ${files.length} items to trash?`
       : files[0]?.isDirectory
         ? `Move folder "${files[0].name}" and all its contents to trash?`
         : `Move file "${files[0]?.name}" to trash?`;
-    if (!confirm(confirmMessage)) return;
+    if (!options.skipConfirm && !confirm(confirmMessage)) return;
 
     try {
       for (const target of files) {
@@ -335,6 +334,7 @@ function HeadlessFileTree({
           sessionId,
           filePath: target.path,
           useTrash: true,
+          allowPermanentFallback: !options.skipConfirm,
         });
 
         if (!result.success) {
@@ -732,7 +732,7 @@ function HeadlessFileTree({
         const item = tree.getItemInstance(selectedItems[0])?.getItemData();
         if (item) {
           e.preventDefault();
-          handleDelete(item);
+          handleDelete(item, { skipConfirm: isMac() && e.metaKey });
         }
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && selectedItems.length > 0) {
