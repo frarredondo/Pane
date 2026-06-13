@@ -1,4 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from './playwright.shared';
+
+const devServerPort = getPlaywrightPort();
 
 export default defineConfig({
   testDir: './tests',
@@ -21,7 +24,7 @@ export default defineConfig({
   
   use: {
     // Base URL to use in actions like `await page.goto('/')`
-    baseURL: 'http://localhost:4521',
+    baseURL: getPlaywrightBaseURL(devServerPort),
     // Collect trace when retrying the failed test
     trace: 'on-first-retry',
     // Take screenshot on failure
@@ -39,8 +42,9 @@ export default defineConfig({
   // Run your local dev server before starting the tests
   webServer: {
     command: 'pnpm electron-dev',
-    port: 4521,
+    port: devServerPort,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    env: getPlaywrightServerEnv(devServerPort),
   },
 });

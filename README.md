@@ -302,9 +302,10 @@ pnpm build:linux  # Linux (x64 + ARM64)
 pnpm run release patch   # 0.0.2 -> 0.0.3
 pnpm run release minor   # 0.0.2 -> 0.1.0
 pnpm run release major   # 0.0.2 -> 1.0.0
+pnpm run release 2.2.1   # explicit version when package.json and tags diverge
 ```
 
-Tags and pushes automatically. GitHub Actions builds and publishes installers for all platforms to [Releases](https://github.com/dcouple/Pane/releases).
+Run releases only from a clean `main` checkout that matches `origin/main`. The release script refuses inferred bumps when `package.json` and the latest `v*` tag disagree; use an explicit version after deciding the intended next release. See [Release Instructions](docs/RELEASE_INSTRUCTIONS.md) for the workflow and required GitHub checks.
 
 ---
 

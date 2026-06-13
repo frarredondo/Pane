@@ -4,6 +4,11 @@ This document describes how to integrate UI interaction event tracking into Pane
 
 ## Overview
 
+Before changing UI event tracking, read
+[Analytics Invariants](ANALYTICS_INVARIANTS.md). First-run consent events must
+be captured only after identity is resolved, and settings saves must preserve
+analytics identity and attribution config.
+
 The analytics system has been implemented with:
 1. Backend IPC handlers in `/main/src/ipc/analytics.ts`
 2. AnalyticsManager service enhancements to support string arrays
