@@ -7,6 +7,7 @@ const DEFAULT_HOST = 'https://runpane.com/api/c';
 let currentApiKey: string | undefined;
 let currentHost: string | undefined;
 let currentEnabled: boolean | undefined;
+let currentIdentity: AnalyticsIdentity | undefined;
 
 export interface PendingAnalyticsEvent {
   eventName: string;
@@ -22,37 +23,110 @@ export interface PostHogConfig {
   identity?: AnalyticsIdentity;
 }
 
-function identifyUser(config: PostHogConfig): void {
-  if (!config.enabled || !config.identity) return;
-
-  const properties = {
-    identity_source: config.identity.identitySource,
-    github_username: config.identity.githubUsername,
-    github_email: config.identity.githubEmail,
-    git_email: config.identity.gitEmail,
-    git_email_sha256: config.identity.gitEmailHash,
-    git_user_name: config.identity.gitUserName,
-  };
-
-  posthog.identify(config.identity.distinctId, Object.fromEntries(
-    Object.entries(properties).filter(([, value]) => value !== undefined)
-  ));
+export interface PostHogInitOptions {
+  flushPendingEvents?: boolean;
 }
 
-function directCaptureTarget(): { token: string; host: string; distinctId: string } {
-  const distinctId = posthog.get_distinct_id?.();
+function compactProperties(properties: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(properties).filter(([, value]) => value !== undefined)
+  );
+}
+
+function personProperties(identity?: AnalyticsIdentity): Record<string, unknown> {
+  if (!identity) return {};
+
+  return compactProperties({
+    install_id: identity.installId,
+    identity_source: identity.identitySource,
+    github_username: identity.githubUsername,
+    github_email: identity.githubEmail,
+    git_email: identity.gitEmail,
+    git_email_sha256: identity.gitEmailHash,
+    git_user_name: identity.gitUserName,
+    app_version: identity.appVersion,
+    platform: identity.platform,
+  });
+}
+
+function contextProperties(identity = currentIdentity): Record<string, unknown> {
+  if (!identity) return {};
+
+  return compactProperties({
+    install_id: identity.installId,
+    identity_source: identity.identitySource,
+    github_username: identity.githubUsername,
+    git_email_sha256: identity.gitEmailHash,
+    app_version: identity.appVersion,
+    platform: identity.platform,
+    electron_version: identity.electronVersion,
+    web_attributed: Boolean(identity.webDistinctId || identity.webAttributionPresent),
+    web_attribution_present: identity.webAttributionPresent,
+    is_first_launch: identity.isFirstLaunch,
+    previous_version: identity.previousVersion,
+  });
+}
+
+function identifyUser(config: PostHogConfig): void {
+  currentIdentity = config.identity;
+  if (!config.enabled || !config.identity) return;
+
+  posthog.identify(config.identity.distinctId, personProperties(config.identity));
+}
+
+function directCaptureTarget(identity = currentIdentity): { token: string; host: string; distinctId: string } {
+  const posthogDistinctId = posthog.get_distinct_id?.();
 
   return {
     token: currentApiKey || DEFAULT_API_KEY,
     host: currentHost || DEFAULT_HOST,
     distinctId:
-      typeof distinctId === 'string' && distinctId.length > 0
-        ? distinctId
+      typeof identity?.distinctId === 'string' && identity.distinctId.length > 0
+        ? identity.distinctId
+        : typeof posthogDistinctId === 'string' && posthogDistinctId.length > 0
+        ? posthogDistinctId
         : `anon_${crypto.randomUUID()}`,
   };
 }
 
-export function initPostHog(config: PostHogConfig): void {
+async function directCapture(
+  eventName: string,
+  properties?: Record<string, unknown>,
+  identity = currentIdentity,
+  options: { processPersonProfile?: boolean } = {}
+): Promise<void> {
+  const { token, host, distinctId } = directCaptureTarget(identity);
+  const shouldProcessPersonProfile = Boolean(options.processPersonProfile && identity);
+
+  const payload = {
+    api_key: token,
+    event: eventName,
+    properties: compactProperties({
+      ...contextProperties(identity),
+      ...properties,
+      distinct_id: distinctId,
+      token,
+      $lib: 'posthog-js',
+      ...(shouldProcessPersonProfile
+        ? { $set: personProperties(identity) }
+        : { $process_person_profile: false }),
+    }),
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await fetch(`${host.replace(/\/$/, '')}/capture/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    });
+  } catch (error) {
+    console.error(`[PostHog] Failed to capture ${eventName}:`, error);
+  }
+}
+
+export function initPostHog(config: PostHogConfig, options: PostHogInitOptions = {}): void {
   const apiKey = config.posthogApiKey || DEFAULT_API_KEY;
   const host = config.posthogHost || DEFAULT_HOST;
 
@@ -96,7 +170,7 @@ export function initPostHog(config: PostHogConfig): void {
 
   identifyUser(config);
 
-  if (config.enabled) {
+  if (config.enabled && options.flushPendingEvents !== false) {
     flushPendingEvents();
   }
 }
@@ -129,12 +203,25 @@ export function discardPendingEvents(): void {
   pendingEvents = [];
 }
 
-export function aliasWebVisitor(webDistinctId: string): void {
+export function aliasWebVisitor(webDistinctId?: string, distinctId = currentIdentity?.distinctId): void {
+  if (!webDistinctId || !distinctId || webDistinctId === distinctId) return;
+
   try {
-    posthog.alias(webDistinctId);
+    posthog.alias(webDistinctId, distinctId);
   } catch (error) {
     console.error('[PostHog] Failed to alias web visitor:', error);
   }
+}
+
+export async function aliasWebVisitorDirect(identity = currentIdentity): Promise<void> {
+  if (!identity?.webDistinctId || identity.webDistinctId === identity.distinctId) return;
+
+  await directCapture(
+    '$create_alias',
+    { alias: identity.webDistinctId },
+    identity,
+    { processPersonProfile: true }
+  );
 }
 
 /**
@@ -144,89 +231,59 @@ export function aliasWebVisitor(webDistinctId: string): void {
  * opt-in state, so no other events (autocapture, pageviews, etc.) can leak
  * during the flush window.
  */
-export function captureAndOptOut(eventName: string, properties?: Record<string, unknown>): void {
-  const { token, host, distinctId } = directCaptureTarget();
-
-  const payload = {
-    api_key: token,
-    event: eventName,
-    properties: {
-      ...properties,
-      distinct_id: distinctId,
-      token,
-      $lib: 'posthog-js',
-      $process_person_profile: false,
-    },
-    timestamp: new Date().toISOString(),
-  };
-
-  try {
-    fetch(`${host}/capture/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch((err) => {
-      console.error('[PostHog] Failed to send opt-out event:', err);
-    });
-  } catch (error) {
-    console.error('[PostHog] Failed to capture event:', error);
-  }
-
+export async function captureAndOptOut(
+  eventName: string,
+  properties?: Record<string, unknown>,
+  identity = currentIdentity
+): Promise<void> {
+  currentIdentity = identity;
+  await directCapture(eventName, properties, identity, {
+    processPersonProfile: Boolean(identity),
+  });
   posthog.opt_out_capturing();
+  currentEnabled = false;
 }
 
 export function capture(eventName: string, properties?: Record<string, unknown>): void {
   try {
-    posthog.capture(eventName, properties);
+    posthog.capture(eventName, compactProperties({
+      ...contextProperties(),
+      ...properties,
+    }));
   } catch (error) {
     console.error('[PostHog] Failed to capture event:', error);
   }
 }
 
 /**
- * Capture a single event regardless of opt-in state, without toggling
- * opt-in afterward. Counterpart to captureAndOptOut: that one is for the
- * decline click; this one is for measurement events that need to fire
- * BEFORE the user has consented (e.g. consent_dialog_shown).
+ * Capture a single event directly, regardless of SDK opt-in state, without
+ * toggling opt-in afterward. Counterpart to captureAndOptOut: that one is for
+ * the decline click; this one is for deterministic consent/funnel markers.
  *
  * Sends the event directly via HTTP so it bypasses the SDK's opt-in gate.
  * Same network path as captureAndOptOut, just without the opt-out flip.
  *
- * Use this sparingly. The only legitimate case is funnel-completeness
- * events that must be captured before the user can opt in or out —
- * specifically, "the user saw the consent dialog." It establishes the
- * real denominator for opt-in rate (versus the conservative
- * opted_in + opted_out lower bound).
+ * Use this sparingly. The legitimate cases are funnel-completeness and
+ * consent-decision events that must be captured in a strict order:
+ * consent_dialog_shown, analytics_opted_in, and app_first_opened.
  */
-export function captureUnconditionally(eventName: string, properties?: Record<string, unknown>): void {
-  const { token, host, distinctId } = directCaptureTarget();
+export async function captureUnconditionally(
+  eventName: string,
+  properties?: Record<string, unknown>,
+  identity = currentIdentity
+): Promise<void> {
+  currentIdentity = identity;
+  await directCapture(eventName, properties, identity, {
+    processPersonProfile: Boolean(identity),
+  });
+}
 
-  const payload = {
-    api_key: token,
-    event: eventName,
-    properties: {
-      ...properties,
-      distinct_id: distinctId,
-      token,
-      $lib: 'posthog-js',
-      $process_person_profile: false,
-    },
-    timestamp: new Date().toISOString(),
-  };
+export async function captureAppFirstOpened(identity = currentIdentity): Promise<void> {
+  if (!identity?.isFirstLaunch && !identity?.webAttributionPresent) return;
 
-  try {
-    fetch(`${host}/capture/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch((err) => {
-      console.error('[PostHog] Failed to send unconditional event:', err);
-    });
-  } catch (error) {
-    console.error('[PostHog] Failed to capture event:', error);
-  }
+  await captureUnconditionally('app_first_opened', {
+    source: identity.webAttributionPresent ? 'web_attribution' : 'first_launch',
+  }, identity);
 }
 
 export { posthog };

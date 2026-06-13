@@ -2,8 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { NotificationSettings } from './NotificationSettings';
 import { useNotifications } from '../hooks/useNotifications';
 import { API } from '../utils/api';
-import { optIn, capture, captureAndOptOut } from '../services/posthog';
-import type { PreferredShell, PreferredTerminalPowerMode, TerminalShortcut } from '../types/config';
+import {
+  aliasWebVisitor,
+  aliasWebVisitorDirect,
+  captureAndOptOut,
+  captureUnconditionally,
+  discardPendingEvents,
+  flushPendingEvents,
+  initPostHog,
+} from '../services/posthog';
+import type {
+  AnalyticsConfig,
+  AnalyticsIdentity,
+  PreferredShell,
+  PreferredTerminalPowerMode,
+  TerminalShortcut,
+} from '../types/config';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
 import {
@@ -158,8 +172,9 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'shortcuts'>('general');
-  const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
-  const [previousAnalyticsEnabled, setPreviousAnalyticsEnabled] = useState(true);
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
+  const [previousAnalyticsEnabled, setPreviousAnalyticsEnabled] = useState(false);
+  const [analyticsConfig, setAnalyticsConfig] = useState<AnalyticsConfig | undefined>();
   const [preferredShell, setPreferredShell] = useState<PreferredShell>('auto');
   const [availableShells, setAvailableShells] = useState<AvailableShell[]>([]);
   const [terminalShortcuts, setTerminalShortcuts] = useState<TerminalShortcut[]>([]);
@@ -284,9 +299,14 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
 
       // Load analytics settings
       if (data.analytics) {
-        const enabled = data.analytics.enabled !== false; // Default to true
+        const enabled = data.analytics.enabled === true;
         setAnalyticsEnabled(enabled);
         setPreviousAnalyticsEnabled(enabled);
+        setAnalyticsConfig(data.analytics);
+      } else {
+        setAnalyticsEnabled(false);
+        setPreviousAnalyticsEnabled(false);
+        setAnalyticsConfig(undefined);
       }
 
       // Fetch available shells on Windows
@@ -765,6 +785,46 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
     }
   };
 
+  const resolveAnalyticsIdentity = async (): Promise<AnalyticsIdentity | undefined> => {
+    try {
+      const identityResult = await window.electronAPI?.analytics?.getIdentity?.();
+      if (identityResult?.success) {
+        return identityResult.data;
+      }
+    } catch (error) {
+      console.error('[Settings] Error resolving analytics identity:', error);
+    }
+    return undefined;
+  };
+
+  const syncAnalyticsToggle = async (enabled: boolean) => {
+    const identity = await resolveAnalyticsIdentity();
+
+    initPostHog({
+      enabled,
+      posthogApiKey: analyticsConfig?.posthogApiKey,
+      posthogHost: analyticsConfig?.posthogHost,
+      identity,
+    }, { flushPendingEvents: false });
+
+    if (enabled) {
+      if (identity?.webDistinctId) {
+        aliasWebVisitor(identity.webDistinctId, identity.distinctId);
+        void window.electronAPI?.analytics?.redeemAttribution?.();
+      }
+      await captureUnconditionally('analytics_opted_in', undefined, identity);
+      flushPendingEvents();
+      return;
+    }
+
+    if (identity?.webDistinctId) {
+      await aliasWebVisitorDirect(identity);
+      void window.electronAPI?.analytics?.redeemAttribution?.();
+    }
+    await captureAndOptOut('analytics_opted_out', undefined, identity);
+    discardPendingEvents();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -795,6 +855,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
         additionalPaths: parsedPaths,
         notifications: notificationSettings,
         analytics: {
+          ...analyticsConfig,
           enabled: analyticsEnabled
         },
         preferredShell,
@@ -808,12 +869,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
 
       // Only toggle PostHog opt-in/opt-out after config save succeeds
       if (previousAnalyticsEnabled !== analyticsEnabled) {
-        if (analyticsEnabled) {
-          optIn();
-          capture('analytics_opted_in');
-        } else {
-          captureAndOptOut('analytics_opted_out');
-        }
+        await syncAnalyticsToggle(analyticsEnabled);
       }
 
       // Update the useNotifications hook with new settings

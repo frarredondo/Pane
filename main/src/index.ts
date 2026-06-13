@@ -79,6 +79,11 @@ const registeredPartitions = new Set<string>();
 
 // Module-level shutdown guard to prevent multiple shutdown attempts
 let shutdownInProgress = false;
+let analyticsLaunchContext: {
+  appVersion?: string;
+  previousVersion?: string | null;
+  isFirstLaunch?: boolean;
+} = {};
 
 type RendererDiagnosticPayload = {
   kind?: string;
@@ -957,11 +962,24 @@ async function initializeServices() {
 
   ipcMain.handle('analytics:get-identity', async () => {
     try {
-      const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId());
+      const installId = await configManager.getOrCreateAnalyticsInstallId();
+      const currentVersion = analyticsLaunchContext.appVersion || app.getVersion();
+      const previousVersion =
+        analyticsLaunchContext.previousVersion !== undefined
+          ? analyticsLaunchContext.previousVersion
+          : databaseService.getLastAppVersion();
+      const isFirstLaunch = analyticsLaunchContext.isFirstLaunch ?? previousVersion === null;
+      const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId(), installId);
       const webDistinctId = readWebAttribution(getAppDirectory());
       if (webDistinctId) {
         identity.webDistinctId = webDistinctId;
       }
+      identity.appVersion = currentVersion;
+      identity.platform = os.platform();
+      identity.electronVersion = process.versions.electron;
+      identity.webAttributionPresent = webDistinctId !== undefined;
+      identity.isFirstLaunch = isFirstLaunch;
+      identity.previousVersion = previousVersion;
       await configManager.setAnalyticsIdentity(identity);
       return { success: true, data: identity };
     } catch (error) {
@@ -1125,6 +1143,11 @@ if (launchRemoteSetup) {
     const currentVersion = app.getVersion();
     const lastVersion = databaseService.getLastAppVersion();
     const isFirstLaunch = lastVersion === null;
+    analyticsLaunchContext = {
+      appVersion: currentVersion,
+      previousVersion: lastVersion,
+      isFirstLaunch,
+    };
 
     if (lastVersion && lastVersion !== currentVersion) {
       analyticsManager.track('app_updated', {
@@ -1381,7 +1404,7 @@ if (launchRemoteSetup) {
       try {
         const settings = configManager.getAnalyticsSettings();
         const apiKey = settings.posthogApiKey || 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
-        const host = settings.posthogHost || 'https://us.i.posthog.com';
+        const host = settings.posthogHost || 'https://runpane.com/api/c';
         const distinctId = configManager.getAnalyticsDistinctId() || `anon-${Date.now().toString(36)}`;
         const sessionDurationSeconds = Math.floor((Date.now() - appStartTime) / 1000);
 
@@ -1395,6 +1418,7 @@ if (launchRemoteSetup) {
             properties: {
               distinct_id: distinctId,
               token: apiKey,
+              install_id: settings.installId,
               session_duration_seconds: sessionDurationSeconds,
               app_version: app.getVersion(),
               platform: os.platform(),

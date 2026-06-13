@@ -1,12 +1,38 @@
 import type { Page } from '@playwright/test';
 
-export async function installElectronApiMock(page: Page) {
-  await page.addInitScript(() => {
+type AnalyticsMainEvent = {
+  eventName: string;
+  properties?: Record<string, unknown>;
+};
+
+type ElectronApiMockOptions = {
+  analyticsConsentShown?: boolean;
+  analyticsIdentity?: Record<string, unknown>;
+  initialConfig?: Record<string, unknown>;
+  mainAnalyticsEvents?: AnalyticsMainEvent[];
+};
+
+export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
+  await page.addInitScript((mockOptions: ElectronApiMockOptions) => {
     const success = (data: unknown = null) => Promise.resolve({ success: true, data });
     const unsubscribe = () => undefined;
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     const pendingPermissions: Array<Record<string, unknown>> = [];
     const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+    const preferences: Record<string, string> = {
+      analytics_consent_shown: mockOptions.analyticsConsentShown === false ? 'false' : 'true',
+    };
+    const defaultAnalyticsIdentity = {
+      distinctId: 'test',
+      installId: 'install_test',
+      identitySource: 'anonymous',
+      appVersion: 'test',
+      platform: 'linux',
+      electronVersion: 'test',
+      webAttributionPresent: false,
+      isFirstLaunch: false,
+      previousVersion: 'test',
+    };
     let nextRemoteConnectionId = 1;
     const remoteDaemonConfig = {
       host: {
@@ -61,6 +87,7 @@ export async function installElectronApiMock(page: Page) {
     };
     const configState: Record<string, unknown> = {
       remoteDaemon: clone(remoteDaemonConfig),
+      ...clone(mockOptions.initialConfig ?? {}),
     };
     let mockSessions: Array<Record<string, unknown>> = [];
     let cloudDisconnectError: string | null = null;
@@ -129,9 +156,15 @@ export async function installElectronApiMock(page: Page) {
       },
     });
 
-    const invoke = (channel: string) => {
+    const invoke = (channel: string, key?: string, value?: string) => {
       if (channel === 'preferences:get') {
-        return success('true');
+        return success(key ? preferences[key] ?? 'true' : 'true');
+      }
+      if (channel === 'preferences:set') {
+        if (key) {
+          preferences[key] = value ?? '';
+        }
+        return success();
       }
       if (channel === 'archive:get-progress') {
         return success(null);
@@ -156,9 +189,16 @@ export async function installElectronApiMock(page: Page) {
       checkForUpdates: () => success({ hasUpdate: false }),
       openExternal: () => undefined,
       analytics: namespace({
-        getIdentity: () => success({ distinctId: 'test', hasConsent: false }),
-        onMainEvent: subscribe,
+        getIdentity: () => success(clone(mockOptions.analyticsIdentity ?? defaultAnalyticsIdentity)),
+        onMainEvent: (callback: (event: AnalyticsMainEvent) => void) => {
+          const remove = subscribe('analytics:main-event', callback as (...args: unknown[]) => void);
+          for (const event of mockOptions.mainAnalyticsEvents ?? []) {
+            callback(clone(event));
+          }
+          return remove;
+        },
         syncDistinctId: () => undefined,
+        redeemAttribution: () => success(undefined),
       }),
       cloud: namespace({
         getState: () => success(clone(cloudState)),
@@ -493,6 +533,12 @@ export async function installElectronApiMock(page: Page) {
     Object.defineProperty(window, '__paneTestElectronMock', {
       configurable: true,
       value: {
+        getConfig() {
+          return clone(configState);
+        },
+        getPreferences() {
+          return clone(preferences);
+        },
         emitPermissionRequest(request: Record<string, unknown>) {
           pendingPermissions.push(request);
           emit('permission:request', request);
@@ -518,5 +564,5 @@ export async function installElectronApiMock(page: Page) {
         },
       },
     });
-  });
+  }, options);
 }

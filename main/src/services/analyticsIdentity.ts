@@ -29,7 +29,7 @@ function sha256(value: string): string {
   return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
 }
 
-export function resolveAnalyticsIdentity(existingDistinctId?: string): AnalyticsIdentity {
+export function resolveAnalyticsIdentity(existingDistinctId?: string, installId?: string): AnalyticsIdentity {
   const githubUsername = runCommand('gh', ['api', 'user', '--jq', '.login']);
   const githubEmail = runCommand('gh', ['api', 'user', '--jq', '.email // empty']);
   const gitEmail = runCommand('git', ['config', '--global', 'user.email']);
@@ -37,8 +37,9 @@ export function resolveAnalyticsIdentity(existingDistinctId?: string): Analytics
   const email = githubEmail || gitEmail;
   const gitEmailHash = email ? sha256(email) : undefined;
 
-  let distinctId = existingDistinctId || `anon-${Date.now().toString(36)}`;
-  let identitySource: AnalyticsIdentity['identitySource'] = existingDistinctId ? 'posthog' : 'anonymous';
+  let distinctId = existingDistinctId || (installId ? `install:${installId}` : `anon-${Date.now().toString(36)}`);
+  let identitySource: AnalyticsIdentity['identitySource'] =
+    existingDistinctId && existingDistinctId !== `install:${installId}` ? 'posthog' : 'anonymous';
 
   if (email) {
     distinctId = `email:${email.trim().toLowerCase()}`;
@@ -54,6 +55,7 @@ export function resolveAnalyticsIdentity(existingDistinctId?: string): Analytics
   return {
     distinctId,
     identitySource,
+    installId,
     githubUsername,
     githubEmail,
     gitEmail,
