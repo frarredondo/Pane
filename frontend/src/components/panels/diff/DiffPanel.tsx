@@ -1,9 +1,20 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import CombinedDiffView from './CombinedDiffView';
 import type { CombinedDiffViewHandle } from './CombinedDiffView';
 import type { ToolPanel, DiffPanelState } from '../../../../../shared/types/panels';
 import type { GitStatus } from '../../../types/session';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, GitBranch, Globe } from 'lucide-react';
+import { useSession } from '../../../contexts/SessionContext';
+import { cn } from '../../../utils/cn';
+import BrowserSurface from '../browser/BrowserSurface';
+import {
+  consumeLocalReviewModeRequest,
+  getReviewDefaultMode,
+  setReviewDefaultMode,
+  subscribeReviewDefaultMode,
+  subscribeLocalReviewModeRequest,
+  type ReviewMode,
+} from './reviewModePreference';
 
 interface DiffPanelProps {
   panel: ToolPanel;
@@ -29,19 +40,61 @@ function buildGitStatusFingerprint(gitStatus?: GitStatus): string {
   ].join(':');
 }
 
+function buildGithubReviewUrl(prUrl?: string): string | null {
+  if (!prUrl) return null;
+
+  try {
+    const url = new URL(prUrl);
+    const normalizedPath = url.pathname.replace(/\/$/, '');
+    if (!normalizedPath.endsWith('/files')) {
+      url.pathname = `${normalizedPath}/files`;
+    } else {
+      url.pathname = normalizedPath;
+    }
+    return url.toString();
+  } catch {
+    return prUrl.endsWith('/files') ? prUrl : `${prUrl.replace(/\/$/, '')}/files`;
+  }
+}
+
 export const DiffPanel: React.FC<DiffPanelProps> = ({
   panel,
   isActive,
   sessionId,
   isMainRepo = false
 }) => {
+  const sessionContext = useSession();
+  const session = sessionContext?.session;
   const [isStale, setIsStale] = useState(false);
+  const [reviewMode, setReviewModeState] = useState<ReviewMode>(() => (
+    consumeLocalReviewModeRequest(sessionId) ? 'local' : getReviewDefaultMode()
+  ));
   const diffState = panel.state?.customState as DiffPanelState | undefined;
   const lastRefreshRef = useRef<number>(Date.now());
   const combinedDiffRef = useRef<CombinedDiffViewHandle>(null);
   // Track diff-relevant git state to avoid spurious refreshes on no-op status events
   const lastGitFingerprintRef = useRef<string | null>(null);
   const wasActiveRef = useRef(isActive);
+  const reviewUrl = useMemo(() => buildGithubReviewUrl(session?.gitStatus?.prUrl), [session?.gitStatus?.prUrl]);
+
+  useEffect(() => subscribeReviewDefaultMode(setReviewModeState), []);
+
+  useEffect(() => {
+    if (consumeLocalReviewModeRequest(sessionId)) {
+      setReviewModeState('local');
+    }
+
+    return subscribeLocalReviewModeRequest((eventSessionId) => {
+      if (eventSessionId === sessionId) {
+        setReviewModeState('local');
+      }
+    });
+  }, [sessionId]);
+
+  const handleReviewModeChange = useCallback((mode: ReviewMode) => {
+    setReviewModeState(mode);
+    setReviewDefaultMode(mode);
+  }, []);
 
   // Listen for file change events from other panels
   useEffect(() => {
@@ -101,7 +154,7 @@ export const DiffPanel: React.FC<DiffPanelProps> = ({
     const becameActive = isActive && !wasActiveRef.current;
     wasActiveRef.current = isActive;
 
-    if (becameActive && isStale) {
+    if (becameActive && isStale && reviewMode === 'local') {
       setIsStale(false);
       combinedDiffRef.current?.refresh();
 
@@ -135,12 +188,72 @@ export const DiffPanel: React.FC<DiffPanelProps> = ({
       return () => clearTimeout(timer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- panel.state/diffState intentionally excluded: they are written inside this effect via IPC and must not re-trigger it
-  }, [isActive, isStale, panel.id, sessionId]);
+  }, [isActive, isStale, panel.id, sessionId, reviewMode]);
+
+  if (!reviewUrl) {
+    return (
+      <div className="diff-panel h-full flex flex-col bg-bg-primary">
+        <div className="flex-1 flex items-center justify-center p-8 text-text-secondary">
+          <div className="max-w-sm text-center space-y-2">
+            <GitBranch className="w-8 h-8 mx-auto text-text-muted" />
+            <h2 className="text-sm font-medium text-text-primary">Review unavailable</h2>
+            <p className="text-xs text-text-tertiary">
+              Open a PR for this branch to review changes.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const prLabel = session?.gitStatus?.prNumber ? `#${session.gitStatus.prNumber}` : 'Pull Request';
 
   return (
     <div className="diff-panel h-full flex flex-col bg-bg-primary">
+      <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-border-primary bg-surface-secondary flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <GitBranch className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
+          <span className="text-xs font-medium text-text-secondary truncate">Review</span>
+          <span className="text-xs text-text-muted truncate">{prLabel}</span>
+          {session?.gitStatus?.prTitle && (
+            <span className="text-xs text-text-tertiary truncate">{session.gitStatus.prTitle}</span>
+          )}
+        </div>
+
+        <div className="inline-flex items-center rounded border border-border-primary bg-bg-primary p-0.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => handleReviewModeChange('github')}
+            className={cn(
+              "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors",
+              reviewMode === 'github'
+                ? "bg-interactive text-text-on-interactive"
+                : "text-text-secondary hover:bg-surface-hover"
+            )}
+            aria-pressed={reviewMode === 'github'}
+          >
+            <Globe className="w-3 h-3" />
+            GitHub
+          </button>
+          <button
+            type="button"
+            onClick={() => handleReviewModeChange('local')}
+            className={cn(
+              "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors",
+              reviewMode === 'local'
+                ? "bg-interactive text-text-on-interactive"
+                : "text-text-secondary hover:bg-surface-hover"
+            )}
+            aria-pressed={reviewMode === 'local'}
+          >
+            <GitBranch className="w-3 h-3" />
+            Local
+          </button>
+        </div>
+      </div>
+
       {/* Stale indicator bar */}
-      {isStale && !isActive && (
+      {reviewMode === 'local' && isStale && !isActive && (
         <div className="bg-status-warning/10 border-b border-status-warning/30 px-3 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-status-warning text-sm">
             <AlertCircle className="w-4 h-4" />
@@ -151,14 +264,24 @@ export const DiffPanel: React.FC<DiffPanelProps> = ({
 
       {/* Main diff view */}
       <div className="flex-1 overflow-hidden">
-        <CombinedDiffView
-          ref={combinedDiffRef}
-          sessionId={sessionId}
-          selectedExecutions={[]}
-          isGitOperationRunning={false}
-          isMainRepo={isMainRepo}
-          isVisible={isActive}
-        />
+        {reviewMode === 'github' ? (
+          <BrowserSurface
+            panelId={panel.id}
+            sessionId={sessionId}
+            url={reviewUrl}
+            isActive={isActive}
+            compact
+          />
+        ) : (
+          <CombinedDiffView
+            ref={combinedDiffRef}
+            sessionId={sessionId}
+            selectedExecutions={[]}
+            isGitOperationRunning={false}
+            isMainRepo={isMainRepo}
+            isVisible={isActive}
+          />
+        )}
       </div>
     </div>
   );

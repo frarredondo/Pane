@@ -299,8 +299,8 @@ const GitStatusIndicator: React.FC<GitStatusIndicatorProps> = React.memo(({ gitS
     if (onClick) {
       onClick();
     } else if (sessionId) {
-      // Dispatch event to select session and switch to View Diff tab
-      const selectEvent = new CustomEvent('select-session-and-view-diff', { 
+      // Dispatch event to select session and switch to Review.
+      const selectEvent = new CustomEvent('select-session-and-view-review', {
         detail: { sessionId } 
       });
       window.dispatchEvent(selectEvent);

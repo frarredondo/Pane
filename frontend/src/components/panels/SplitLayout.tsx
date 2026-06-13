@@ -22,6 +22,7 @@ import type {
 } from '../../../../shared/types/panels';
 import { containsGroup } from '../../utils/panelLayout';
 import type { DropZone } from '../../utils/panelLayout';
+import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
 // ---------------------------------------------------------------------------
 // Allotment theme overrides (inlined as a style element on first render)
@@ -69,6 +70,7 @@ export interface SplitLayoutProps {
   onDragStart?: (panelId: string) => void;
   onDragEnd?: () => void;
   onStripDrop?: (groupId: string, panelId: string, insertIndex: number) => void;
+  getPanelTabPresentation?: PanelTabPresentationResolver;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +94,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   onDragStart,
   onDragEnd,
   onStripDrop,
+  getPanelTabPresentation,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -186,6 +189,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onStripDrop={onStripDrop ? (panelId, idx) => onStripDrop(node.id, panelId, idx) : undefined}
+          getPanelTabPresentation={getPanelTabPresentation}
         />
       );
     }
@@ -229,7 +233,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     resolvePanels, primaryGroupId, focusedGroupId, multiGroup, isMainRepo,
     onPanelSelect, onPanelClose, onFocusGroup, onSizesChange,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
-    onDropTab, onDragStart, onDragEnd, onStripDrop, zoomedGroupId,
+    onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId,
   ]);
 
   // Single-group root: render directly without Allotment

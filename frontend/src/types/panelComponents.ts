@@ -7,6 +7,14 @@ export interface PanelCreateOptions {
   title?: string;           // Custom panel title
 }
 
+export interface PanelTabPresentation {
+  title?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+export type PanelTabPresentationResolver = (panel: ToolPanel) => PanelTabPresentation | undefined;
+
 export interface PanelTabBarProps {
   panels: ToolPanel[];
   activePanel?: ToolPanel;
@@ -41,6 +49,8 @@ export interface PanelTabBarProps {
   isTabDragging?: boolean;
   /** The panel id being dragged. */
   draggedPanelId?: string | null;
+  /** Optional per-panel title/disabled presentation override. */
+  getPanelTabPresentation?: PanelTabPresentationResolver;
 }
 
 export interface PanelContainerProps {

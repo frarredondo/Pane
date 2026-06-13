@@ -77,6 +77,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   onStripDrop,
   isTabDragging,
   draggedPanelId,
+  getPanelTabPresentation,
 }) => {
   const sessionContext = useSession();
   const session = sessionContext?.session;
@@ -499,6 +500,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           onStripDrop={onStripDrop}
           isTabDragging={isTabDragging}
           draggedPanelId={draggedPanelId}
+          getPanelTabPresentation={getPanelTabPresentation}
         />
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}

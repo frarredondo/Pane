@@ -19,6 +19,7 @@ import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
 import { dropZoneFor, subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
 import { cn } from '../../utils/cn';
+import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
 // ---------------------------------------------------------------------------
 // DropOverlay
@@ -115,6 +116,7 @@ export interface PanelGroupViewProps {
   onDragStart?: (panelId: string) => void;
   onDragEnd?: () => void;
   onStripDrop?: (panelId: string, insertIndex: number) => void;
+  getPanelTabPresentation?: PanelTabPresentationResolver;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -135,6 +137,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   onDragStart,
   onDragEnd,
   onStripDrop,
+  getPanelTabPresentation,
 }) => {
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
@@ -202,6 +205,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             onStripDrop={handleStripDrop}
             isTabDragging={isTabDragging}
             draggedPanelId={draggedPanelId}
+            getPanelTabPresentation={getPanelTabPresentation}
           />
         </div>
       )}

@@ -19,12 +19,13 @@ import { useResizableHeight } from '../hooks/useResizableHeight';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
 import { setPendingViewCommit } from './panels/diff/CombinedDiffView';
+import { requestLocalReviewMode } from './panels/diff/reviewModePreference';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionProvider } from '../contexts/SessionContext';
 import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, SessionPanelLayout, PanelGroupNode } from '../../../shared/types/panels';
-import { PanelCreateOptions } from '../types/panelComponents';
+import { PanelCreateOptions, type PanelTabPresentationResolver } from '../types/panelComponents';
 import {
   createSingleGroupLayout,
   reconcile as reconcileLayout,
@@ -52,6 +53,40 @@ import { Tooltip } from './ui/Tooltip';
 import { Kbd } from './ui/Kbd';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
+
+const REVIEW_UNAVAILABLE_REASON = 'Open a PR for this branch to review changes';
+
+function canSelectPanel(panel: ToolPanel | null | undefined, hasReviewPr: boolean): panel is ToolPanel {
+  return !!panel && (panel.type !== 'diff' || hasReviewPr);
+}
+
+function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
+  return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
+    || panelList.find(p => p.type === 'explorer')
+    || panelList.find(p => p.type !== 'diff')
+    || panelList[0];
+}
+
+function sanitizeReviewActivePanels(
+  node: SessionPanelLayout['root'],
+  panelById: Map<string, ToolPanel>,
+  hasReviewPr: boolean
+): SessionPanelLayout['root'] {
+  if (hasReviewPr) return node;
+
+  if (node.type === 'group') {
+    const activePanel = node.activePanelId ? panelById.get(node.activePanelId) : undefined;
+    if (activePanel?.type !== 'diff') return node;
+
+    const fallback = node.panelIds
+      .map(id => panelById.get(id))
+      .find((panel): panel is ToolPanel => !!panel && panel.type !== 'diff');
+
+    return { ...node, activePanelId: fallback?.id ?? null };
+  }
+
+  return { ...node, children: node.children.map(child => sanitizeReviewActivePanels(child, panelById, hasReviewPr)) };
+}
 
 export const SessionView = memo(() => {
   const { activeView, activeProjectId } = useNavigationStore();
@@ -201,24 +236,26 @@ export const SessionView = memo(() => {
       // Always reload panels from database when switching sessions
       panelApi.loadPanelsForSession(sid).then(async loadedPanels => {
         devLog.debug('[SessionView] Loaded panels:', loadedPanels);
+        const hasReviewPr = !!activeSession.gitStatus?.prUrl;
         const inFlight = (usePanelStore.getState().panels[sid] || []).filter(
           p => !preLoadIds.has(p.id) && !loadedPanels.some(lp => lp.id === p.id)
         );
         setPanels(sid, inFlight.length > 0 ? [...loadedPanels, ...inFlight] : loadedPanels);
 
-        // Pick default active: prefer diff, then explorer, then first panel
-        const fallback = loadedPanels.find(p => p.type === 'diff')
-          || loadedPanels.find(p => p.type === 'explorer')
-          || loadedPanels[0];
+        // Pick default active: Review is only selectable once a PR is known.
+        const fallback = pickDefaultPanel(loadedPanels, hasReviewPr);
 
         const activePanelResult = await panelApi.getActivePanel(sid);
-        const fallbackActiveId = activePanelResult?.id ?? fallback?.id ?? null;
+        const effectiveActivePanel = canSelectPanel(activePanelResult, hasReviewPr)
+          ? activePanelResult
+          : fallback;
+        const fallbackActiveId = effectiveActivePanel?.id ?? null;
 
-        if (activePanelResult) {
-          setActivePanelInStore(sid, activePanelResult.id);
-        } else if (fallback) {
-          setActivePanelInStore(sid, fallback.id);
-          panelApi.setActivePanel(sid, fallback.id).catch(() => {});
+        if (effectiveActivePanel) {
+          setActivePanelInStore(sid, effectiveActivePanel.id);
+          if (activePanelResult?.id !== effectiveActivePanel.id) {
+            panelApi.setActivePanel(sid, effectiveActivePanel.id).catch(() => {});
+          }
         }
 
         // --- Layout load + reconcile ---
@@ -256,16 +293,22 @@ export const SessionView = memo(() => {
             fallbackActiveId,
           );
           const { layout } = reconcileLayout(base, liveIdsNow);
-          setLayoutInStore(sid, layout);
-          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+          const panelById = new Map(nowPanels.map(panel => [panel.id, panel]));
+          const safeRoot = sanitizeReviewActivePanels(layout.root, panelById, hasReviewPr);
+          const safeLayout = safeRoot === layout.root ? layout : { ...layout, root: safeRoot };
+          setLayoutInStore(sid, safeLayout);
+          setFocusedGroupInStore(sid, safeLayout.focusedGroupId ?? primaryGroup(safeLayout.root).id);
         } catch (err) {
           console.warn('[SessionView] Failed to load layout, creating default:', err);
           const layout = createSingleGroupLayout(
             sortedLive.map(p => p.id),
             fallbackActiveId,
           );
-          setLayoutInStore(sid, layout);
-          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+          const panelById = new Map(loadedPanels.map(panel => [panel.id, panel]));
+          const safeRoot = sanitizeReviewActivePanels(layout.root, panelById, hasReviewPr);
+          const safeLayout = safeRoot === layout.root ? layout : { ...layout, root: safeRoot };
+          setLayoutInStore(sid, safeLayout);
+          setFocusedGroupInStore(sid, safeLayout.focusedGroupId ?? primaryGroup(safeLayout.root).id);
         }
       });
     }
@@ -274,7 +317,7 @@ export const SessionView = memo(() => {
     return () => {
       flushLayoutPersist();
     };
-  }, [activeSession?.id, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
+  }, [activeSession?.id, activeSession?.gitStatus?.prUrl, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
   
   // Listen for panel updates from the backend
   useEffect(() => {
@@ -428,6 +471,17 @@ export const SessionView = memo(() => {
     if (!isSplitLayout) return primaryGroupPanels;
     return primaryGroupPanels.filter(p => p.metadata?.permanent === true);
   }, [primaryGroupPanels, isSplitLayout]);
+
+  const getPanelTabPresentation = useCallback<PanelTabPresentationResolver>((panel) => {
+    if (panel.type !== 'diff') return undefined;
+    const hasReviewPr = !!activeSession?.gitStatus?.prUrl;
+    return {
+      title: 'Review',
+      disabled: !hasReviewPr,
+      disabledReason: hasReviewPr ? undefined : REVIEW_UNAVAILABLE_REASON,
+    };
+  }, [activeSession?.gitStatus?.prUrl]);
+
   // --- Drag & drop state ---
   const [draggedPanelId, setDraggedPanelId] = useState<string | null>(null);
   const [dropZones, setDropZones] = useState<Map<string, DropZone | null>>(new Map());
@@ -478,6 +532,7 @@ export const SessionView = memo(() => {
   const handleGroupPanelSelect = useCallback(
     (groupId: string, panel: ToolPanel) => {
       if (!activeSession) return;
+      if (panel.type === 'diff' && !activeSession.gitStatus?.prUrl) return;
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
       if (!currentLayout) return;
@@ -508,6 +563,7 @@ export const SessionView = memo(() => {
   const handlePanelSelect = useCallback(
     async (panel: ToolPanel) => {
       if (!activeSession) return;
+      if (panel.type === 'diff' && !activeSession.gitStatus?.prUrl) return;
 
       // Add to history when panel is selected
       addToHistory(activeSession.id, panel.id);
@@ -529,18 +585,22 @@ export const SessionView = memo(() => {
   );
 
   const handleCommitClick = useCallback(
-    (commitHash: string) => {
+    async (commitHash: string) => {
       if (!activeSession || sessionPanels.length === 0) return;
+      if (!activeSession.gitStatus?.prUrl) return;
       const diffPanel = sessionPanels.find(p => p.type === 'diff');
       if (!diffPanel) return;
-      handlePanelSelect(diffPanel);
       // Store pending hash before dispatching — if the diff panel is not
       // currently active, CombinedDiffView is unmounted and will read this
       // module-level variable when it mounts after the panel switch.
       setPendingViewCommit(activeSession.id, commitHash);
-      window.dispatchEvent(new CustomEvent('diff:view-commit', {
-        detail: { sessionId: activeSession.id, commitHash },
-      }));
+      requestLocalReviewMode(activeSession.id);
+      await handlePanelSelect(diffPanel);
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('diff:view-commit', {
+          detail: { sessionId: activeSession.id, commitHash },
+        }));
+      }, 0);
     },
     [activeSession, sessionPanels, handlePanelSelect]
   );
@@ -586,7 +646,7 @@ export const SessionView = memo(() => {
   const panelLabel = (i: number) => {
     const p = focusedGroupPanels[i];
     if (!p) return `Switch to tab ${i + 1}`;
-    const name = p.type === 'diff' ? 'Diff' : p.title;
+    const name = p.type === 'diff' ? 'Review' : p.title;
     return `Switch to ${name}`;
   };
   useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => !!focusedGroupPanels[0], action: () => { const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
@@ -952,6 +1012,10 @@ export const SessionView = memo(() => {
     const currentLayout = usePanelStore.getState().layouts[sid];
     if (currentLayout) {
       const group = findGroup(currentLayout.root, groupId);
+      const panel = group?.activePanelId
+        ? usePanelStore.getState().panels[sid]?.find(candidate => candidate.id === group.activePanelId)
+        : undefined;
+      if (panel?.type === 'diff' && !activeSession.gitStatus?.prUrl) return;
       if (group?.activePanelId) {
         setActivePanelInStore(sid, group.activePanelId);
         panelApi.setActivePanel(sid, group.activePanelId).catch(() => {});
@@ -1070,13 +1134,14 @@ export const SessionView = memo(() => {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onStripDrop={handleStripDrop}
+        getPanelTabPresentation={getPanelTabPresentation}
       />
     );
   }, [
     sessionLayout, activeSession, tabBarPanels, focusedGroupId,
     handleSizesChange, handleGroupPanelSelect, handlePanelClose, handleFocusGroup,
     isTabDragging, draggedPanelId, dropZones, handleDropZoneChange,
-    handleDropTab, handleDragStart, handleDragEnd, handleStripDrop,
+    handleDropTab, handleDragStart, handleDragEnd, handleStripDrop, getPanelTabPresentation,
   ]);
 
   // Dynamic shortcuts for custom commands (mod+shift+5, 6, 7, ...)
@@ -1650,6 +1715,7 @@ export const SessionView = memo(() => {
           onStripDrop={primaryGroupNode ? handlePrimaryStripDrop : undefined}
           isTabDragging={isTabDragging}
           draggedPanelId={draggedPanelId}
+          getPanelTabPresentation={getPanelTabPresentation}
         />
 
         {/* Content area: center panels + right detail */}
