@@ -88,6 +88,14 @@ function isClipboardImagePlaceholderText(text: string): boolean {
   return text.trim() === '[Image]';
 }
 
+function waitForNextPaint(): Promise<void> {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActive, autoFocus = true }) => {
   renderLog('[TerminalPanel] Component rendering, panel:', panel.id, 'isActive:', isActive);
   
@@ -460,7 +468,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             ? state.scrollbackBuffer.join('\n')
             : '';
         if (content) {
-          terminal.write(content, finishRefresh);
+          await new Promise<void>(resolve => {
+            terminal.write(content, () => {
+              finishRefresh();
+              resolve();
+            });
+          });
           return;
         }
       }
@@ -1470,6 +1483,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       // Container stable — full refresh (reset + rewrite scrollback + fit)
       // This is what the manual "Refresh terminal" button does and makes TUI apps repaint correctly
       await handleRefreshTerminal();
+      await waitForNextPaint();
 
       if (cancelled) return;
 
@@ -1483,12 +1497,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         void handleRefreshTerminal();
       }, REFOCUS_DELAYED_REFRESH_MS);
 
-      // Hide overlay 100ms after refresh resolves to ensure content is painted
       hideOverlayTimer = setTimeout(() => {
-        if (!cancelled) {
-          setIsRefreshing(false);
-        }
-      }, 100);
+        if (!cancelled) setIsRefreshing(false);
+      }, 0);
     };
 
     const animationFrame = requestAnimationFrame(fitAndRefresh);
@@ -1543,6 +1554,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         if (cancelled || !fitAddonRef.current || !xtermRef.current) return;
 
         await handleRefreshTerminal();
+        await waitForNextPaint();
         if (cancelled) return;
 
         if (autoFocus) {
@@ -1557,7 +1569,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
         hideOverlayTimer = setTimeout(() => {
           if (!cancelled) setIsRefreshing(false);
-        }, 100);
+        }, 0);
       });
     };
 
@@ -1682,7 +1694,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           <div className="flex flex-col items-center gap-3">
             <TerminalSpinner />
             <div className="text-text-secondary text-sm">
-              {!isInitialized ? 'Initializing terminal...' : 'Starting CLI...'}
+              {!isInitialized ? 'Initializing terminal...' : isRefreshing ? 'Refreshing terminal...' : 'Starting CLI...'}
             </div>
           </div>
         </div>
