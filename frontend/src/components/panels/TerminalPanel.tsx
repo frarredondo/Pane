@@ -62,6 +62,7 @@ const TERMINAL_VISIBILITY_REFRESH_MS = 60_000;
 const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-layout (Allotment minSize is 120)
 const MIN_PTY_COLS = 20;        // mirrors main-process floor
 const MIN_PTY_ROWS = 5;
+const NEAR_BOTTOM_THRESHOLD_ROWS = 3;
 const TERMINAL_VISIBILITY_VIEWER_ID = getTerminalVisibilityViewerId();
 
 function getTerminalVisibilityViewerId(): string {
@@ -410,29 +411,60 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     const rect = terminalRef.current?.getBoundingClientRect();
     if (!rect || rect.width < MIN_VIABLE_RECT_PX) return;
     try {
+      const scrollSnapshot = (() => {
+        const buffer = terminal.buffer.active;
+        const distanceFromBottom = Math.max(0, buffer.baseY - buffer.viewportY);
+        return {
+          distanceFromBottom,
+          wasNearBottom: isNearBottomRef.current || distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_ROWS,
+        };
+      })();
+      const restoreScrollPosition = () => {
+        if (scrollSnapshot.wasNearBottom) {
+          terminal.scrollToBottom();
+          isNearBottomRef.current = true;
+          setShowScrollDown(false);
+          return;
+        }
+
+        const targetLine = Math.max(0, terminal.buffer.active.baseY - scrollSnapshot.distanceFromBottom);
+        terminal.scrollToLine(targetLine);
+        isNearBottomRef.current = false;
+        setShowScrollDown(true);
+      };
+
       const state = await window.electronAPI.invoke('terminal:getState', panel.id);
       if (state?.isAlternateScreen) {
         resizePtyToFit();
         if (terminal.rows > 0) {
           terminal.refresh(0, terminal.rows - 1);
         }
+        restoreScrollPosition();
         return;
       }
 
       // Fit first so reset+replay lands at the settled width, not a stale/tiny grid
       resizePtyToFit();
       terminal.reset();
+      const finishRefresh = () => {
+        restoreScrollPosition();
+        // The old post-replay fit() invalidated WebGL via a dims change; after reordering
+        // that fit is a same-size no-op, so an explicit refresh is needed for WebGL redraw
+        if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+      };
+
       if (state?.scrollbackBuffer) {
         const content = typeof state.scrollbackBuffer === 'string'
           ? state.scrollbackBuffer
           : Array.isArray(state.scrollbackBuffer)
             ? state.scrollbackBuffer.join('\n')
             : '';
-        if (content) terminal.write(content);
+        if (content) {
+          terminal.write(content, finishRefresh);
+          return;
+        }
       }
-      // The old post-replay fit() invalidated WebGL via a dims change; after reordering
-      // that fit is a same-size no-op, so an explicit refresh is needed for WebGL redraw
-      if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+      finishRefresh();
     } catch (e) {
       console.warn('[TerminalPanel] Failed to refresh terminal:', e);
     }
@@ -774,7 +806,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           // wheel sometimes stops 1-2 lines short of baseY, leaving the prompt just
           // out of view. Snapping within a small threshold fixes the "can't reach input" feel.
           const terminalInstance = terminal;
-          const SNAP_THRESHOLD = 3; // lines — for the "can't reach input" snap fix
+          const SNAP_THRESHOLD = NEAR_BOTTOM_THRESHOLD_ROWS; // lines — for the "can't reach input" snap fix
           let prevDistFromBottom = 0;
           const scrollDisposable = terminalInstance.onScroll(() => {
             const buf = terminalInstance.buffer.active;
@@ -1471,10 +1503,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     };
   }, [useBatterySaverTerminalVisibility, effectiveVisible, panel.id, isInitialized, autoFocus, handleRefreshTerminal, forwardToMainLog]);
 
-  // Performance mode keeps mounted terminals live, so returning to a panel only
-  // needs layout/paint work. Do not reset and replay scrollback here.
-  // The overlay masks the font-swap flash (xterm renders one frame with fallback
-  // monospace before the real terminal font is rasterized after display:none→block).
+  // Performance mode keeps mounted terminals live, but xterm/WebGL can still
+  // paint stale rows after display:none→block. Use the same canonical refresh
+  // path as the manual Refresh button when a terminal tab becomes visible.
   useEffect(() => {
     if (useBatterySaverTerminalVisibility) return;
     if (!panelVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
@@ -1487,52 +1518,60 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let delayedRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     let hideOverlayTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const fitAndPaint = () => {
+    const fitAndRefresh = () => {
       if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
 
       const containerWidth = terminalRef.current.clientWidth;
       if ((containerWidth < MIN_VIABLE_RECT_PX || containerWidth !== lastWidth) && retries < MAX_RETRIES) {
         lastWidth = containerWidth;
         retries++;
-        retryTimer = setTimeout(fitAndPaint, 50);
+        retryTimer = setTimeout(fitAndRefresh, 50);
         return;
       }
 
       if (containerWidth < MIN_VIABLE_RECT_PX) {
-        console.warn(`[TerminalPanel] Activation fit bailed for panel ${panel.id}: container ${containerWidth}px`);
+        console.warn(`[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
         setIsRefreshing(false);
         if (autoFocus) xtermRef.current?.focus();
         return;
       }
 
-      void document.fonts.ready.then(() => {
+      void document.fonts.ready.then(async () => {
         if (cancelled || !fitAddonRef.current || !xtermRef.current) return;
-        resizePtyToFit();
-        const terminal = xtermRef.current;
-        if (terminal && terminal.rows > 0) {
-          terminal.refresh(0, terminal.rows - 1);
-        }
+
+        await handleRefreshTerminal();
+        if (cancelled) return;
+
         if (autoFocus) {
-          terminal?.focus();
+          xtermRef.current?.focus();
         }
+
+        delayedRefreshTimer = setTimeout(() => {
+          if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
+          forwardToMainLog('info', `[TerminalPanel] Delayed performance-mode activation refresh for panel ${panel.id}`);
+          void handleRefreshTerminal();
+        }, REFOCUS_DELAYED_REFRESH_MS);
+
         hideOverlayTimer = setTimeout(() => {
           if (!cancelled) setIsRefreshing(false);
-        }, 32);
+        }, 100);
       });
     };
 
-    const animationFrame = requestAnimationFrame(fitAndPaint);
+    const animationFrame = requestAnimationFrame(fitAndRefresh);
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(animationFrame);
       if (retryTimer) clearTimeout(retryTimer);
+      if (delayedRefreshTimer) clearTimeout(delayedRefreshTimer);
       if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
       setIsRefreshing(false);
     };
-  }, [useBatterySaverTerminalVisibility, panelVisible, isInitialized, autoFocus, resizePtyToFit]);
+  }, [useBatterySaverTerminalVisibility, panelVisible, panel.id, isInitialized, autoFocus, handleRefreshTerminal, forwardToMainLog]);
 
   useEffect(() => {
     if (!xtermRef.current) {
