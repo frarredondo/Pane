@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { worktreeFileSyncService } from '../worktreeFileSyncService';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 import type { CommandRunner } from '../../utils/commandRunner';
@@ -85,6 +85,12 @@ const nodeModulesEntry: WorktreeFileSyncEntry = {
 const claudeEntry: WorktreeFileSyncEntry = {
   id: 'claude',
   path: '.claude',
+  enabled: true,
+  recursive: false,
+};
+const codexEntry: WorktreeFileSyncEntry = {
+  id: 'codex',
+  path: '.codex',
   enabled: true,
   recursive: false,
 };
@@ -294,6 +300,25 @@ describe('worktreeFileSyncService', () => {
         'cp "/home/user/repo/.env" "/home/user/worktree/.env"',
       );
     });
+
+    it('prunes generated worktrees directories before recursive discovery', async () => {
+      const cpCommands: string[] = [];
+      const runner = makeMockCommandRunner('/home/user/repo/.env', new Set(), cpCommands);
+
+      await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [envEntry],
+      );
+
+      const execAsync = runner.execAsync as ReturnType<typeof vi.fn>;
+      const matchCall = execAsync.mock.calls.find((call) => isMatchCommand(String(call[0])));
+      expect(matchCall).toBeDefined();
+      expect(String(matchCall?.[0])).toContain('-type d -name worktrees');
+      expect(String(matchCall?.[0])).toContain('-prune -o -print');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -354,28 +379,102 @@ describe('worktreeFileSyncService', () => {
     const mainRepoPath = '/home/user/repo';
     const worktreePath = '/home/user/worktree';
 
-    it('copies .claude directory as a root-level entry', async () => {
-      const cpCommands: string[] = [];
-
-      // For non-recursive entries the runner is called with existsAt checks,
-      // not find. Simulate: src exists, dest does not exist, src is a directory.
+    function makeRootDirectoryRunner(rootPath: string, copyCommands: string[]): CommandRunner {
       const execAsync = vi.fn().mockImplementation((cmd: string) => {
-        if (cmd === 'test -e "/home/user/repo/.claude"') {
-          // source exists
+        if (cmd.startsWith('test -e ')) {
+          return cmd.includes(`/repo/${rootPath}`)
+            ? Promise.resolve({ stdout: '', stderr: '' })
+            : Promise.reject(new Error('not exists'));
+        }
+        if (cmd.startsWith('test -f ')) {
+          return Promise.reject(new Error('not a file'));
+        }
+        if (cmd.includes('for item in')) {
+          copyCommands.push(cmd);
           return Promise.resolve({ stdout: '', stderr: '' });
         }
-        if (cmd === 'test -e "/home/user/worktree/.claude"') {
-          // destination does not exist
+        return Promise.resolve({ stdout: '', stderr: '' });
+      });
+
+      return { execAsync } as unknown as CommandRunner;
+    }
+
+    it('copies .claude contents without entering nested worktrees', async () => {
+      const copyCommands: string[] = [];
+      const runner = makeRootDirectoryRunner('.claude', copyCommands);
+
+      const result = await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [claudeEntry],
+      );
+
+      expect(result.failures).toHaveLength(0);
+      expect(copyCommands).toHaveLength(1);
+      expect(copyCommands[0]).toContain('/home/user/repo/.claude');
+      expect(copyCommands[0]).toContain('case "$base" in worktrees) continue ;; esac');
+      expect(copyCommands[0]).toContain('cp -rp "$item"');
+      expect(copyCommands[0]).not.toBe('cp -rp "/home/user/repo/.claude" "/home/user/worktree/.claude"');
+    });
+
+    it('applies the generated worktrees exclusion to other agent config roots', async () => {
+      const copyCommands: string[] = [];
+      const runner = makeRootDirectoryRunner('.codex', copyCommands);
+
+      await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [codexEntry],
+      );
+
+      expect(copyCommands).toHaveLength(1);
+      expect(copyCommands[0]).toContain('/home/user/repo/.codex');
+      expect(copyCommands[0]).toContain('case "$base" in worktrees) continue ;; esac');
+    });
+
+    it('applies the generated worktrees exclusion to custom config roots', async () => {
+      const copyCommands: string[] = [];
+      const runner = makeRootDirectoryRunner('.agent', copyCommands);
+
+      await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [{
+          id: 'agent',
+          path: '.agent',
+          enabled: true,
+          recursive: false,
+        }],
+      );
+
+      expect(copyCommands).toHaveLength(1);
+      expect(copyCommands[0]).toContain('/home/user/repo/.agent');
+      expect(copyCommands[0]).toContain('case "$base" in worktrees) continue ;; esac');
+    });
+
+    it('honors an explicit nested worktrees entry', async () => {
+      const cpCommands: string[] = [];
+
+      const execAsync = vi.fn().mockImplementation((cmd: string) => {
+        if (cmd === 'test -e "/home/user/repo/.agent/worktrees"') {
+          return Promise.resolve({ stdout: '', stderr: '' });
+        }
+        if (cmd === 'test -e "/home/user/worktree/.agent/worktrees"') {
           return Promise.reject(new Error('not exists'));
         }
         if (cmd.startsWith('test -f ')) {
-          // .claude is a directory — test -f fails
           return Promise.reject(new Error('not a file'));
         }
         if (cmd.startsWith('mkdir ')) {
           return Promise.resolve({ stdout: '', stderr: '' });
         }
-        if (cmd.startsWith('cp ')) {
+        if (cmd.includes('for item in') || cmd.startsWith('cp ')) {
           cpCommands.push(cmd);
           return Promise.resolve({ stdout: '', stderr: '' });
         }
@@ -389,12 +488,17 @@ describe('worktreeFileSyncService', () => {
         worktreePath,
         runner,
         environment,
-        [claudeEntry],
+        [{
+          id: 'agent-worktrees',
+          path: '.agent/worktrees',
+          enabled: true,
+          recursive: true,
+        }],
       );
 
       expect(cpCommands).toHaveLength(1);
       expect(cpCommands[0]).toBe(
-        'cp -rp "/home/user/repo/.claude" "/home/user/worktree/.claude"',
+        'cp -rp "/home/user/repo/.agent/worktrees" "/home/user/worktree/.agent/worktrees"',
       );
     });
 
@@ -518,11 +622,11 @@ describe('worktreeFileSyncService', () => {
             ? Promise.reject(new Error('not a file'))
             : Promise.resolve({ stdout: '', stderr: '' });
         }
-        if (cmd.startsWith('mkdir ')) {
+        if (cmd.includes('for item in') || cmd.startsWith('cp ')) {
+          cpCommands.push(cmd);
           return Promise.resolve({ stdout: '', stderr: '' });
         }
-        if (cmd.startsWith('cp ')) {
-          cpCommands.push(cmd);
+        if (cmd.startsWith('mkdir ')) {
           return Promise.resolve({ stdout: '', stderr: '' });
         }
         return Promise.resolve({ stdout: '', stderr: '' });
@@ -568,11 +672,11 @@ describe('worktreeFileSyncService', () => {
             ? Promise.reject(new Error('not a file'))
             : Promise.resolve({ stdout: '', stderr: '' });
         }
-        if (cmd.startsWith('mkdir ')) {
+        if (cmd.includes('for item in') || cmd.startsWith('cp ')) {
+          cpCommands.push(cmd);
           return Promise.resolve({ stdout: '', stderr: '' });
         }
-        if (cmd.startsWith('cp ')) {
-          cpCommands.push(cmd);
+        if (cmd.startsWith('mkdir ')) {
           return Promise.resolve({ stdout: '', stderr: '' });
         }
         return Promise.resolve({ stdout: '', stderr: '' });

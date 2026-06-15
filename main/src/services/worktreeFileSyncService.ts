@@ -20,6 +20,7 @@ export interface WorktreeFileSyncResult {
 // 60s default exec timeout; give copy commands a generous ceiling instead of
 // killing them midway and leaving a partial node_modules behind.
 const COPY_TIMEOUT_MS = 600_000;
+const GENERATED_WORKSPACE_DIR_NAMES = new Set(['worktrees']);
 
 /**
  * Joins path segments correctly for the target environment.
@@ -70,6 +71,16 @@ function entryHasGlobPattern(entryPath: string): boolean {
   return hasMagic(entryPath);
 }
 
+function isGeneratedWorkspaceSegment(segment: string): boolean {
+  return GENERATED_WORKSPACE_DIR_NAMES.has(segment);
+}
+
+function isExplicitGeneratedWorkspaceEntry(entryPath: string): boolean {
+  const segments = entryPath.split('/').filter(Boolean);
+  const lastSegment = segments[segments.length - 1];
+  return lastSegment !== undefined && isGeneratedWorkspaceSegment(lastSegment);
+}
+
 function buildMatchPatterns(entryPath: string, recursive: boolean): string[] {
   if (!recursive || entryPath.includes('/')) {
     return [entryPath];
@@ -85,13 +96,12 @@ function buildMatchPatterns(entryPath: string, recursive: boolean): string[] {
 
 function shouldSkipMatch(relativePath: string): boolean {
   const normalized = relativePath.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
   if (
     normalized === '.git'
     || normalized.startsWith('.git/')
     || normalized.includes('/.git/')
-    || normalized === 'worktrees'
-    || normalized.startsWith('worktrees/')
-    || normalized.includes('/worktrees/')
+    || segments.some(isGeneratedWorkspaceSegment)
   ) {
     return true;
   }
@@ -332,7 +342,7 @@ async function findRecursiveMatchesUnix(
 ): Promise<string[]> {
   const script = [
     'repo=$1',
-    'find "$repo" -maxdepth 5 \\( -path "$repo/.git" -o -path "$repo/.git/*" -o -path "$repo/worktrees" -o -path "$repo/worktrees/*" \\) -prune -o -print | while IFS= read -r abs; do',
+    'find "$repo" -maxdepth 5 \\( -path "$repo/.git" -o \\( -type d -name worktrees ! -path "$repo" \\) \\) -prune -o -print | while IFS= read -r abs; do',
     '  printf "%s\\n" "$abs"',
     'done',
   ].join('\n');
@@ -361,7 +371,9 @@ async function findRecursiveMatchesWindows(
     absolute: true,
     follow: false,
     ignore: [
+      '**/.git',
       '**/.git/**',
+      '**/worktrees',
       '**/worktrees/**',
     ],
   });
@@ -391,6 +403,43 @@ async function execCopyCommand(
   }
 }
 
+async function copyRootDirectoryExcludingGeneratedChildren(
+  srcPath: string,
+  destPath: string,
+  commandRunner: CommandRunner,
+  environment: ProjectEnvironment,
+): Promise<void> {
+  if (environment === 'windows') {
+    await fs.promises.mkdir(destPath, { recursive: true });
+    const children = await fs.promises.readdir(srcPath, { withFileTypes: true });
+    for (const child of children) {
+      if (isGeneratedWorkspaceSegment(child.name)) continue;
+      await fs.promises.cp(
+        path.join(srcPath, child.name),
+        path.join(destPath, child.name),
+        { recursive: true, force: false, errorOnExist: false, preserveTimestamps: true },
+      );
+    }
+    return;
+  }
+
+  const copyCommand = environment === 'macos' ? 'cp -c -R' : 'cp -rp';
+  const excludedCasePatterns = Array.from(GENERATED_WORKSPACE_DIR_NAMES).join('|');
+  const escapedSrc = escapeForBash(srcPath);
+  const escapedDest = escapeForBash(destPath);
+  const command = [
+    `mkdir -p ${escapedDest}`,
+    `for item in ${escapedSrc}/* ${escapedSrc}/.[!.]* ${escapedSrc}/..?*; do`,
+    '  [ -e "$item" ] || continue',
+    '  base="$(basename "$item")"',
+    `  case "$base" in ${excludedCasePatterns}) continue ;; esac`,
+    `  ${copyCommand} "$item" ${escapedDest}/`,
+    'done',
+  ].join('; ');
+
+  await commandRunner.execAsync(command, srcPath, { timeout: COPY_TIMEOUT_MS });
+}
+
 /**
  * Copies a single root-level entry from main repo into the worktree.
  * Only copies if the source exists AND the destination is missing.
@@ -415,6 +464,11 @@ async function copyRootEntry(
   if (destExists) return;
 
   const isFile = await isFilePath(srcPath, commandRunner, environment, mainRepoPath);
+  if (!isFile && !isExplicitGeneratedWorkspaceEntry(entryPath)) {
+    await copyRootDirectoryExcludingGeneratedChildren(srcPath, destPath, commandRunner, environment);
+    return;
+  }
+
   await ensureParentDir(destPath, commandRunner, worktreePath, environment);
   const cmd = getFastCopyCommand(srcPath, destPath, environment, isFile);
   await execCopyCommand(cmd, mainRepoPath, commandRunner, environment);
@@ -577,7 +631,9 @@ export const worktreeFileSyncService = {
       for (const entry of orderedEntries) {
         try {
           const normalizedPath = normalizeSyncPath(entry.path);
-          if (entry.recursive || entryHasGlobPattern(normalizedPath)) {
+          const hasGlobPattern = entryHasGlobPattern(normalizedPath);
+          const isExplicitGeneratedWorkspacePath = !hasGlobPattern && isExplicitGeneratedWorkspaceEntry(normalizedPath);
+          if ((entry.recursive || hasGlobPattern) && !isExplicitGeneratedWorkspacePath) {
             const matchFailures = await copyRecursiveMatches(
               mainRepoPath,
               worktreePath,
