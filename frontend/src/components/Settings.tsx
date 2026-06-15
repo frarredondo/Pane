@@ -2013,21 +2013,17 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
                   {worktreeFileSync.map((entry, index) => (
                     <div key={entry.id} className="flex items-center gap-3 p-2 rounded-lg bg-surface-secondary border border-border-secondary">
                       <div className="flex-1 min-w-0">
-                        {entry.path ? (
-                          <span className="text-sm font-mono">{entry.path}</span>
-                        ) : (
-                          <Input
-                            value={entry.path}
-                            onChange={(e) => {
-                              const updated = [...worktreeFileSync];
-                              updated[index] = { ...entry, path: e.target.value };
-                              setWorktreeFileSync(updated);
-                            }}
-                            placeholder="e.g. .myconfig"
-                            className="text-sm"
-                            error="Path is required"
-                          />
-                        )}
+                        <Input
+                          value={entry.path}
+                          onChange={(e) => {
+                            const updated = [...worktreeFileSync];
+                            updated[index] = { ...entry, path: e.target.value };
+                            setWorktreeFileSync(updated);
+                          }}
+                          placeholder="e.g. .myconfig"
+                          className="text-sm font-mono"
+                          error={entry.path.trim().length === 0 ? 'Path is required' : undefined}
+                        />
                         {entry.recursive && (
                           <span className="ml-2 text-xs text-text-tertiary">includes subdirectories</span>
                         )}

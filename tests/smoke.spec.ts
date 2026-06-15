@@ -107,6 +107,27 @@ test.describe('Smoke Tests', () => {
     await page.waitForTimeout(500);
   });
 
+  test('Worktree file sync custom entries remain editable while typing', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    await dismissStartupDialogs(page);
+
+    await openSettings(page);
+
+    const worktreeFileSyncButton = page.getByRole('button', { name: /Worktree File Sync/i });
+    await expect(worktreeFileSyncButton).toBeVisible({ timeout: 5000 });
+    await clickDomNode(worktreeFileSyncButton);
+
+    await clickDomNode(page.getByRole('button', { name: 'Add Entry' }));
+
+    const customPathInput = page.getByPlaceholder('e.g. .myconfig').last();
+    await expect(customPathInput).toBeVisible();
+    await customPathInput.pressSequentially('./venv/*');
+
+    await expect(customPathInput).toHaveValue('./venv/*');
+    await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  });
+
   test('Remote daemon settings can create a paired profile and switch modes', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
