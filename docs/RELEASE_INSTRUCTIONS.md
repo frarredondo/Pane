@@ -13,6 +13,8 @@ Before a release, these facts must be true:
 - For inferred bumps (`patch`, `minor`, `major`), `package.json` version matches
   the latest `v*` semver tag.
 - The release tag does not already exist locally or on `origin`.
+- Dependencies are installed before running the release script so commit hooks can
+  run successfully.
 
 If `package.json` and the latest release tag disagree, do not run an inferred
 patch. Decide the intended next version and run an explicit release instead:
@@ -36,6 +38,10 @@ pnpm test:ci:minimal
 
 pnpm run release patch
 ```
+
+If the release commit fails, the script aborts before creating or pushing a tag
+as long as any changes remain in the worktree. Fix the hook, dependency, or
+typecheck failure, restore the worktree, and rerun the release.
 
 Use `minor`, `major`, or an explicit version when that is the intended release:
 

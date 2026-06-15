@@ -23,6 +23,20 @@ function run(command, options = {}) {
   return result ? result.trim() : '';
 }
 
+function getGitStatus() {
+  return run('git status --porcelain');
+}
+
+function getHeadPackageVersion() {
+  try {
+    const headPackageJson = run('git show HEAD:package.json');
+    return JSON.parse(headPackageJson).version;
+  } catch {
+    console.error('Unable to read package.json from HEAD. Aborting before tag.');
+    process.exit(1);
+  }
+}
+
 function parseSemver(version) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
   if (!match) {
@@ -95,7 +109,7 @@ if (!input) {
   process.exit(1);
 }
 
-const status = run('git status --porcelain');
+const status = getGitStatus();
 if (status) {
   console.error('Release requires a clean worktree. Commit or stash changes first.');
   console.error(status);
@@ -178,7 +192,22 @@ run('git add package.json', { stdio: 'inherit' });
 try {
   run(`git commit -m "release: v${cleanVersion}"`, { stdio: 'inherit' });
 } catch {
+  const postCommitStatus = getGitStatus();
+  if (postCommitStatus) {
+    console.error('Release commit failed while changes remain in the worktree. Aborting before tag.');
+    console.error('Fix the commit failure, restore the worktree, and rerun the release.');
+    console.error(postCommitStatus);
+    process.exit(1);
+  }
+
   console.log('No version change to commit, continuing with tag...');
+}
+
+const headPackageVersion = getHeadPackageVersion();
+if (headPackageVersion !== cleanVersion) {
+  console.error(`HEAD package.json version is ${headPackageVersion}, expected ${cleanVersion}. Aborting before tag.`);
+  console.error('The release tag must point at a commit that contains the released package.json version.');
+  process.exit(1);
 }
 run(`git tag ${tagName}`, { stdio: 'inherit' });
 run('git push origin HEAD:main', { stdio: 'inherit' });
