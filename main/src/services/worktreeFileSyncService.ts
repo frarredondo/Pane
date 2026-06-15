@@ -1,8 +1,9 @@
 import path from 'path';
 import fs from 'fs';
+import { glob, hasMagic } from 'glob';
 import { CommandRunner } from '../utils/commandRunner';
 import type { ProjectEnvironment } from '../utils/pathResolver';
-import { posixJoin } from '../utils/wslUtils';
+import { escapeForBash, posixJoin } from '../utils/wslUtils';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 
 export interface WorktreeFileSyncFailure {
@@ -43,6 +44,127 @@ function envRelative(environment: ProjectEnvironment, from: string, to: string):
     return path.posix.relative(from, to);
   }
   return path.relative(from, to);
+}
+
+function normalizeSyncPath(entryPath: string): string {
+  let normalized = entryPath.trim().replace(/\\/g, '/');
+  while (normalized.startsWith('./')) {
+    normalized = normalized.slice(2);
+  }
+  if (normalized === '.') {
+    return '';
+  }
+
+  if (
+    normalized.startsWith('/')
+    || path.win32.isAbsolute(normalized)
+    || normalized.split('/').includes('..')
+  ) {
+    throw new Error('Worktree file sync paths must be repo-relative and cannot contain ".."');
+  }
+
+  return normalized;
+}
+
+function entryHasGlobPattern(entryPath: string): boolean {
+  return hasMagic(entryPath);
+}
+
+function buildMatchPatterns(entryPath: string, recursive: boolean): string[] {
+  if (!recursive || entryPath.includes('/')) {
+    return [entryPath];
+  }
+  return [
+    entryPath,
+    `*/${entryPath}`,
+    `*/*/${entryPath}`,
+    `*/*/*/${entryPath}`,
+    `*/*/*/*/${entryPath}`,
+  ];
+}
+
+function shouldSkipMatch(relativePath: string): boolean {
+  const normalized = relativePath.replace(/\\/g, '/');
+  if (
+    normalized === '.git'
+    || normalized.startsWith('.git/')
+    || normalized.includes('/.git/')
+    || normalized === 'worktrees'
+    || normalized.startsWith('worktrees/')
+    || normalized.includes('/worktrees/')
+  ) {
+    return true;
+  }
+
+  if (normalized.endsWith('/node_modules')) {
+    const beforeNodeModules = normalized.slice(0, -'/node_modules'.length);
+    return beforeNodeModules.includes('/node_modules');
+  }
+
+  return false;
+}
+
+function escapeRegexChar(char: string): string {
+  return '\\^$+?.()|{}[]'.includes(char) ? `\\${char}` : char;
+}
+
+function segmentPatternToRegExp(segmentPattern: string): RegExp {
+  let source = '';
+  for (let i = 0; i < segmentPattern.length; i++) {
+    const char = segmentPattern[i];
+    if (char === '*') {
+      source += '[^/]*';
+    } else if (char === '?') {
+      source += '[^/]';
+    } else if (char === '[') {
+      const endIndex = segmentPattern.indexOf(']', i + 1);
+      if (endIndex > i + 1) {
+        source += segmentPattern.slice(i, endIndex + 1);
+        i = endIndex;
+      } else {
+        source += '\\[';
+      }
+    } else {
+      source += escapeRegexChar(char);
+    }
+  }
+  try {
+    return new RegExp(`^${source}$`);
+  } catch {
+    return /^$/;
+  }
+}
+
+function globSegmentsMatch(patternSegments: string[], pathSegments: string[]): boolean {
+  if (patternSegments.length === 0) {
+    return pathSegments.length === 0;
+  }
+
+  const [patternSegment, ...remainingPatternSegments] = patternSegments;
+  if (patternSegment === '**') {
+    for (let i = 0; i <= pathSegments.length; i++) {
+      if (globSegmentsMatch(remainingPatternSegments, pathSegments.slice(i))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const [pathSegment, ...remainingPathSegments] = pathSegments;
+  if (!pathSegment) {
+    return false;
+  }
+
+  return segmentPatternToRegExp(patternSegment).test(pathSegment)
+    && globSegmentsMatch(remainingPatternSegments, remainingPathSegments);
+}
+
+function globMatchesAny(patterns: string[], relativePath: string): boolean {
+  const pathSegments = relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
+  return patterns.some((pattern) => {
+    const patternSegments = pattern.split('/').filter(Boolean);
+    return globSegmentsMatch(patternSegments, pathSegments);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -187,14 +309,16 @@ async function isFilePath(
 async function findRecursiveMatches(
   repoPath: string,
   pattern: string,
+  recursive: boolean,
   commandRunner: CommandRunner,
   environment: ProjectEnvironment,
-): Promise<Array<{ path: string; isFile: boolean }>> {
+): Promise<string[]> {
   try {
+    const matchPatterns = buildMatchPatterns(pattern, recursive);
     if (environment === 'windows') {
-      return await findRecursiveMatchesWindows(repoPath, pattern, commandRunner);
+      return await findRecursiveMatchesWindows(repoPath, matchPatterns);
     }
-    return await findRecursiveMatchesUnix(repoPath, pattern, commandRunner);
+    return await findRecursiveMatchesUnix(repoPath, matchPatterns, commandRunner);
   } catch (err) {
     console.error(`[WorktreeFileSync] findRecursiveMatches failed for pattern "${pattern}":`, err);
     return [];
@@ -203,66 +327,44 @@ async function findRecursiveMatches(
 
 async function findRecursiveMatchesUnix(
   repoPath: string,
-  pattern: string,
+  patterns: string[],
   commandRunner: CommandRunner,
-): Promise<Array<{ path: string; isFile: boolean }>> {
-  let cmd: string;
-  let isFile: boolean;
-
-  if (pattern === 'node_modules') {
-    // Exclude nested node_modules and worktree directories (which contain sibling worktrees)
-    cmd = `find "${repoPath}" -maxdepth 4 -name "node_modules" -type d -not -path "*/node_modules/*/node_modules" -not -path "*/worktrees/*" -not -path "*/.git/*"`;
-    isFile = false;
-  } else if (pattern.startsWith('.env')) {
-    cmd = `find "${repoPath}" -maxdepth 4 -name ".env*" -type f -not -path "*/node_modules/*" -not -path "*/worktrees/*" -not -path "*/.git/*"`;
-    isFile = true;
-  } else {
-    return [];
-  }
-
+): Promise<string[]> {
+  const script = [
+    'repo=$1',
+    'find "$repo" -maxdepth 5 \\( -path "$repo/.git" -o -path "$repo/.git/*" -o -path "$repo/worktrees" -o -path "$repo/worktrees/*" \\) -prune -o -print | while IFS= read -r abs; do',
+    '  printf "%s\\n" "$abs"',
+    'done',
+  ].join('\n');
+  const cmd = `sh -c ${escapeForBash(script)} sh ${escapeForBash(repoPath)}`;
   const { stdout } = await commandRunner.execAsync(cmd, repoPath);
   return stdout
     .trim()
     .split('\n')
     .filter(Boolean)
-    .map((p) => ({ path: p, isFile }));
+    .filter((absolutePath) => {
+      const relativePath = path.posix.relative(repoPath, absolutePath);
+      return relativePath.length > 0
+        && !relativePath.startsWith('..')
+        && globMatchesAny(patterns, relativePath);
+    });
 }
 
 async function findRecursiveMatchesWindows(
   repoPath: string,
-  pattern: string,
-  commandRunner: CommandRunner,
-): Promise<Array<{ path: string; isFile: boolean }>> {
-  if (pattern === 'node_modules') {
-    // Find all directories named "node_modules" recursively.
-    // dir /s /b /ad lists all subdirectories; we filter for those ending in \node_modules
-    // and exclude nested ones (where \node_modules\ appears before the trailing \node_modules)
-    const cmd = `cmd /c "dir /s /b /ad "${repoPath}" 2>nul"`;
-    const { stdout } = await commandRunner.execAsync(cmd, repoPath);
-    return stdout
-      .trim()
-      .split('\r\n')
-      .filter(Boolean)
-      .filter((p) => p.endsWith('\\node_modules'))
-      .filter((p) => !p.includes('\\worktrees\\') && !p.includes('\\.git\\'))
-      .filter((p) => {
-        // Exclude nested node_modules (e.g. repo\node_modules\pkg\node_modules)
-        // Check if "node_modules" appears in the path before the final segment
-        const withoutTrailing = p.slice(0, p.lastIndexOf('\\'));
-        return !withoutTrailing.includes('\\node_modules');
-      })
-      .map((p) => ({ path: p, isFile: false }));
-  } else if (pattern.startsWith('.env')) {
-    const cmd = `dir /s /b "${repoPath}\\.env*"`;
-    const { stdout } = await commandRunner.execAsync(cmd, repoPath);
-    return stdout
-      .trim()
-      .split('\r\n')
-      .filter(Boolean)
-      .filter((p) => !p.includes('\\worktrees\\') && !p.includes('\\.git\\'))
-      .map((p) => ({ path: p, isFile: true }));
-  }
-  return [];
+  patterns: string[],
+): Promise<string[]> {
+  return glob(patterns, {
+    cwd: repoPath,
+    dot: true,
+    nodir: false,
+    absolute: true,
+    follow: false,
+    ignore: [
+      '**/.git/**',
+      '**/worktrees/**',
+    ],
+  });
 }
 
 /**
@@ -300,10 +402,11 @@ async function copyRootEntry(
   commandRunner: CommandRunner,
   environment: ProjectEnvironment,
 ): Promise<void> {
-  if (entry.path.trim().length === 0) return;
+  const entryPath = normalizeSyncPath(entry.path);
+  if (entryPath.length === 0) return;
 
-  const srcPath = envJoin(environment, mainRepoPath, entry.path);
-  const destPath = envJoin(environment, worktreePath, entry.path);
+  const srcPath = envJoin(environment, mainRepoPath, entryPath);
+  const destPath = envJoin(environment, worktreePath, entryPath);
 
   const srcExists = await existsAt(srcPath, commandRunner, environment, mainRepoPath);
   if (!srcExists) return;
@@ -333,16 +436,22 @@ async function copyRecursiveMatches(
   commandRunner: CommandRunner,
   environment: ProjectEnvironment,
 ): Promise<WorktreeFileSyncFailure[]> {
+  const entryPath = normalizeSyncPath(entry.path);
+  if (entryPath.length === 0) return [];
+
   const matches = await findRecursiveMatches(
     mainRepoPath,
-    entry.path,
+    entryPath,
+    entry.recursive,
     commandRunner,
     environment,
   );
 
   const failures: WorktreeFileSyncFailure[] = [];
-  for (const match of matches) {
-    const relativePath = envRelative(environment, mainRepoPath, match.path);
+  for (const matchPath of matches) {
+    const relativePath = envRelative(environment, mainRepoPath, matchPath);
+    if (shouldSkipMatch(relativePath)) continue;
+
     try {
       const destPath = envJoin(environment, worktreePath, relativePath);
 
@@ -350,10 +459,11 @@ async function copyRecursiveMatches(
       if (destExists) continue;
 
       await ensureParentDir(destPath, commandRunner, worktreePath, environment);
-      const cmd = getFastCopyCommand(match.path, destPath, environment, match.isFile);
+      const isFile = await isFilePath(matchPath, commandRunner, environment, mainRepoPath);
+      const cmd = getFastCopyCommand(matchPath, destPath, environment, isFile);
       await execCopyCommand(cmd, mainRepoPath, commandRunner, environment);
     } catch (err) {
-      console.error(`[WorktreeFileSync] Failed to copy match "${match.path}":`, err);
+      console.error(`[WorktreeFileSync] Failed to copy match "${matchPath}":`, err);
       failures.push({ path: relativePath, reason: describeError(err) });
       // Continue with remaining matches, best effort
     }
@@ -466,7 +576,8 @@ export const worktreeFileSyncService = {
 
       for (const entry of orderedEntries) {
         try {
-          if (entry.recursive) {
+          const normalizedPath = normalizeSyncPath(entry.path);
+          if (entry.recursive || entryHasGlobPattern(normalizedPath)) {
             const matchFailures = await copyRecursiveMatches(
               mainRepoPath,
               worktreePath,

@@ -23,7 +23,7 @@ function makeMockCommandRunner(
   cpCommands: string[],
 ): CommandRunner {
   const execAsync = vi.fn().mockImplementation((cmd: string, _cwd: string) => {
-    if (cmd.startsWith('find ') || cmd.startsWith('dir /')) {
+    if (cmd.startsWith('find ') || cmd.startsWith('dir /') || cmd.startsWith('sh -c ')) {
       return Promise.resolve({ stdout: findOutput, stderr: '' });
     }
     if (cmd.startsWith('test -e ')) {
@@ -36,10 +36,10 @@ function makeMockCommandRunner(
       return Promise.reject(new Error('not exists'));
     }
     if (cmd.startsWith('test -f ')) {
-      // All matched .env* paths are files; node_modules are directories
+      // Matched config/env paths are files; dependency/tool folders are directories.
       const match = /^test -f "(.+)"$/.exec(cmd);
       const testedPath = match ? match[1] : '';
-      const isFile = !testedPath.endsWith('node_modules');
+      const isFile = !testedPath.endsWith('node_modules') && !testedPath.endsWith('/bin');
       if (isFile) {
         return Promise.resolve({ stdout: '', stderr: '' });
       }
@@ -60,6 +60,10 @@ function makeMockCommandRunner(
   });
 
   return { execAsync } as unknown as CommandRunner;
+}
+
+function isMatchCommand(cmd: string): boolean {
+  return cmd.startsWith('find ') || cmd.startsWith('dir /') || cmd.startsWith('sh -c ');
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +428,70 @@ describe('worktreeFileSyncService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Glob entries
+  // -------------------------------------------------------------------------
+
+  describe('glob entries', () => {
+    const environment: ProjectEnvironment = 'linux';
+    const mainRepoPath = '/home/user/repo';
+    const worktreePath = '/home/user/worktree';
+
+    it('expands a custom ./venv/* entry and preserves the venv-relative destination paths', async () => {
+      const findOutput = [
+        '/home/user/repo/venv/bin',
+        '/home/user/repo/venv/bin/python',
+        '/home/user/repo/venv/pyvenv.cfg',
+      ].join('\n');
+      const cpCommands: string[] = [];
+      const runner = makeMockCommandRunner(findOutput, new Set(), cpCommands);
+
+      await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [{
+          id: 'venv',
+          path: './venv/*',
+          enabled: true,
+          recursive: false,
+        }],
+      );
+
+      expect(cpCommands).toHaveLength(2);
+      expect(cpCommands).toContain(
+        'cp -rp "/home/user/repo/venv/bin" "/home/user/worktree/venv/bin"',
+      );
+      expect(cpCommands).toContain(
+        'cp "/home/user/repo/venv/pyvenv.cfg" "/home/user/worktree/venv/pyvenv.cfg"',
+      );
+    });
+
+    it('rejects entries that escape the repository root', async () => {
+      const cpCommands: string[] = [];
+      const runner = makeMockCommandRunner('', new Set(), cpCommands);
+
+      const result = await worktreeFileSyncService.syncWorktree(
+        mainRepoPath,
+        worktreePath,
+        runner,
+        environment,
+        [{
+          id: 'escape',
+          path: '../.env',
+          enabled: true,
+          recursive: false,
+        }],
+      );
+
+      expect(cpCommands).toHaveLength(0);
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0].path).toBe('../.env');
+      expect(result.failures[0].reason).toContain('repo-relative');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Entry ordering: small/critical entries before heavyweight directories
   // -------------------------------------------------------------------------
 
@@ -433,9 +501,11 @@ describe('worktreeFileSyncService', () => {
     const worktreePath = '/home/user/worktree';
 
     function makeOrderingRunner(cpCommands: string[]): CommandRunner {
+      let matchCallCount = 0;
       const execAsync = vi.fn().mockImplementation((cmd: string) => {
-        if (cmd.startsWith('find ')) {
-          if (cmd.includes('-name "node_modules"')) {
+        if (isMatchCommand(cmd)) {
+          matchCallCount += 1;
+          if (matchCallCount === 2) {
             return Promise.resolve({ stdout: '/home/user/repo/node_modules', stderr: '' });
           }
           return Promise.resolve({ stdout: '/home/user/repo/.env', stderr: '' });
@@ -484,7 +554,7 @@ describe('worktreeFileSyncService', () => {
     it('keeps non-heavyweight entries in config order', async () => {
       const cpCommands: string[] = [];
       const execAsync = vi.fn().mockImplementation((cmd: string) => {
-        if (cmd.startsWith('find ')) {
+        if (isMatchCommand(cmd)) {
           return Promise.resolve({ stdout: '/home/user/repo/.env', stderr: '' });
         }
         if (cmd === 'test -e "/home/user/repo/.claude"') {
@@ -584,7 +654,7 @@ describe('worktreeFileSyncService', () => {
 
     it('reports per-match copy failures without aborting the sync', async () => {
       const execAsync = vi.fn().mockImplementation((cmd: string) => {
-        if (cmd.startsWith('find ')) {
+        if (isMatchCommand(cmd)) {
           return Promise.resolve({ stdout: '/home/user/repo/node_modules', stderr: '' });
         }
         if (cmd.startsWith('test -e ')) {
@@ -616,9 +686,11 @@ describe('worktreeFileSyncService', () => {
 
     it('continues to later entries after an earlier entry fails', async () => {
       const cpCommands: string[] = [];
+      let matchCallCount = 0;
       const execAsync = vi.fn().mockImplementation((cmd: string) => {
-        if (cmd.startsWith('find ')) {
-          if (cmd.includes('-name "node_modules"')) {
+        if (isMatchCommand(cmd)) {
+          matchCallCount += 1;
+          if (matchCallCount === 2) {
             return Promise.resolve({ stdout: '/home/user/repo/node_modules', stderr: '' });
           }
           return Promise.resolve({ stdout: '/home/user/repo/.env', stderr: '' });
