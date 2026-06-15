@@ -4,7 +4,11 @@ import { useHotkeyStore } from '../stores/hotkeyStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { cycleIndex } from '../utils/arrayUtils';
-import type { Session } from '../types/session';
+import {
+  createProjectById,
+  flattenSessionsByProjects,
+  groupSessionsByProject,
+} from '../utils/sessionOrdering';
 import type { Project } from '../types/project';
 
 interface UseSessionNavigationHotkeysOptions {
@@ -21,54 +25,16 @@ export function useSessionNavigationHotkeys({
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
 
-  const sessionsByProject = useMemo(() => {
-    const map = new Map<number, Session[]>();
-    sessions
-      .filter(s => !s.archived)
-      .forEach(s => {
-        if (s.projectId != null) {
-          const list = map.get(s.projectId) || [];
-          list.push(s);
-          map.set(s.projectId, list);
-        }
-      });
-    map.forEach((list, key) => {
-      map.set(key, list.sort((a, b) => {
-        const da = new Date(a.createdAt).getTime();
-        const db = new Date(b.createdAt).getTime();
-        return sessionSortAscending ? da - db : db - da;
-      }));
-    });
-    return map;
-  }, [sessions, sessionSortAscending]);
+  const sessionsByProject = useMemo(
+    () => groupSessionsByProject(sessions, sessionSortAscending),
+    [sessions, sessionSortAscending]
+  );
 
-  const projectById = useMemo(() => {
-    const map = new Map<number, Project>();
-    projects.forEach(project => map.set(project.id, project));
-    return map;
-  }, [projects]);
+  const projectById = useMemo(() => createProjectById(projects), [projects]);
 
   const allActiveSessions = useMemo(() => {
-    const result: Session[] = [];
-    projects.forEach(project => {
-      const list = sessionsByProject.get(project.id) || [];
-      result.push(...list);
-    });
-    return result;
+    return flattenSessionsByProjects(projects, sessionsByProject);
   }, [projects, sessionsByProject]);
-
-  const pinnedSessions = useMemo(() => {
-    return sessions
-      .filter(session => !session.archived && session.isFavorite)
-      .map(session => {
-        const projectName = session.projectId != null ? projectById.get(session.projectId)?.name : undefined;
-        return {
-          session,
-          label: `${projectName || 'Unknown'}/${session.name || 'Untitled'}`,
-        };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-  }, [sessions, projectById]);
 
   const expandedProjects = useNavigationStore(s => s.expandedProjects);
   const registerProjectIds = useNavigationStore(s => s.registerProjectIds);
@@ -81,23 +47,16 @@ export function useSessionNavigationHotkeys({
   }, [projects, registerProjectIds]);
 
   // Sessions in the exact order ProjectSessionList renders them: projects in
-  // display order, collapsed projects skipped, sessions sorted by createdAt.
+  // display order, collapsed projects skipped, sessions in display order.
   // Pinned rows are excluded, matching the list's hotkey numbering.
   const visibleSessions = useMemo(() => {
-    const result: Session[] = [];
-    projects.forEach(project => {
-      if (expandedProjects.has(project.id)) {
-        const list = sessionsByProject.get(project.id) || [];
-        result.push(...list);
-      }
-    });
-    return result;
+    return flattenSessionsByProjects(projects, sessionsByProject, expandedProjects);
   }, [projects, expandedProjects, sessionsByProject]);
 
   const allActiveSessionsRef = useRef(allActiveSessions);
   allActiveSessionsRef.current = allActiveSessions;
-  const pinnedSessionsRef = useRef(pinnedSessions);
-  pinnedSessionsRef.current = pinnedSessions;
+  const visibleSessionsRef = useRef(visibleSessions);
+  visibleSessionsRef.current = visibleSessions;
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
   const setActiveSessionRef = useRef(setActiveSession);
@@ -118,9 +77,10 @@ export function useSessionNavigationHotkeys({
     navigateToSessionsRef.current();
   }, []);
 
-  const cyclePinnedOrAllSessions = useCallback((direction: 'next' | 'prev') => {
-    const pinned = pinnedSessionsRef.current.map(item => item.session);
-    const sessions = pinned.length > 0 ? pinned : allActiveSessionsRef.current;
+  const cycleVisibleOrAllSessions = useCallback((direction: 'next' | 'prev') => {
+    const sessions = visibleSessionsRef.current.length > 0
+      ? visibleSessionsRef.current
+      : allActiveSessionsRef.current;
     if (sessions.length === 0) return;
 
     const currentId = activeSessionIdRef.current;
@@ -151,31 +111,27 @@ export function useSessionNavigationHotkeys({
   });
 
   useHotkey({
-    id: 'cycle-pinned-or-all-next',
-    label: 'Next Pinned Pane',
+    id: 'cycle-sidebar-session-next',
+    label: 'Next Pane in Sidebar',
     keys: 'mod+ArrowDown',
     category: 'session',
     enabled: () => {
-      const pinnedCount = pinnedSessionsRef.current.length;
-      return pinnedCount > 1 || (pinnedCount === 0 && allActiveSessionsRef.current.length > 1);
+      return visibleSessionsRef.current.length > 1 || allActiveSessionsRef.current.length > 1;
     },
-    action: () => cyclePinnedOrAllSessions('next'),
+    action: () => cycleVisibleOrAllSessions('next'),
   });
 
   useHotkey({
-    id: 'cycle-pinned-or-all-prev',
-    label: 'Previous Pinned Pane',
+    id: 'cycle-sidebar-session-prev',
+    label: 'Previous Pane in Sidebar',
     keys: 'mod+ArrowUp',
     category: 'session',
     enabled: () => {
-      const pinnedCount = pinnedSessionsRef.current.length;
-      return pinnedCount > 1 || (pinnedCount === 0 && allActiveSessionsRef.current.length > 1);
+      return visibleSessionsRef.current.length > 1 || allActiveSessionsRef.current.length > 1;
     },
-    action: () => cyclePinnedOrAllSessions('prev'),
+    action: () => cycleVisibleOrAllSessions('prev'),
   });
 
-  const visibleSessionsRef = useRef(visibleSessions);
-  visibleSessionsRef.current = visibleSessions;
   const projectByIdRef = useRef(projectById);
   projectByIdRef.current = projectById;
 

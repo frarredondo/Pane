@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   exit_code INTEGER,
   pid INTEGER,
   claude_session_id TEXT,
-  project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE
+  project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+  is_favorite BOOLEAN DEFAULT 0,
+  favorite_pinned_at DATETIME
 );
 
 -- Session outputs table to store terminal output history

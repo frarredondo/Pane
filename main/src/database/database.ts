@@ -903,6 +903,22 @@ export class DatabaseService {
       console.log("[Database] Added is_favorite column to sessions table");
     }
 
+    const hasFavoritePinnedAtColumn = sessionTableInfoFavorite.some(
+      (col: SqliteTableInfo) => col.name === "favorite_pinned_at",
+    );
+
+    if (!hasFavoritePinnedAtColumn) {
+      this.db
+        .prepare("ALTER TABLE sessions ADD COLUMN favorite_pinned_at DATETIME")
+        .run();
+      this.db
+        .prepare(
+          "UPDATE sessions SET favorite_pinned_at = created_at WHERE is_favorite = 1 AND favorite_pinned_at IS NULL",
+        )
+        .run();
+      console.log("[Database] Added favorite_pinned_at column to sessions table");
+    }
+
     // Add auto_commit column to sessions table if it doesn't exist
     const hasAutoCommitColumn = sessionTableInfoFavorite.some(
       (col: SqliteTableInfo) => col.name === "auto_commit",
@@ -1099,6 +1115,7 @@ export class DatabaseService {
             is_main_repo BOOLEAN DEFAULT 0,
             display_order INTEGER,
             is_favorite BOOLEAN DEFAULT 0,
+            favorite_pinned_at DATETIME,
             folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL,
             auto_commit BOOLEAN DEFAULT 1
           )
@@ -2957,6 +2974,14 @@ export class DatabaseService {
       updates.push("is_favorite = ?");
       values.push(data.is_favorite ? 1 : 0);
     }
+    if (data.favorite_pinned_at !== undefined) {
+      if (data.favorite_pinned_at === "CURRENT_TIMESTAMP") {
+        updates.push("favorite_pinned_at = CURRENT_TIMESTAMP");
+      } else {
+        updates.push("favorite_pinned_at = ?");
+        values.push(data.favorite_pinned_at);
+      }
+    }
     if (data.skip_continue_next !== undefined) {
       updates.push("skip_continue_next = ?");
       const boolValue = data.skip_continue_next ? 1 : 0;
@@ -2976,11 +3001,16 @@ export class DatabaseService {
 
     // Only update the updated_at timestamp if we're changing something other than is_favorite, skip_continue_next, or pr_renamed
     // This prevents the session from showing as "unviewed" when just toggling these settings
-    const isOnlyToggleUpdate =
-      updates.length === 1 &&
-      (updates[0] === "is_favorite = ?" ||
-        updates[0] === "skip_continue_next = ?" ||
-        updates[0] === "pr_renamed = ?");
+    const toggleOnlyFields = new Set([
+      "is_favorite = ?",
+      "favorite_pinned_at = ?",
+      "favorite_pinned_at = CURRENT_TIMESTAMP",
+      "skip_continue_next = ?",
+      "pr_renamed = ?",
+    ]);
+    const isOnlyToggleUpdate = updates.every((update) =>
+      toggleOnlyFields.has(update),
+    );
     if (!isOnlyToggleUpdate) {
       updates.push("updated_at = CURRENT_TIMESTAMP");
     }

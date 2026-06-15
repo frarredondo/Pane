@@ -13,6 +13,12 @@ import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
+import {
+  createProjectById,
+  flattenSessionsByProjects,
+  getPinnedSessions,
+  groupSessionsByProject,
+} from '../utils/sessionOrdering';
 
 
 
@@ -77,47 +83,16 @@ export function ProjectSessionList({
   }, [loadProjects]);
 
   // Group sessions by project
-  const sessionsByProject = useMemo(() => {
-    const map = new Map<number, Session[]>();
-    sessions
-      .filter(s => !s.archived)
-      .forEach(s => {
-        if (s.projectId != null) {
-          const list = map.get(s.projectId) || [];
-          list.push(s);
-          map.set(s.projectId, list);
-        }
-      });
-    map.forEach((list, key) => {
-      map.set(key, list.sort((a, b) => {
-        const da = new Date(a.createdAt).getTime();
-        const db = new Date(b.createdAt).getTime();
-        return sessionSortAscending ? da - db : db - da;
-      }));
-    });
-    return map;
-  }, [sessions, sessionSortAscending]);
+  const sessionsByProject = useMemo(
+    () => groupSessionsByProject(sessions, sessionSortAscending),
+    [sessions, sessionSortAscending]
+  );
 
-  const projectById = useMemo(() => {
-    const map = new Map<number, Project>();
-    projects.forEach(project => map.set(project.id, project));
-    return map;
-  }, [projects]);
-
-  const getPinnedSessionLabel = useCallback((session: Session) => {
-    const projectName = session.projectId != null ? projectById.get(session.projectId)?.name : undefined;
-    return `${projectName || 'Unknown'}/${session.name || 'Untitled'}`;
-  }, [projectById]);
+  const projectById = useMemo(() => createProjectById(projects), [projects]);
 
   const pinnedSessions = useMemo(() => {
-    return sessions
-      .filter(session => !session.archived && session.isFavorite)
-      .map(session => ({
-        session,
-        label: getPinnedSessionLabel(session),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-  }, [sessions, getPinnedSessionLabel]);
+    return getPinnedSessions(sessions, projectById);
+  }, [sessions, projectById]);
 
   // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
   // (always mounted in Sidebar), and new-project auto-expansion lives there too.
@@ -216,6 +191,7 @@ export function ProjectSessionList({
     if (payload.length > 0) {
       try {
         await API.projects.reorder(payload);
+        window.dispatchEvent(new Event('project-changed'));
       } catch (err) {
         console.error('Failed to reorder projects:', err);
         loadProjects();
@@ -231,15 +207,8 @@ export function ProjectSessionList({
   // Compute global index for each session (for hotkey labels in tooltips)
   const globalSessionIndex = useMemo(() => {
     const map = new Map<string, number>();
-    let idx = 0;
-    projects.forEach(p => {
-      if (expandedProjects.has(p.id)) {
-        const list = sessionsByProject.get(p.id) || [];
-        list.forEach(s => {
-          map.set(s.id, idx);
-          idx++;
-        });
-      }
+    flattenSessionsByProjects(projects, sessionsByProject, expandedProjects).forEach((session, index) => {
+      map.set(session.id, index);
     });
     return map;
   }, [projects, expandedProjects, sessionsByProject]);

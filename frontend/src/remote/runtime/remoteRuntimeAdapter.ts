@@ -117,8 +117,8 @@ export class RemoteRuntimeAdapter {
     return this.invoke<VoiceTranscriptionResult>('voice:finalize-streaming', [request]);
   }
 
-  toggleFavorite(sessionId: string): Promise<{ isFavorite: boolean }> {
-    return this.invoke<{ isFavorite: boolean }>('sessions:toggle-favorite', [sessionId]);
+  toggleFavorite(sessionId: string): Promise<{ isFavorite: boolean; favoritePinnedAt?: string | null }> {
+    return this.invoke<{ isFavorite: boolean; favoritePinnedAt?: string | null }>('sessions:toggle-favorite', [sessionId]);
   }
 
   archiveSession(sessionId: string): Promise<void> {

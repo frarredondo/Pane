@@ -2,11 +2,12 @@ import type { Session, SessionOutput } from '../types/session';
 
 type TimestampLike = string | Date | null | undefined;
 
-type SessionWire = Omit<Session, 'createdAt' | 'lastActivity' | 'lastViewedAt' | 'runStartedAt'> & {
+type SessionWire = Omit<Session, 'createdAt' | 'lastActivity' | 'lastViewedAt' | 'runStartedAt' | 'favoritePinnedAt'> & {
   createdAt?: TimestampLike;
   lastActivity?: TimestampLike;
   lastViewedAt?: TimestampLike;
   runStartedAt?: TimestampLike;
+  favoritePinnedAt?: TimestampLike;
 };
 
 type SessionOutputWire = Omit<SessionOutput, 'timestamp'> & {
@@ -32,6 +33,7 @@ export function normalizeSession(session: SessionWire): Session {
     lastActivity: normalizeTimestamp(session.lastActivity),
     lastViewedAt: normalizeTimestamp(session.lastViewedAt),
     runStartedAt: normalizeTimestamp(session.runStartedAt),
+    favoritePinnedAt: normalizeTimestamp(session.favoritePinnedAt),
   };
 }
 

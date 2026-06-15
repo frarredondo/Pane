@@ -96,6 +96,7 @@ export interface Session {
   isMainRepo?: boolean;
   displayOrder?: number;
   isFavorite?: boolean;
+  favoritePinnedAt?: string;
   toolType?: 'claude' | 'none';
   archived?: boolean;
   gitStatus?: GitStatus;

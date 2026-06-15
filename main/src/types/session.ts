@@ -20,6 +20,7 @@ export interface Session {
   projectId?: number;
   folderId?: string;
   isFavorite?: boolean;
+  favoritePinnedAt?: string;
   model?: string;
   toolType?: 'claude' | 'none';
   archived?: boolean;
