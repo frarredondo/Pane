@@ -5,8 +5,10 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import {
+  chooseSidebarCycleSessions,
   createProjectById,
   flattenSessionsByProjects,
+  getPinnedSessions,
   groupSessionsByProject,
 } from '../utils/sessionOrdering';
 import type { Project } from '../types/project';
@@ -24,6 +26,8 @@ export function useSessionNavigationHotkeys({
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
+  const sidebarNavigationScope = useNavigationStore(s => s.sidebarNavigationScope);
+  const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
 
   const sessionsByProject = useMemo(
     () => groupSessionsByProject(sessions, sessionSortAscending),
@@ -53,14 +57,24 @@ export function useSessionNavigationHotkeys({
     return flattenSessionsByProjects(projects, sessionsByProject, expandedProjects);
   }, [projects, expandedProjects, sessionsByProject]);
 
+  const pinnedSessions = useMemo(() => {
+    return getPinnedSessions(sessions, projectById).map(item => item.session);
+  }, [sessions, projectById]);
+
   const allActiveSessionsRef = useRef(allActiveSessions);
   allActiveSessionsRef.current = allActiveSessions;
   const visibleSessionsRef = useRef(visibleSessions);
   visibleSessionsRef.current = visibleSessions;
+  const pinnedSessionsRef = useRef(pinnedSessions);
+  pinnedSessionsRef.current = pinnedSessions;
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+  const sidebarNavigationScopeRef = useRef(sidebarNavigationScope);
+  sidebarNavigationScopeRef.current = sidebarNavigationScope;
   const setActiveSessionRef = useRef(setActiveSession);
   setActiveSessionRef.current = setActiveSession;
+  const setSidebarNavigationScopeRef = useRef(setSidebarNavigationScope);
+  setSidebarNavigationScopeRef.current = setSidebarNavigationScope;
   const navigateToSessionsRef = useRef(navigateToSessions);
   navigateToSessionsRef.current = navigateToSessions;
 
@@ -78,12 +92,16 @@ export function useSessionNavigationHotkeys({
   }, []);
 
   const cycleVisibleOrAllSessions = useCallback((direction: 'next' | 'prev') => {
-    const sessions = visibleSessionsRef.current.length > 0
-      ? visibleSessionsRef.current
-      : allActiveSessionsRef.current;
+    const currentId = activeSessionIdRef.current;
+    const sessions = chooseSidebarCycleSessions(
+      sidebarNavigationScopeRef.current,
+      currentId,
+      pinnedSessionsRef.current,
+      visibleSessionsRef.current,
+      allActiveSessionsRef.current
+    );
     if (sessions.length === 0) return;
 
-    const currentId = activeSessionIdRef.current;
     const currentIndex = sessions.findIndex(s => s.id === currentId);
     const nextIndex = cycleIndex(currentIndex, sessions.length, direction);
     if (nextIndex === -1) return;
@@ -116,7 +134,14 @@ export function useSessionNavigationHotkeys({
     keys: 'mod+ArrowDown',
     category: 'session',
     enabled: () => {
-      return visibleSessionsRef.current.length > 1 || allActiveSessionsRef.current.length > 1;
+      const sessions = chooseSidebarCycleSessions(
+        sidebarNavigationScopeRef.current,
+        activeSessionIdRef.current,
+        pinnedSessionsRef.current,
+        visibleSessionsRef.current,
+        allActiveSessionsRef.current
+      );
+      return sessions.length > 1;
     },
     action: () => cycleVisibleOrAllSessions('next'),
   });
@@ -127,7 +152,14 @@ export function useSessionNavigationHotkeys({
     keys: 'mod+ArrowUp',
     category: 'session',
     enabled: () => {
-      return visibleSessionsRef.current.length > 1 || allActiveSessionsRef.current.length > 1;
+      const sessions = chooseSidebarCycleSessions(
+        sidebarNavigationScopeRef.current,
+        activeSessionIdRef.current,
+        pinnedSessionsRef.current,
+        visibleSessionsRef.current,
+        allActiveSessionsRef.current
+      );
+      return sessions.length > 1;
     },
     action: () => cycleVisibleOrAllSessions('prev'),
   });
@@ -165,6 +197,7 @@ export function useSessionNavigationHotkeys({
         action: () => {
           const s = visibleSessionsRef.current[idx];
           if (s) {
+            setSidebarNavigationScopeRef.current('repositories');
             setActiveSessionRef.current(s.id);
             navigateToSessionsRef.current();
           }

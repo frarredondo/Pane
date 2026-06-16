@@ -13,6 +13,7 @@ import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
+import type { SidebarNavigationScope } from '../stores/navigationStore';
 import {
   createProjectById,
   flattenSessionsByProjects,
@@ -38,6 +39,8 @@ export function ProjectSessionList({
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForProject, setCreateForProject] = useState<Project | null>(null);
+  const [pinnedSectionExpanded, setPinnedSectionExpanded] = useState(true);
+  const [repositoriesSectionExpanded, setRepositoriesSectionExpanded] = useState(true);
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
@@ -51,6 +54,7 @@ export function ProjectSessionList({
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
   // Expansion state lives in the navigation store so the always-mounted
   // session hotkeys (useSessionNavigationHotkeys) see the same visible ordering
   const expandedProjects = useNavigationStore(s => s.expandedProjects);
@@ -111,7 +115,8 @@ export function ProjectSessionList({
     toggleProjectExpanded(id);
   };
 
-  const handleSessionClick = (sessionId: string) => {
+  const handleSessionClick = (sessionId: string, scope: SidebarNavigationScope = 'repositories') => {
+    setSidebarNavigationScope(scope);
     setActiveSession(sessionId);
     navigateToSessions();
   };
@@ -219,6 +224,7 @@ export function ProjectSessionList({
         {/* Home */}
         <button
           onClick={() => {
+            setSidebarNavigationScope('repositories');
             setActiveSession(null);
             navigateToSessions();
           }}
@@ -243,28 +249,54 @@ export function ProjectSessionList({
 
         {pinnedSessions.length > 0 && (
           <>
-            <div className="mt-2 px-3 pt-1 pb-1">
+            <button
+              type="button"
+              onClick={() => setPinnedSectionExpanded(expanded => !expanded)}
+              className="group/section mt-2 flex w-full items-center gap-1.5 px-3 pt-1 pb-1 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
+            >
+              <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
+                {pinnedSectionExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-current" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-current" />
+                )}
+              </span>
               <span className="text-sm text-text-tertiary truncate">Pinned</span>
-            </div>
-            <div className="mt-0.5">
-              {pinnedSessions.map(({ session, label }) => (
-                <SessionRow
-                  key={`pinned-${session.id}`}
-                  session={session}
-                  isActive={session.id === activeSessionId}
-                  globalIndex={-1}
-                  displayName={label}
-                  onClick={() => handleSessionClick(session.id)}
-                  onArchive={() => handleArchiveSession(session.id)}
-                  onTogglePinned={() => handleTogglePinnedSession(session.id)}
-                />
-              ))}
-            </div>
+            </button>
+            {pinnedSectionExpanded && (
+              <div className="mt-0.5">
+                {pinnedSessions.map(({ session, label }) => (
+                  <SessionRow
+                    key={`pinned-${session.id}`}
+                    session={session}
+                    isActive={session.id === activeSessionId}
+                    globalIndex={-1}
+                    displayName={label}
+                    onClick={() => handleSessionClick(session.id, 'pinned')}
+                    onArchive={() => handleArchiveSession(session.id)}
+                    onTogglePinned={() => handleTogglePinnedSession(session.id)}
+                  />
+                ))}
+              </div>
+            )}
           </>
         )}
 
         <div className="mt-2 px-3 pt-1 pb-1 flex items-center justify-between gap-2">
-          <span className="text-sm text-text-tertiary truncate">Repositories</span>
+          <button
+            type="button"
+            onClick={() => setRepositoriesSectionExpanded(expanded => !expanded)}
+            className="group/section flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
+          >
+            <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
+              {repositoriesSectionExpanded ? (
+                <ChevronDown className="h-3.5 w-3.5 text-current" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-current" />
+              )}
+            </span>
+            <span className="text-sm text-text-tertiary truncate">Repositories</span>
+          </button>
           <button
             onClick={() => setShowAddProjectDialog(true)}
             className="inline-flex items-center justify-center rounded-md p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
@@ -275,7 +307,7 @@ export function ProjectSessionList({
         </div>
 
         {/* Projects */}
-        {projects.map(project => {
+        {repositoriesSectionExpanded && projects.map(project => {
           const isExpanded = expandedProjects.has(project.id);
           const projectSessions = sessionsByProject.get(project.id) || [];
 
@@ -379,7 +411,7 @@ export function ProjectSessionList({
                       session={session}
                       isActive={session.id === activeSessionId}
                       globalIndex={globalSessionIndex.get(session.id) ?? -1}
-                      onClick={() => handleSessionClick(session.id)}
+                      onClick={() => handleSessionClick(session.id, 'repositories')}
                       onArchive={() => handleArchiveSession(session.id)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
                     />
@@ -417,7 +449,17 @@ export function ProjectSessionList({
 
 // --- Session row button content ---
 
-function SessionRowContent({ session, gs, iconColor, hasDiff, adds, dels, displayName }: {
+function SessionRowContent({
+  session,
+  gs,
+  iconColor,
+  hasDiff,
+  adds,
+  dels,
+  displayName,
+  showActivity,
+  showUnviewedCompleted,
+}: {
   session: Session;
   gs: GitStatus | undefined;
   iconColor: string;
@@ -425,6 +467,8 @@ function SessionRowContent({ session, gs, iconColor, hasDiff, adds, dels, displa
   adds: number;
   dels: number;
   displayName?: string;
+  showActivity: boolean;
+  showUnviewedCompleted: boolean;
 }) {
   return (
     <div className="flex items-center gap-2 min-w-0 w-full">
@@ -433,7 +477,11 @@ function SessionRowContent({ session, gs, iconColor, hasDiff, adds, dels, displa
       ) : (
         <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}
-      <span className="text-sm font-medium text-text-primary truncate flex-1 min-w-0">
+      <span className={cn(
+        'text-sm font-medium text-text-primary truncate flex-1 min-w-0 decoration-status-info decoration-2 underline-offset-4',
+        showActivity && 'animate-sidebar-active-label',
+        showUnviewedCompleted && 'underline decoration-dashed'
+      )}>
         {displayName || gs?.prTitle || session.name || 'Untitled'}
       </span>
       {gs?.prNumber ? (
@@ -475,6 +523,7 @@ function SessionRow({
     const sessionPanels = s.panels[session.id] || [];
     return sessionPanels.some(p => s.activityStatus[p.id] === 'active') ? 'active' : 'idle';
   });
+  const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
 
   // Fetch git status if not available
   useEffect(() => {
@@ -530,7 +579,7 @@ function SessionRow({
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
   const hasDiff = adds > 0 || dels > 0;
-  const showActivityRail = sessionActivity === 'active';
+  const showActivity = sessionActivity === 'active';
 
   return (
     <Tooltip
@@ -555,10 +604,6 @@ function SessionRow({
           }
         }}
       >
-        {showActivityRail && (
-          <span className="pointer-events-none absolute left-0 top-0 h-full w-1 bg-status-info animate-pulse" />
-        )}
-
         <SessionRowContent
           session={session}
           gs={gs}
@@ -567,6 +612,8 @@ function SessionRow({
           adds={adds}
           dels={dels}
           displayName={displayName}
+          showActivity={showActivity}
+          showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
         />
 
         <div className="flex flex-shrink-0 items-center gap-0.5">
