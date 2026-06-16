@@ -337,7 +337,7 @@ describe('Remote PWA browser runtime', () => {
       return new Response(JSON.stringify({
         ok: true,
         result: body.channel === 'sessions:toggle-favorite'
-          ? { success: true, data: { isFavorite: true } }
+          ? { success: true, data: { isFavorite: true, favoritePinnedAt: '2026-01-03T00:00:00.000Z' } }
           : { success: true },
       }), {
         headers: { 'Content-Type': 'application/json' },
@@ -354,7 +354,10 @@ describe('Remote PWA browser runtime', () => {
       transport: 'http+sse',
     });
 
-    await expect(adapter.toggleFavorite('session-1')).resolves.toEqual({ isFavorite: true });
+    await expect(adapter.toggleFavorite('session-1')).resolves.toEqual({
+      isFavorite: true,
+      favoritePinnedAt: '2026-01-03T00:00:00.000Z',
+    });
     await expect(adapter.archiveSession('session-1')).resolves.toBeUndefined();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);

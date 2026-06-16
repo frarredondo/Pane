@@ -74,6 +74,7 @@ export interface Session {
   is_main_repo?: boolean;
   display_order?: number;
   is_favorite?: boolean;
+  favorite_pinned_at?: string | null;
   tool_type?: "claude" | "none";
   base_commit?: string;
   base_branch?: string;
@@ -125,6 +126,7 @@ export interface UpdateSessionData {
   claude_session_id?: string;
   run_started_at?: string;
   is_favorite?: boolean;
+  favorite_pinned_at?: string | null;
   skip_continue_next?: boolean;
   pr_renamed?: boolean;
 }

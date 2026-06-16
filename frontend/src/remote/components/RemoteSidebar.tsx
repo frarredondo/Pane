@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 import type { Session } from '../../types/session';
 import { RemoteDesktopLink } from './RemoteDesktopLink';
+import { createProjectById, getPinnedSessions } from '../../utils/sessionOrdering';
 
 interface RemoteSidebarProps {
   projects: RemoteProjectWithSessions[];
@@ -32,14 +33,11 @@ export function RemoteSidebar({
   className = 'flex w-80 shrink-0',
 }: RemoteSidebarProps) {
   const pinnedSessions = useMemo(() => {
-    return projects
-      .flatMap(project => (project.sessions ?? [])
-        .filter(session => !session.archived && session.isFavorite)
-        .map(session => ({
-          session,
-          label: getPinnedSessionLabel(project, session),
-        })))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+    const projectById = createProjectById(projects);
+    return getPinnedSessions(
+      projects.flatMap(project => project.sessions ?? []),
+      projectById
+    );
   }, [projects]);
 
   return (
@@ -207,8 +205,4 @@ function RemoteSessionRow({
       </span>
     </div>
   );
-}
-
-function getPinnedSessionLabel(project: RemoteProjectWithSessions, session: Session): string {
-  return `${project.name || 'Unknown'}/${session.name || 'Untitled'}`;
 }

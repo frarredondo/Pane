@@ -244,6 +244,7 @@ export class SessionManager extends EventEmitter {
       folderId: dbSession.folder_id,
       displayOrder: dbSession.display_order, // Include displayOrder for proper sorting
       isFavorite: dbSession.is_favorite,
+      favoritePinnedAt: dbSession.favorite_pinned_at ?? undefined,
       // Model is now managed at panel level
       toolType: normalizedToolType,
       archived: dbSession.archived || false,

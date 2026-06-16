@@ -1319,7 +1319,10 @@ export function registerSessionHandlers(
       const newFavoriteStatus = !currentSession.is_favorite;
       console.log('[IPC] Toggling favorite status to:', newFavoriteStatus);
       
-      const updatedSession = databaseService.updateSession(sessionId, { is_favorite: newFavoriteStatus });
+      const updatedSession = databaseService.updateSession(sessionId, {
+        is_favorite: newFavoriteStatus,
+        favorite_pinned_at: newFavoriteStatus ? 'CURRENT_TIMESTAMP' : null,
+      });
       if (!updatedSession) {
         console.error('[IPC] Failed to update session in database');
         return { success: false, error: 'Failed to update session' };
@@ -1331,13 +1334,14 @@ export function registerSessionHandlers(
       const session = sessionManager.getSession(sessionId);
       if (session) {
         session.isFavorite = newFavoriteStatus;
+        session.favoritePinnedAt = updatedSession.favorite_pinned_at ?? undefined;
         console.log('[IPC] Emitting session-updated event with favorite status:', session.isFavorite);
         sessionManager.emit('session-updated', session);
       } else {
         console.warn('[IPC] Session not found in session manager:', sessionId);
       }
 
-      return { success: true, data: { isFavorite: newFavoriteStatus } };
+      return { success: true, data: { isFavorite: newFavoriteStatus, favoritePinnedAt: updatedSession.favorite_pinned_at } };
     } catch (error) {
       console.error('Failed to toggle favorite status:', error);
       if (error instanceof Error) {
