@@ -6,6 +6,7 @@ export interface PanelStore {
   activePanels: Record<string, string>;       // sessionId -> active panelId
   activityStatus: Record<string, 'active' | 'idle'>; // panelId -> status
   lastActivityAt: Record<string, string>;     // panelId -> last PTY output timestamp
+  unviewedCompletedActivity: Record<string, string>; // sessionId -> completion timestamp
 
   // Layout state for split tab groups
   layouts: Record<string, SessionPanelLayout>;   // sessionId -> layout tree
@@ -19,6 +20,8 @@ export interface PanelStore {
   updatePanelState: (panel: ToolPanel) => void;
   setActivityStatus: (panelId: string, status: 'active' | 'idle', lastActivityAt?: string) => void;
   clearActivityStatus: (panelId: string) => void;
+  markUnviewedCompletedActivity: (sessionId: string, completedAt?: string) => void;
+  clearUnviewedCompletedActivity: (sessionId: string) => void;
 
   // Layout actions
   setLayout: (sessionId: string, layout: SessionPanelLayout) => void;
@@ -29,6 +32,7 @@ export interface PanelStore {
   getActivePanel: (sessionId: string) => ToolPanel | undefined;
   getPanelActivityStatus: (panelId: string) => 'active' | 'idle';
   getSessionActivityStatus: (sessionId: string) => 'active' | 'idle';
+  hasUnviewedCompletedActivity: (sessionId: string) => boolean;
   getLayout: (sessionId: string) => SessionPanelLayout | undefined;
   getFocusedGroupId: (sessionId: string) => string | undefined;
 }

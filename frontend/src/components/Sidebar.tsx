@@ -194,6 +194,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const navigateToProject = useNavigationStore((state) => state.navigateToProject);
+  const setSidebarNavigationScope = useNavigationStore((state) => state.setSidebarNavigationScope);
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
 
   const handleRefreshGitStatus = async () => {
@@ -295,7 +296,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
                     return (
                       <Tooltip key={session.id} content={<SessionDetailTooltip session={session} />} side="right">
                         <button
-                          onClick={() => setActiveSession(session.id)}
+                          onClick={() => {
+                            setSidebarNavigationScope('repositories');
+                            setActiveSession(session.id);
+                          }}
                           className={`w-8 h-8 rounded flex items-center justify-center transition-colors ${
                             isActive ? 'bg-interactive/20 ring-1 ring-interactive/50' : 'hover:bg-surface-hover'
                           }`}

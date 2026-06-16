@@ -1,5 +1,6 @@
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
+import type { SidebarNavigationScope } from '../stores/navigationStore';
 
 export interface PinnedSession {
   session: Session;
@@ -104,4 +105,22 @@ export function getPinnedSessions(
       if (pinnedDiff !== 0) return pinnedDiff;
       return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
     });
+}
+
+export function chooseSidebarCycleSessions(
+  scope: SidebarNavigationScope,
+  activeSessionId: string | null,
+  pinnedSessions: Session[],
+  visibleSessions: Session[],
+  allActiveSessions: Session[]
+): Session[] {
+  if (
+    scope === 'pinned' &&
+    activeSessionId &&
+    pinnedSessions.some(session => session.id === activeSessionId)
+  ) {
+    return pinnedSessions;
+  }
+
+  return visibleSessions.length > 0 ? visibleSessions : allActiveSessions;
 }

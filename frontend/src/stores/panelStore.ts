@@ -10,6 +10,7 @@ export const usePanelStore = create<PanelStore>()(
     activePanels: {},
     activityStatus: {},
     lastActivityAt: {},
+    unviewedCompletedActivity: {},
     layouts: {},
     focusedGroupIds: {},
 
@@ -83,6 +84,18 @@ export const usePanelStore = create<PanelStore>()(
       });
     },
 
+    markUnviewedCompletedActivity: (sessionId, completedAt) => {
+      set((state) => {
+        state.unviewedCompletedActivity[sessionId] = completedAt ?? new Date().toISOString();
+      });
+    },
+
+    clearUnviewedCompletedActivity: (sessionId) => {
+      set((state) => {
+        delete state.unviewedCompletedActivity[sessionId];
+      });
+    },
+
     // Layout actions
     setLayout: (sessionId, layout) => {
       set((state) => {
@@ -107,6 +120,9 @@ export const usePanelStore = create<PanelStore>()(
       const sessionPanels = get().panels[sessionId] || [];
       const actStatus = get().activityStatus;
       return sessionPanels.some((p) => actStatus[p.id] === 'active') ? 'active' : 'idle';
+    },
+    hasUnviewedCompletedActivity: (sessionId) => {
+      return Boolean(get().unviewedCompletedActivity[sessionId]);
     },
 
     // Layout getters

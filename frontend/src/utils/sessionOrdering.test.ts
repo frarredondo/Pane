@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import {
+  chooseSidebarCycleSessions,
   flattenSessionsByProjects,
   getPinnedSessions,
   groupSessionsByProject,
@@ -101,5 +102,47 @@ describe('sessionOrdering', () => {
     ], projects);
 
     expect(pinned.map(item => item.session.id)).toEqual(['new', 'old']);
+  });
+
+  it('uses pinned order for sidebar cycling when active pane was selected from pinned', () => {
+    const pinned = [
+      session({ id: 'latest-pin', projectId: 1, isFavorite: true }),
+      session({ id: 'older-pin', projectId: 1, isFavorite: true }),
+    ];
+    const visible = [
+      session({ id: 'normal-first', projectId: 1 }),
+      pinned[1],
+      pinned[0],
+    ];
+
+    const scoped = chooseSidebarCycleSessions(
+      'pinned',
+      'older-pin',
+      pinned,
+      visible,
+      visible
+    );
+
+    expect(scoped.map(item => item.id)).toEqual(['latest-pin', 'older-pin']);
+  });
+
+  it('falls back to visible repository order when pinned scope no longer contains the active pane', () => {
+    const pinned = [
+      session({ id: 'latest-pin', projectId: 1, isFavorite: true }),
+    ];
+    const visible = [
+      session({ id: 'normal-first', projectId: 1 }),
+      session({ id: 'normal-second', projectId: 1 }),
+    ];
+
+    const scoped = chooseSidebarCycleSessions(
+      'pinned',
+      'normal-first',
+      pinned,
+      visible,
+      visible
+    );
+
+    expect(scoped.map(item => item.id)).toEqual(['normal-first', 'normal-second']);
   });
 });

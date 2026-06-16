@@ -458,6 +458,19 @@ body.light-rounded {
   animation: typing-dots 1.5s ease-in-out infinite;
 }
 
+@keyframes sidebar-active-label-breathe {
+  0%, 100% {
+    color: var(--color-text-primary);
+  }
+  50% {
+    color: var(--color-status-info);
+  }
+}
+
+.animate-sidebar-active-label {
+  animation: sidebar-active-label-breathe 2.4s ease-in-out infinite;
+}
+
 .xterm .xterm-screen {
   margin: 6px;
 }

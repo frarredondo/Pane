@@ -140,8 +140,29 @@ function App() {
   useEffect(() => {
     const unsubscribe = window.electronAPI?.events?.onPanelActivityStatus?.((data) => {
       usePanelStore.getState().setActivityStatus(data.panelId, data.status, data.lastActivityAt);
+
+      if (data.status === 'idle') {
+        const nextPanelStore = usePanelStore.getState();
+        const activeSessionId = useSessionStore.getState().activeSessionId;
+        const sessionIsNowIdle = nextPanelStore.getSessionActivityStatus(data.sessionId) === 'idle';
+        if (sessionIsNowIdle && activeSessionId !== data.sessionId) {
+          nextPanelStore.markUnviewedCompletedActivity(data.sessionId, data.lastActivityAt);
+        }
+      }
     });
     return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    const clearViewedCompletedActivity = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
+      if (sessionId) {
+        usePanelStore.getState().clearUnviewedCompletedActivity(sessionId);
+      }
+    };
+
+    window.addEventListener('session-switched', clearViewedCompletedActivity);
+    return () => window.removeEventListener('session-switched', clearViewedCompletedActivity);
   }, []);
 
   // Keyboard shortcuts

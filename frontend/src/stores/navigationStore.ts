@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+export type SidebarNavigationScope = 'repositories' | 'pinned';
+
 // Tracks which project ids have already been seen so registerProjectIds only
 // auto-expands genuinely new projects (preserves user-collapsed state)
 let knownProjectIds = new Set<number>();
@@ -23,6 +25,11 @@ interface NavigationState {
   toggleProjectExpanded: (projectId: number) => void;
   expandProject: (projectId: number) => void;
   registerProjectIds: (projectIds: number[]) => void;
+
+  // Last sidebar section used to enter the active pane. Cmd/Ctrl+Arrow uses
+  // this to keep cycling within Pinned after a pinned-row click.
+  sidebarNavigationScope: SidebarNavigationScope;
+  setSidebarNavigationScope: (scope: SidebarNavigationScope) => void;
 
   // Actions
   setActiveView: (view: 'sessions' | 'project') => void;
@@ -48,6 +55,9 @@ export const useNavigationStore = create<NavigationState>((set) => ({
 
   immersiveMode: false,
   setImmersiveMode: (immersive) => set({ immersiveMode: immersive }),
+
+  sidebarNavigationScope: 'repositories',
+  setSidebarNavigationScope: (scope) => set({ sidebarNavigationScope: scope }),
 
   expandedProjects: new Set<number>(),
   toggleProjectExpanded: (projectId) => set((state) => {
