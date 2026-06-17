@@ -32,27 +32,28 @@
 <br />
 <br />
 
-**Package-manager alternatives**
+<details>
+<summary><sub>Other install methods: pnpm, pipx, shell, and direct downloads</sub></summary>
+<br />
 
-<sub>pnpm</sub><br />
-<pre><code>pnpm dlx runpane@latest</code></pre>
+<pre><code># pnpm one-shot
+pnpm dlx runpane@latest
 
-<sub>Python tools</sub><br />
-<pre><code>pipx run runpane</code></pre>
+# Python tools one-shot
+pipx run runpane
 
-<sub>Persistent npm install</sub><br />
-<pre><code>npm i -g runpane
-runpane setup</code></pre>
+# Persistent npm install
+npm i -g runpane
+runpane setup
 
-**Shell installers**
+# Mac / Linux shell installer
+curl -fsSL https://runpane.com/install.sh | sh
 
-<sub>Mac / Linux shell installer</sub><br />
-<pre><code>curl -fsSL https://runpane.com/install.sh | sh</code></pre>
+# Windows PowerShell installer
+irm https://runpane.com/install.ps1 | iex</code></pre>
 
-<sub>Windows PowerShell installer</sub><br />
-<pre><code>irm https://runpane.com/install.ps1 | iex</code></pre>
-
-**Direct downloads**
+<sub>Prefer a normal app installer?</sub><br />
+<br />
 
 <a href="https://runpane.com/api/download?platform=mac&source=readme">
   <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS">
@@ -63,6 +64,8 @@ runpane setup</code></pre>
 <a href="https://runpane.com/api/download?platform=linux&source=readme">
   <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux">
 </a>
+
+</details>
 
 <br />
 <br />
