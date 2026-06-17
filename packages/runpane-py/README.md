@@ -95,6 +95,22 @@ PyPI package downloads use `source=pip` when requesting release artifacts from
 `runpane.com/api/download`. If that route is unavailable, the CLI falls back to
 matching GitHub release assets and prints a warning.
 
+## Maintenance Notes
+
+Keep the npm and PyPI clients in sync with each Pane release. When changing
+shared installer behavior:
+
+- If release asset names or platforms change, update both npm and PyPI wrapper
+  artifact matching.
+- If `runpane` CLI behavior changes, update both clients and the shared smoke
+  tests.
+- If the website `/api/download` contract changes, verify npm and PyPI fallback
+  behavior.
+- If daemon setup flags change, update docs, README files, and wrapper tests
+  together.
+- Keep the CI wrapper matrix green: Linux, macOS, Windows, Node 18/22, and
+  Python 3.8/3.13.
+
 ## Publishing
 
 This package should be published through PyPI Trusted Publishing from GitHub
