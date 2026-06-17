@@ -474,6 +474,14 @@ export class SessionManager extends EventEmitter {
       
       await panelManager.ensureExplorerPanel(session.id);
       await panelManager.ensureDiffPanel(session.id);
+      // Explorer is the intended initial tab (the diff creation above just
+      // stole active by being the last createPanel).
+      const explorerPanel = panelManager
+        .getPanelsForSession(session.id)
+        .find((p) => p.type === 'explorer');
+      if (explorerPanel) {
+        await panelManager.setActivePanel(session.id, explorerPanel.id);
+      }
       return session;
     });
   }

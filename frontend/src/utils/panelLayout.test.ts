@@ -30,6 +30,7 @@ import {
   findGroupInDirection,
   dropZoneFor,
   subsetInsertIndex,
+  mergeAllGroups,
 } from './panelLayout';
 
 // ---------------------------------------------------------------------------
@@ -427,6 +428,34 @@ describe('directional focus geometry', () => {
     expect(findGroupInDirection(grid, 'g1', 'left')).toBeNull();
     expect(findGroupInDirection(grid, 'g1', 'up')).toBeNull();
     expect(findGroupInDirection(grid, 'g4', 'right')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeAllGroups
+// ---------------------------------------------------------------------------
+
+describe('mergeAllGroups', () => {
+  it('returns a single group unchanged', () => {
+    const g = group('g1', ['a', 'b'], 'b');
+    expect(mergeAllGroups(g)).toBe(g);
+  });
+
+  it('collapses a nested tree into the primary group, preserving id, order, and active', () => {
+    const tree = split('s1', 'row', [
+      group('g1', ['a', 'b'], 'b'),
+      split('s2', 'column', [group('g2', ['c']), group('g3', ['d'])]),
+    ]);
+    const merged = mergeAllGroups(tree);
+    expect(merged.id).toBe('g1');
+    expect(merged.panelIds).toEqual(['a', 'b', 'c', 'd']);
+    expect(merged.activePanelId).toBe('b');
+  });
+
+  it('dedupes panel ids, keeping the first occurrence', () => {
+    const tree = split('s1', 'row', [group('g1', ['a', 'b']), group('g2', ['a', 'c'])]);
+    const merged = mergeAllGroups(tree);
+    expect(merged.panelIds).toEqual(['a', 'b', 'c']);
   });
 });
 

@@ -458,11 +458,17 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     }
   };
 
-  // Sort panels: diff first, explorer second, then by position
+  // Whether a tab drag is hovering the bar (drives the un-split affordance)
+  const [dragOverBar, setDragOverBar] = useState(false);
+  useEffect(() => {
+    if (!isTabDragging) setDragOverBar(false);
+  }, [isTabDragging]);
+
+  // Sort panels: explorer first, diff second, then by position
   const sortedPanels = useMemo(() => {
     const typeOrder = (type: string) => {
-      if (type === 'diff') return 0;
-      if (type === 'explorer') return 1;
+      if (type === 'explorer') return 0;
+      if (type === 'diff') return 1;
       if (type === 'browser') return 2;
       return 3;
     };
@@ -478,10 +484,28 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     <div className="panel-tab-bar bg-bg-chrome flex-shrink-0">
       {/* Flex container */}
       <div
-        className="flex items-center min-h-[var(--panel-tab-height)] px-2"
+        className="relative flex items-center min-h-[var(--panel-tab-height)] px-2"
         role="tablist"
         aria-label="Panel Tabs"
+        onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
+        onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
+        {/* Un-split affordance: dropping a tab on the top bar while split
+            merges every group back into the primary group. Advertise that
+            while a drag hovers the bar (pointer-events-none so drops pass
+            through to the strip). */}
+        {tabsInGroups && isTabDragging && dragOverBar && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] bg-surface-primary border border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)] text-text-secondary shadow-dropdown">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+                <line x1="8" y1="2.5" x2="8" y2="13.5" strokeDasharray="2 2" opacity="0.5" />
+                <path d="M5.5 8h5M9 6.5 10.5 8 9 9.5" />
+              </svg>
+              Drop to merge all tabs back here
+            </span>
+          </div>
+        )}
         {/* Scrollable tab area — delegated to PanelTabStrip. When the pane is
             split, SessionView passes only the primary group's permanent tabs
             here (working tabs live in the group strips); shortcut hints are

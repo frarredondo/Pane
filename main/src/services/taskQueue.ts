@@ -274,6 +274,16 @@ export class TaskQueue {
           panelManager.ensureBrowserPanel(session.id),
         ]);
 
+        // Each createPanel marks the new panel active, so the parallel ensures
+        // leave a race winner focused. Explorer is the intended initial tab
+        // (renders instantly; diff can take a moment on big worktrees).
+        const explorerPanel = panelManager
+          .getPanelsForSession(session.id)
+          .find((p) => p.type === 'explorer');
+        if (explorerPanel) {
+          await panelManager.setActivePanel(session.id, explorerPanel.id);
+        }
+
         // Emit the session-created event BEFORE running build script so UI shows immediately
         sessionManager.emitSessionCreated(session);
 

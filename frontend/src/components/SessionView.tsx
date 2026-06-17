@@ -36,10 +36,12 @@ import {
   findGroup,
   primaryGroup,
   allGroups,
+  allPanelIds,
   findGroupInDirection,
   updateSizes,
   findGroupContainingPanel,
   subsetInsertIndex,
+  mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
 import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, X } from 'lucide-react';
@@ -263,10 +265,10 @@ export const SessionView = memo(() => {
         const pinned = loadedPanels.find(p => p.type === 'terminal');
         const livePanels = pinned ? loadedPanels.filter(p => p.id !== pinned.id) : loadedPanels;
 
-        // Sort for initial layout creation (diff first, explorer second, then position)
+        // Sort for initial layout creation (explorer first, diff second, then position)
         const typeOrder = (type: string) => {
-          if (type === 'diff') return 0;
-          if (type === 'explorer') return 1;
+          if (type === 'explorer') return 0;
+          if (type === 'diff') return 1;
           return 2;
         };
         const sortedLive = [...livePanels].sort((a, b) => {
@@ -415,11 +417,11 @@ export const SessionView = memo(() => {
     [sessionPanels, defaultTerminalPanel]
   );
 
-  // Sort tab bar panels same as PanelTabBar: diff first, explorer second, then by position
+  // Sort tab bar panels same as PanelTabBar: explorer first, diff second, then by position
   const sortedSessionPanels = useMemo(() => {
     const typeOrder = (type: string) => {
-      if (type === 'diff') return 0;
-      if (type === 'explorer') return 1;
+      if (type === 'explorer') return 0;
+      if (type === 'diff') return 1;
       return 2;
     };
     return [...tabBarPanels].sort((a, b) => {
@@ -464,13 +466,18 @@ export const SessionView = memo(() => {
     return primaryGroupNode.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
   }, [primaryGroupNode, tabBarPanels]);
   const isSplitLayout = sessionLayout?.root.type === 'split';
-  /** What the top bar shows: everything when unsplit; only the primary
-      group's permanent tabs once split (working tabs live in group strips). */
+  /** What the top bar shows: everything when unsplit; once split, the
+      permanent tool tabs hoisted from EVERY group (in reading order), so the
+      defaults stay pinned to the top bar no matter which group owns them.
+      Clicking one routes to its owning group via handlePanelSelect. */
   const topBarPanels = useMemo(() => {
     if (!primaryGroupPanels) return undefined;
-    if (!isSplitLayout) return primaryGroupPanels;
-    return primaryGroupPanels.filter(p => p.metadata?.permanent === true);
-  }, [primaryGroupPanels, isSplitLayout]);
+    if (!isSplitLayout || !sessionLayout) return primaryGroupPanels;
+    const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
+    return allPanelIds(sessionLayout.root)
+      .map(id => panelMap.get(id))
+      .filter((p): p is ToolPanel => !!p && p.metadata?.permanent === true);
+  }, [primaryGroupPanels, isSplitLayout, sessionLayout, tabBarPanels]);
 
   const getPanelTabPresentation = useCallback<PanelTabPresentationResolver>((panel) => {
     if (panel.type !== 'diff') return undefined;
@@ -1101,17 +1108,33 @@ export const SessionView = memo(() => {
     setDropZones(new Map());
   }, [activeSession, applyLayout, preferWorkingActive]);
 
-  // Stable identity for the primary strip's drop handler so memo(PanelTabBar)
-  // holds. When split, the top bar shows only the permanent subset, so its
-  // drop indexes must translate to the group's full panel order.
+  // Top-bar drops are the un-split gesture: merge every group back into the
+  // primary group and place the dropped tab at the indicated position. When
+  // the pane isn't split, the merge is the identity and this is a plain
+  // reorder. The top bar shows only the permanent subset while split, so its
+  // drop indexes translate to the group's full panel order first.
   const primaryGroupId = primaryGroupNode?.id;
   const handlePrimaryStripDrop = useCallback((panelId: string, insertIndex: number) => {
-    if (!primaryGroupId || !primaryGroupNode) return;
+    if (!primaryGroupId || !primaryGroupNode || !activeSession) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout) return;
+    const merged = mergeAllGroups(currentLayout.root);
+    // The top bar shows the hoisted permanent subset while split; translate
+    // its drop index against the merged (post-un-split) panel order.
     const fullIndex = isSplitLayout && topBarPanels
-      ? subsetInsertIndex(primaryGroupNode.panelIds, topBarPanels.map(p => p.id), insertIndex)
+      ? subsetInsertIndex(merged.panelIds, topBarPanels.map(p => p.id), insertIndex)
       : insertIndex;
-    handleStripDrop(primaryGroupId, panelId, fullIndex);
-  }, [primaryGroupId, primaryGroupNode, isSplitLayout, topBarPanels, handleStripDrop]);
+    const newRoot = movePanelInLayout(merged, panelId, { groupId: merged.id, index: fullIndex });
+    applyLayout(sid, {
+      ...currentLayout,
+      root: newRoot,
+      focusedGroupId: merged.id,
+      zoomedGroupId: null,
+    });
+    setDraggedPanelId(null);
+    setDropZones(new Map());
+  }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1707,7 +1730,7 @@ export const SessionView = memo(() => {
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
           primaryGroupPanels={topBarPanels}
-          primaryGroupActivePanelId={primaryGroupNode?.activePanelId}
+          primaryGroupActivePanelId={isSplitLayout ? (currentActivePanel?.id ?? null) : primaryGroupNode?.activePanelId}
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
           tabsInGroups={isSplitLayout}
           onDragStart={handleDragStart}

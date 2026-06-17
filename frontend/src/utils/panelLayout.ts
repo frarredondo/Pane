@@ -530,6 +530,34 @@ export function reconcile(
 }
 
 // ---------------------------------------------------------------------------
+// Merge all groups (the un-split gesture)
+// ---------------------------------------------------------------------------
+
+/**
+ * Collapse the entire tree into the primary group. Panel order: the primary
+ * group's panels first, then the remaining groups' panels in reading order.
+ * The primary group's id and active tab survive.
+ */
+export function mergeAllGroups(root: PanelLayoutNode): PanelGroupNode {
+  if (root.type === 'group') return root;
+  const primary = primaryGroup(root);
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const id of allPanelIds(root)) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return {
+    type: 'group',
+    id: primary.id,
+    panelIds: ids,
+    activePanelId: primary.activePanelId ?? ids[0] ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Subset index translation
 // ---------------------------------------------------------------------------
 
