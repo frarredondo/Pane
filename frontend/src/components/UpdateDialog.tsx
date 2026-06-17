@@ -265,7 +265,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
       <div className="space-y-3 text-sm">
         <p className="text-text-secondary">
           This opens Terminal and copies the Pane update command.
-          Paste it, press Return, and the latest Pane DMG will download and open.
+          Paste it, press Return, and the latest Pane installer will download and open.
         </p>
         <p className="text-text-secondary">
           After the DMG opens: close Pane, drag Pane.app into Applications, and choose Replace.

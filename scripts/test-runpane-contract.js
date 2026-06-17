@@ -1,0 +1,506 @@
+#!/usr/bin/env node
+const assert = require('assert');
+const childProcess = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const rootDir = path.resolve(__dirname, '..');
+const npmCli = path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js');
+const pythonSource = path.join(rootDir, 'packages', 'runpane-py', 'src');
+
+const parserSamples = [
+  ['install'],
+  ['install', 'client', '--version', 'v2.2.8', '--format', 'dmg', '--download-dir', '/tmp/pane-downloads', '--dry-run', '--yes'],
+  [
+    'install',
+    'daemon',
+    '--label',
+    'VM',
+    '--prefer-tunnel',
+    'ssh',
+    '--channel',
+    'nightly',
+    '--base-url',
+    'https://example.test',
+    '--pane-dir',
+    '/tmp/pane',
+    '--listen-port',
+    '4555',
+    '--auto-listen-port',
+    '--print-only',
+    '--repo-ref',
+    'main',
+    '--unknown-future-flag',
+    'future-value',
+    '--dry-run',
+    '--verbose'
+  ],
+  ['update', '--version', 'latest', '--format', 'appimage', '--pane-path', '/usr/bin/pane', '--dry-run'],
+  ['doctor', '--pane-path', '/usr/bin/pane', '--format', 'zip', '--verbose'],
+  ['--version']
+];
+
+const platformCases = [
+  { platform: { os: 'darwin', arch: 'arm64' }, target: 'client' },
+  { platform: { os: 'darwin', arch: 'arm64' }, target: 'daemon' },
+  { platform: { os: 'linux', arch: 'x64' }, target: 'client' },
+  { platform: { os: 'linux', arch: 'arm64' }, target: 'daemon' },
+  { platform: { os: 'win32', arch: 'x64' }, target: 'client' },
+  { platform: { os: 'win32', arch: 'arm64' }, target: 'daemon' }
+];
+
+const artifactRelease = {
+  tag_name: 'v2.2.8',
+  name: 'v2.2.8',
+  body: '',
+  html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.2.8',
+  published_at: '2026-01-01T00:00:00Z',
+  prerelease: false,
+  draft: false,
+  assets: [
+    { name: 'Pane-2.2.8-linux-x86_64.AppImage', browser_download_url: 'https://example.test/linux-x64.AppImage' },
+    { name: 'Pane-2.2.8-linux-arm64.AppImage', browser_download_url: 'https://example.test/linux-arm64.AppImage' },
+    { name: 'Pane-2.2.8-linux-x86_64.deb', browser_download_url: 'https://example.test/linux-x64.deb' },
+    { name: 'Pane-2.2.8-linux-arm64.deb', browser_download_url: 'https://example.test/linux-arm64.deb' },
+    { name: 'Pane-2.2.8-macOS-universal.dmg', browser_download_url: 'https://example.test/macos.dmg' },
+    { name: 'Pane-2.2.8-macOS-universal.zip', browser_download_url: 'https://example.test/macos.zip' },
+    { name: 'Pane-2.2.8-Windows-x64.exe', browser_download_url: 'https://example.test/win-x64.exe' },
+    { name: 'Pane-2.2.8-Windows-arm64.exe', browser_download_url: 'https://example.test/win-arm64.exe' }
+  ]
+};
+
+const artifactCases = [
+  { platform: { os: 'linux', arch: 'x64' }, format: 'appimage' },
+  { platform: { os: 'linux', arch: 'arm64' }, format: 'appimage' },
+  { platform: { os: 'linux', arch: 'x64' }, format: 'deb' },
+  { platform: { os: 'darwin', arch: 'arm64' }, format: 'dmg' },
+  { platform: { os: 'darwin', arch: 'x64' }, format: 'zip' },
+  { platform: { os: 'win32', arch: 'x64' }, format: 'exe' },
+  { platform: { os: 'win32', arch: 'arm64' }, format: 'exe' }
+];
+
+const existingReuseCases = [
+  { args: ['install', 'daemon', '--pane-path', '/tmp/pane'], expected: true },
+  { args: ['install', 'client', '--pane-path', '/tmp/pane'], expected: false },
+  { args: ['install', '--pane-path', '/tmp/pane'], expected: false },
+  { args: ['update', '--pane-path', '/tmp/pane'], expected: false }
+];
+
+const platformEdgeRelease = {
+  tag_name: 'v2.2.8',
+  name: 'v2.2.8',
+  body: '',
+  html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.2.8',
+  published_at: '2026-01-01T00:00:00Z',
+  prerelease: false,
+  draft: false,
+  assets: [
+    { name: 'Pane-2.2.8-darwin-x64.zip', browser_download_url: 'https://example.test/darwin-x64.zip' },
+    { name: 'Pane-2.2.8-Windows-x64.zip', browser_download_url: 'https://example.test/windows-x64.zip' }
+  ]
+};
+
+function ensureBuiltCli() {
+  if (!fs.existsSync(npmCli)) {
+    throw new Error('packages/runpane/dist/cli.js is missing. Run "pnpm --filter runpane build" first.');
+  }
+}
+
+function findPython() {
+  for (const command of [process.env.PYTHON, 'python3', 'python'].filter(Boolean)) {
+    try {
+      childProcess.execFileSync(command, ['--version'], { stdio: 'ignore' });
+      return command;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  throw new Error('Could not find a Python executable. Set PYTHON to override.');
+}
+
+function runPythonSnippet(source, input) {
+  return childProcess.execFileSync(findPython(), ['-c', source], {
+    cwd: rootDir,
+    encoding: 'utf8',
+    input,
+    env: {
+      ...process.env,
+      PYTHONPATH: pythonSource
+    }
+  }).trim();
+}
+
+function assertIncludes(text, expected) {
+  assert.ok(text.includes(expected), `Expected output to include: ${expected}`);
+}
+
+function compareParserParity() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const nodeOutput = parserSamples.map((args) => {
+    const parsed = parseRunpaneArgs(args);
+    return {
+      command: parsed.command,
+      helpTopic: parsed.helpTopic ?? null,
+      target: parsed.target,
+      paneVersion: parsed.paneVersion,
+      channel: parsed.channel,
+      format: parsed.format,
+      downloadDir: parsed.downloadDir ?? null,
+      panePath: parsed.panePath ?? null,
+      dryRun: parsed.dryRun,
+      yes: parsed.yes,
+      verbose: parsed.verbose,
+      remoteSetupArgs: parsed.remoteSetupArgs
+    };
+  });
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import sys
+from runpane.cli import parse_args
+
+samples = json.loads(sys.stdin.read())
+normalized = []
+for args in samples:
+    parsed = parse_args(args)
+    normalized.append({
+        "command": parsed.command,
+        "helpTopic": parsed.help_topic,
+        "target": parsed.target,
+        "paneVersion": parsed.pane_version,
+        "channel": parsed.channel,
+        "format": parsed.format,
+        "downloadDir": parsed.download_dir,
+        "panePath": parsed.pane_path,
+        "dryRun": parsed.dry_run,
+        "yes": parsed.yes,
+        "verbose": parsed.verbose,
+        "remoteSetupArgs": parsed.remote_setup_args,
+    })
+print(json.dumps(normalized))
+`, JSON.stringify(parserSamples));
+
+  assert.deepStrictEqual(JSON.parse(pythonOutput), nodeOutput);
+}
+
+function comparePlatformParity() {
+  const { archAliases, defaultFormat, platformParam } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'platform.js'));
+  const nodeOutput = platformCases.map(({ platform, target }) => ({
+    platform,
+    target,
+    defaultFormat: defaultFormat(platform, target),
+    platformParam: platformParam(platform),
+    archAliases: archAliases(platform)
+  }));
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import sys
+from runpane.platforms import PanePlatform, arch_aliases, default_format, platform_param
+
+cases = json.loads(sys.stdin.read())
+normalized = []
+for case in cases:
+    platform = PanePlatform(**case["platform"])
+    normalized.append({
+        "platform": case["platform"],
+        "target": case["target"],
+        "defaultFormat": default_format(platform, case["target"]),
+        "platformParam": platform_param(platform),
+        "archAliases": arch_aliases(platform),
+    })
+print(json.dumps(normalized))
+`, JSON.stringify(platformCases));
+
+  assert.deepStrictEqual(JSON.parse(pythonOutput), nodeOutput);
+}
+
+function compareArtifactSelectionParity() {
+  const { findArtifact } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'releases.js'));
+  const nodeOutput = artifactCases.map(({ platform, format }) => ({
+    platform,
+    format,
+    artifact: findArtifact(artifactRelease, platform, format).name
+  }));
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import sys
+from runpane.platforms import PanePlatform
+from runpane.releases import find_artifact
+
+payload = json.loads(sys.stdin.read())
+release = payload["release"]
+cases = payload["cases"]
+normalized = []
+for case in cases:
+    platform = PanePlatform(**case["platform"])
+    normalized.append({
+        "platform": case["platform"],
+        "format": case["format"],
+        "artifact": find_artifact(release, platform, case["format"])["name"],
+    })
+print(json.dumps(normalized))
+`, JSON.stringify({ release: artifactRelease, cases: artifactCases }));
+
+  assert.deepStrictEqual(JSON.parse(pythonOutput), nodeOutput);
+}
+
+async function checkPreferredDownloadUrls() {
+  const releases = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'releases.js'));
+  const originalFetch = global.fetch;
+
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => artifactRelease
+  });
+
+  let nodeUrl;
+  try {
+    const resolved = await releases.resolveRelease({
+      version: 'latest',
+      channel: 'stable',
+      source: 'npm',
+      platform: { os: 'linux', arch: 'x64' },
+      format: 'appimage',
+      target: 'client'
+    });
+    nodeUrl = resolved.preferredDownloadUrl;
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const parsedNodeUrl = new URL(nodeUrl);
+  assert.strictEqual(`${parsedNodeUrl.origin}${parsedNodeUrl.pathname}`, 'https://runpane.com/api/download');
+  assert.strictEqual(parsedNodeUrl.searchParams.get('platform'), 'linux');
+  assert.strictEqual(parsedNodeUrl.searchParams.get('arch'), 'x64');
+  assert.strictEqual(parsedNodeUrl.searchParams.get('format'), 'appimage');
+  assert.strictEqual(parsedNodeUrl.searchParams.get('version'), 'v2.2.8');
+  assert.strictEqual(parsedNodeUrl.searchParams.get('file'), null);
+  assert.strictEqual(parsedNodeUrl.searchParams.get('channel'), 'stable');
+  assert.strictEqual(parsedNodeUrl.searchParams.get('source'), 'npm');
+
+  const pythonUrl = runPythonSnippet(`
+import json
+import sys
+import runpane.releases as releases
+from runpane.platforms import PanePlatform
+
+release = json.loads(sys.stdin.read())
+releases.fetch_release = lambda version: release
+resolved = releases.resolve_release(
+    version="latest",
+    channel="stable",
+    source="pip",
+    platform=PanePlatform(os="linux", arch="x64"),
+    format_name="appimage",
+    target="client",
+)
+print(resolved.preferred_download_url)
+`, JSON.stringify(artifactRelease));
+
+  const parsedPythonUrl = new URL(pythonUrl);
+  assert.strictEqual(`${parsedPythonUrl.origin}${parsedPythonUrl.pathname}`, 'https://runpane.com/api/download');
+  assert.strictEqual(parsedPythonUrl.searchParams.get('platform'), 'linux');
+  assert.strictEqual(parsedPythonUrl.searchParams.get('arch'), 'x64');
+  assert.strictEqual(parsedPythonUrl.searchParams.get('format'), 'appimage');
+  assert.strictEqual(parsedPythonUrl.searchParams.get('version'), 'v2.2.8');
+  assert.strictEqual(parsedPythonUrl.searchParams.get('file'), null);
+  assert.strictEqual(parsedPythonUrl.searchParams.get('channel'), 'stable');
+  assert.strictEqual(parsedPythonUrl.searchParams.get('source'), 'pip');
+}
+
+function compareExistingReusePolicy() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { shouldReuseExistingPane } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'installers.js'));
+  const nodeOutput = existingReuseCases.map(({ args }) => {
+    const parsed = parseRunpaneArgs(args);
+    const target = parsed.command === 'update' ? 'client' : parsed.target;
+    return shouldReuseExistingPane(parsed, target);
+  });
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import sys
+from runpane.cli import parse_args
+from runpane.installers import should_reuse_existing_pane
+
+cases = json.loads(sys.stdin.read())
+normalized = []
+for case in cases:
+    parsed = parse_args(case["args"])
+    target = "client" if parsed.command == "update" else parsed.target
+    normalized.append(should_reuse_existing_pane(parsed, target))
+print(json.dumps(normalized))
+`, JSON.stringify(existingReuseCases));
+
+  const expected = existingReuseCases.map((testCase) => testCase.expected);
+  assert.deepStrictEqual(nodeOutput, expected);
+  assert.deepStrictEqual(JSON.parse(pythonOutput), expected);
+}
+
+function checkPlatformMatchingEdgeCases() {
+  const { findArtifact } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'releases.js'));
+  const nodeArtifact = findArtifact(platformEdgeRelease, { os: 'win32', arch: 'x64' }, 'zip').name;
+
+  const pythonArtifact = runPythonSnippet(`
+import json
+import sys
+from runpane.platforms import PanePlatform
+from runpane.releases import find_artifact
+
+release = json.loads(sys.stdin.read())
+artifact = find_artifact(release, PanePlatform(os="win32", arch="x64"), "zip")
+print(artifact["name"])
+`, JSON.stringify(platformEdgeRelease));
+
+  assert.strictEqual(nodeArtifact, 'Pane-2.2.8-Windows-x64.zip');
+  assert.strictEqual(pythonArtifact, 'Pane-2.2.8-Windows-x64.zip');
+}
+
+async function checkExistingDaemonShortCircuit() {
+  const existingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-existing-'));
+  const existingPath = path.join(existingDir, process.platform === 'win32' ? 'Pane.exe' : 'pane');
+  fs.writeFileSync(existingPath, '');
+
+  const releasesPath = path.join(rootDir, 'packages', 'runpane', 'dist', 'releases.js');
+  const downloadPath = path.join(rootDir, 'packages', 'runpane', 'dist', 'download.js');
+  const installersPath = path.join(rootDir, 'packages', 'runpane', 'dist', 'installers.js');
+  const cliPath = path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js');
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const releases = require(releasesPath);
+  const download = require(downloadPath);
+  const installers = require(installersPath);
+  const originalResolveRelease = releases.resolveRelease;
+  const originalDownloadArtifact = download.downloadArtifact;
+  const originalSpawnPane = installers.spawnPane;
+  let spawned = null;
+
+  releases.resolveRelease = async () => {
+    throw new Error('resolveRelease should not be called for existing daemon reuse');
+  };
+  download.downloadArtifact = async () => {
+    throw new Error('downloadArtifact should not be called for existing daemon reuse');
+  };
+  installers.spawnPane = async (executablePath, args) => {
+    spawned = { executablePath, args };
+    return 0;
+  };
+
+  try {
+    delete require.cache[require.resolve(cliPath)];
+    const { installOrUpdate } = require(cliPath);
+    const parsed = parseRunpaneArgs(['install', 'daemon', '--pane-path', existingPath, '--label', 'Existing', '--print-only']);
+    const code = await installOrUpdate(parsed);
+    assert.strictEqual(code, 0);
+    assert.deepStrictEqual(spawned, {
+      executablePath: existingPath,
+      args: ['--remote-setup', '--label', 'Existing', '--print-only']
+    });
+  } finally {
+    releases.resolveRelease = originalResolveRelease;
+    download.downloadArtifact = originalDownloadArtifact;
+    installers.spawnPane = originalSpawnPane;
+    delete require.cache[require.resolve(cliPath)];
+    fs.rmSync(existingDir, { recursive: true, force: true });
+  }
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import os
+import tempfile
+import runpane.cli as cli
+from runpane.cli import install_or_update, parse_args
+
+handle = tempfile.NamedTemporaryFile(delete=False)
+handle.close()
+captured = {}
+
+def fail_resolve(*args, **kwargs):
+    raise AssertionError("resolve_release should not be called for existing daemon reuse")
+
+def fail_download(*args, **kwargs):
+    raise AssertionError("download_artifact should not be called for existing daemon reuse")
+
+def fake_spawn(executable_path, args):
+    captured["matchesExisting"] = executable_path == handle.name
+    captured["args"] = args
+    return 0
+
+cli.resolve_release = fail_resolve
+cli.download_artifact = fail_download
+cli.spawn_pane = fake_spawn
+
+try:
+    parsed = parse_args(["install", "daemon", "--pane-path", handle.name, "--label", "Existing", "--print-only"])
+    code = install_or_update(parsed)
+    print(json.dumps({"code": code, "captured": captured}))
+finally:
+    os.unlink(handle.name)
+`);
+  assert.deepStrictEqual(JSON.parse(pythonOutput), {
+    code: 0,
+    captured: {
+      matchesExisting: true,
+      args: ['--remote-setup', '--label', 'Existing', '--print-only']
+    }
+  });
+}
+
+function checkHelpOutput() {
+  const python = findPython();
+  const pythonEnv = {
+    ...process.env,
+    PYTHONPATH: pythonSource
+  };
+  const nodeHelp = childProcess.execFileSync(process.execPath, [npmCli, '--help'], { encoding: 'utf8' });
+  const nodeInstallHelp = childProcess.execFileSync(process.execPath, [npmCli, 'help', 'install'], { encoding: 'utf8' });
+  const pyHelp = childProcess.execFileSync(python, ['-m', 'runpane', '--help'], { encoding: 'utf8', env: pythonEnv, cwd: rootDir });
+  const pyInstallHelp = childProcess.execFileSync(python, ['-m', 'runpane', 'help', 'install'], {
+    encoding: 'utf8',
+    env: pythonEnv,
+    cwd: rootDir
+  });
+
+  for (const output of [nodeHelp, pyHelp]) {
+    for (const text of ['runpane install', 'runpane update', 'runpane version', 'runpane doctor']) {
+      assertIncludes(output, text);
+    }
+  }
+
+  assertIncludes(nodeHelp, 'pnpm dlx runpane@latest');
+  assertIncludes(pyHelp, 'pipx run runpane');
+
+  for (const output of [nodeInstallHelp, pyInstallHelp]) {
+    for (const text of [
+      '--version <latest|vX.Y.Z>',
+      '--format <auto|appimage|deb|dmg|zip|exe>',
+      '--download-dir <path>',
+      '--pane-path <path>',
+      '--label <name>',
+      '--prefer-tunnel <tailscale|ssh|manual|auto>',
+      '--repo-ref <ref>'
+    ]) {
+      assertIncludes(output, text);
+    }
+  }
+}
+
+async function runChecks() {
+  ensureBuiltCli();
+  compareParserParity();
+  comparePlatformParity();
+  compareArtifactSelectionParity();
+  await checkPreferredDownloadUrls();
+  compareExistingReusePolicy();
+  checkPlatformMatchingEdgeCases();
+  await checkExistingDaemonShortCircuit();
+  checkHelpOutput();
+  console.log('runpane CLI contract checks passed');
+}
+
+runChecks().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
