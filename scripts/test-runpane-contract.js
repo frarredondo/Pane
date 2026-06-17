@@ -10,6 +10,7 @@ const npmCli = path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js');
 const pythonSource = path.join(rootDir, 'packages', 'runpane-py', 'src');
 
 const parserSamples = [
+  ['setup'],
   ['install'],
   ['install', 'client', '--version', 'v2.2.8', '--format', 'dmg', '--download-dir', '/tmp/pane-downloads', '--dry-run', '--yes'],
   [
@@ -439,7 +440,8 @@ try:
 finally:
     os.unlink(handle.name)
 `);
-  assert.deepStrictEqual(JSON.parse(pythonOutput), {
+  const pythonJson = pythonOutput.split(/\r?\n/).filter(Boolean).pop();
+  assert.deepStrictEqual(JSON.parse(pythonJson), {
     code: 0,
     captured: {
       matchesExisting: true,
@@ -464,13 +466,15 @@ function checkHelpOutput() {
   });
 
   for (const output of [nodeHelp, pyHelp]) {
-    for (const text of ['runpane install', 'runpane update', 'runpane version', 'runpane doctor']) {
+    for (const text of ['runpane setup', 'runpane install', 'runpane update', 'runpane version', 'runpane doctor']) {
       assertIncludes(output, text);
     }
   }
 
   assertIncludes(nodeHelp, 'pnpm dlx runpane@latest');
   assertIncludes(pyHelp, 'pipx run runpane');
+  assertIncludes(nodeHelp, 'npx --yes runpane@latest');
+  assertIncludes(pyHelp, 'python -m pip install runpane && python -m runpane setup');
 
   for (const output of [nodeInstallHelp, pyInstallHelp]) {
     for (const text of [
@@ -487,6 +491,27 @@ function checkHelpOutput() {
   }
 }
 
+function checkNoArgsAndSetupFallback() {
+  const python = findPython();
+  const pythonEnv = {
+    ...process.env,
+    PYTHONPATH: pythonSource
+  };
+
+  const outputs = [
+    childProcess.execFileSync(process.execPath, [npmCli], { encoding: 'utf8' }),
+    childProcess.execFileSync(process.execPath, [npmCli, 'setup'], { encoding: 'utf8' }),
+    childProcess.execFileSync(python, ['-m', 'runpane'], { encoding: 'utf8', env: pythonEnv, cwd: rootDir }),
+    childProcess.execFileSync(python, ['-m', 'runpane', 'setup'], { encoding: 'utf8', env: pythonEnv, cwd: rootDir })
+  ];
+
+  for (const output of outputs) {
+    assertIncludes(output, 'Usage:');
+    assertIncludes(output, 'runpane setup');
+    assertIncludes(output, 'Quick start:');
+  }
+}
+
 async function runChecks() {
   ensureBuiltCli();
   compareParserParity();
@@ -497,6 +522,7 @@ async function runChecks() {
   checkPlatformMatchingEdgeCases();
   await checkExistingDaemonShortCircuit();
   checkHelpOutput();
+  checkNoArgsAndSetupFallback();
   console.log('runpane CLI contract checks passed');
 }
 

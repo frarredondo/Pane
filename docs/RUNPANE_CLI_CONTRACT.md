@@ -15,9 +15,9 @@ Treat this file as the source of truth for both wrapper packages:
   rule change must be reflected here.
 - The npm and PyPI wrappers must expose the same command behavior unless this
   contract explicitly documents a package-manager-specific difference.
-- Root `README.md` should show the recommended user commands only. Package
-  READMEs may include package-specific runners such as `yarn dlx`, `bunx`,
-  `pipx`, or `uvx`.
+- Root `README.md` and package READMEs should lead with one guided quick-start
+  command. Explicit commands, package-manager variants, and flags belong in an
+  Advanced section.
 - Release version bumps must keep root `package.json`, `packages/runpane`, and
   `packages/runpane-py` versions in sync. Run
   `pnpm run check:runpane-package-versions` before release.
@@ -37,13 +37,29 @@ out of the wrapper unless a compatibility test covers the new dependency.
 
 ## Package Manager Entrypoints
 
+Recommended guided quick starts:
+
+```bash
+npx --yes runpane@latest
+npm i -g runpane && runpane setup
+pipx run runpane
+python -m pip install runpane && python -m runpane setup
+```
+
 Canonical npm and Node commands:
 
 ```bash
+npx --yes runpane@latest
+npx --yes runpane@latest setup
 npx --yes runpane@latest install client
 npx --yes runpane@latest install daemon --label "My Server"
-npm i -g runpane && runpane install daemon --label "My Server"
+pnpm dlx runpane@latest
 pnpm dlx runpane@latest install daemon --label "My Server"
+npm i -g runpane && runpane
+npm i -g runpane && runpane setup
+npm i -g runpane && runpane install daemon --label "My Server"
+pnpm add -g runpane && runpane
+pnpm add -g runpane && runpane setup
 pnpm add -g runpane && runpane install daemon --label "My Server"
 yarn dlx runpane@latest install daemon --label "My Server"
 bunx runpane@latest install daemon --label "My Server"
@@ -52,10 +68,19 @@ bunx runpane@latest install daemon --label "My Server"
 Canonical Python commands:
 
 ```bash
+pipx run runpane
+pipx run runpane setup
 python -m pip install runpane
+runpane
+runpane setup
+python -m runpane setup
 runpane install daemon --label "My Server"
 pipx install runpane
+runpane
+runpane setup
 pipx run runpane install daemon --label "My Server"
+uvx runpane@latest
+uvx runpane@latest setup
 uvx runpane@latest install daemon --label "My Server"
 python -m runpane install daemon --label "My Server"
 ```
@@ -67,6 +92,8 @@ install path.
 ## Commands
 
 ```bash
+runpane
+runpane setup
 runpane install
 runpane install client
 runpane install daemon
@@ -76,6 +103,11 @@ runpane doctor
 runpane help
 runpane <command> --help
 ```
+
+When stdin and stdout are TTYs, `runpane` with no arguments and `runpane setup`
+open an interactive wizard for desktop install, remote host setup, update, and
+diagnostics. In non-interactive shells or CI, both forms must print help and
+exit successfully instead of waiting for input.
 
 `runpane install` is an alias for `runpane install client`.
 

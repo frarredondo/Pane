@@ -1,38 +1,66 @@
 # runpane
 
-Thin PyPI installer and remote setup CLI for Pane.
+Install or configure Pane from PyPI.
 
 The package does not include the Pane desktop runtime. It downloads the correct
 Pane release artifact only when you run `runpane install` or `runpane update`.
 
-## Usage
+## Quick Start
 
-One-shot execution:
+Run the guided setup:
 
 ```bash
-pipx run runpane install daemon --label "My Server"
-uvx runpane@latest install daemon --label "My Server"
+pipx run runpane
 ```
 
 Persistent install:
 
 ```bash
 python -m pip install runpane
-runpane install daemon --label "My Server"
+python -m runpane setup
+```
+
+The wizard can install Pane on this machine, configure this machine as a remote
+host, update Pane, or run diagnostics.
+
+## Advanced
+
+### Explicit Commands
+
+```bash
+pipx run runpane setup
+pipx run runpane install client
+pipx run runpane install daemon --label "My Server"
+pipx run runpane update
+pipx run runpane doctor
+```
+
+`runpane install daemon` installs Pane and then invokes the installed executable
+with `--remote-setup`, preserving the `pane-remote://...` connection-code output.
+
+### Python Runners
+
+One-shot execution:
+
+```bash
+uvx runpane@latest
+```
+
+Persistent install:
+
+```bash
+python -m pip install runpane
+python -m runpane setup
 
 pipx install runpane
-runpane install daemon --label "My Server"
+runpane setup
 ```
 
-Module entrypoint:
+### Commands
 
 ```bash
-python -m runpane install daemon --label "My Server"
-```
-
-## Commands
-
-```bash
+runpane
+runpane setup
 runpane install
 runpane install client
 runpane install daemon
@@ -42,8 +70,24 @@ runpane doctor
 runpane --help
 ```
 
-`runpane install daemon` installs Pane and then invokes the installed executable
-with `--remote-setup`, preserving the `pane-remote://...` connection-code output.
+### Common Options
+
+```bash
+--version <latest|vX.Y.Z>
+--format <auto|appimage|deb|dmg|zip|exe>
+--download-dir <path>
+--pane-path <path>
+--dry-run
+--verbose
+```
+
+Daemon setup also forwards Pane remote-host options:
+
+```bash
+--label <name>
+--prefer-tunnel <tailscale|ssh|manual|auto>
+--print-only
+```
 
 ## Attribution
 

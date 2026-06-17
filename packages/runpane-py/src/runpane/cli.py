@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+import os
+import socket
+import sys
+from typing import Dict, List, Optional, TypeVar
 
 from .doctor import run_doctor
 from .download import download_artifact
@@ -18,7 +21,7 @@ from .version import print_version
 
 SOURCE = "pip"
 
-COMMANDS = {"help", "install", "update", "version", "doctor"}
+COMMANDS = {"help", "setup", "install", "update", "version", "doctor"}
 TARGETS = {"client", "daemon"}
 FORMATS = {"auto", "appimage", "deb", "dmg", "zip", "exe"}
 CHANNELS = {"stable", "nightly"}
@@ -60,13 +63,17 @@ class ParsedArgs:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    import sys
-
     try:
-        parsed = parse_args(sys.argv[1:] if argv is None else argv)
+        effective_argv = sys.argv[1:] if argv is None else argv
+        if not effective_argv:
+            return run_no_args_entrypoint()
+
+        parsed = parse_args(effective_argv)
         if parsed.command == "help":
             print(help_text(parsed.help_topic))
             return 0
+        if parsed.command == "setup":
+            return run_no_args_entrypoint()
         if parsed.command == "version":
             return print_version(parsed.pane_path)
         if parsed.command == "doctor":
@@ -78,6 +85,121 @@ def main(argv: Optional[List[str]] = None) -> int:
     except Exception as error:
         print(str(error), file=sys.stderr)
         return 1
+
+
+def run_no_args_entrypoint() -> int:
+    if not is_interactive_shell():
+        print(help_text(None))
+        return 0
+
+    return run_interactive_wizard()
+
+
+def is_interactive_shell() -> bool:
+    return bool(sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get("CI"))
+
+
+def run_interactive_wizard() -> int:
+    print("Pane setup")
+    print("Choose what this machine should do. You can rerun setup any time.")
+    print()
+    print("1) Install Pane desktop app on this machine")
+    print("2) Set up this machine as a remote host")
+    print("3) Update Pane desktop app")
+    print("4) Run diagnostics")
+    print()
+
+    action = ask_choice("Choose an action [1]: ", {
+        "": "client",
+        "1": "client",
+        "client": "client",
+        "install": "client",
+        "desktop": "client",
+        "2": "daemon",
+        "daemon": "daemon",
+        "remote": "daemon",
+        "host": "daemon",
+        "3": "update",
+        "update": "update",
+        "4": "doctor",
+        "doctor": "doctor",
+        "diagnostics": "doctor",
+    })
+
+    if action == "client":
+        print()
+        print("Installing Pane desktop app on this machine...")
+        return install_or_update(create_parsed_args("install", target="client"))
+    if action == "update":
+        print()
+        print("Updating Pane desktop app on this machine...")
+        return install_or_update(create_parsed_args("update", target="client"))
+    if action == "doctor":
+        print()
+        print("Running runpane diagnostics...")
+        return run_doctor(create_parsed_args("doctor"), SOURCE)
+
+    print()
+    print("A remote host runs your repos, terminals, agents, and git state.")
+    print("Your desktop Pane or browser client connects with the generated pane-remote:// code.")
+
+    default_label = socket.gethostname() or "Remote Host"
+    label = input(f"Remote host label [{default_label}]: ").strip() or default_label
+
+    print()
+    print("Connection method:")
+    print("1) auto")
+    print("2) tailscale")
+    print("3) ssh")
+    print("4) manual")
+    print()
+    print("Use auto unless you already know you want Tailscale, SSH, or a manual URL.")
+    print()
+
+    tunnel = ask_choice("Choose a connection method [1]: ", {
+        "": "auto",
+        "1": "auto",
+        "auto": "auto",
+        "2": "tailscale",
+        "tailscale": "tailscale",
+        "3": "ssh",
+        "ssh": "ssh",
+        "4": "manual",
+        "manual": "manual",
+    })
+
+    remote_setup_args = ["--label", label]
+    if tunnel != "auto":
+        remote_setup_args.extend(["--prefer-tunnel", tunnel])
+
+    print()
+    print("Setting up this machine as a Pane remote host...")
+    print("When setup finishes, paste the printed pane-remote:// code into Pane or runpane.com/app.")
+
+    return install_or_update(create_parsed_args(
+        "install",
+        target="daemon",
+        remote_setup_args=remote_setup_args,
+    ))
+
+
+ChoiceT = TypeVar("ChoiceT", bound=str)
+
+
+def ask_choice(prompt: str, choices: Dict[str, ChoiceT]) -> ChoiceT:
+    while True:
+        answer = input(prompt).strip().lower()
+        choice = choices.get(answer)
+        if choice:
+            return choice
+        print(f"Choose one of: {', '.join(key for key in choices.keys() if key)}")
+
+
+def create_parsed_args(command: str, **overrides: object) -> ParsedArgs:
+    parsed = ParsedArgs(command=command)
+    for key, value in overrides.items():
+        setattr(parsed, key, value)
+    return parsed
 
 
 def parse_args(argv: List[str]) -> ParsedArgs:
@@ -174,9 +296,12 @@ def install_or_update(parsed: ParsedArgs) -> int:
     if not parsed.dry_run and should_reuse_existing_pane(parsed, target):
         existing = resolve_existing_pane_path(parsed.pane_path)
         if existing:
+            print(f"runpane: using existing Pane executable at {existing}")
+            print("runpane: starting remote setup...")
             return spawn_pane(existing, ["--remote-setup", *parsed.remote_setup_args])
 
     platform = detect_platform()
+    print(f"runpane: resolving Pane release {parsed.pane_version}...")
     resolved = resolve_release(
         version=parsed.pane_version,
         channel=parsed.channel,
@@ -203,10 +328,16 @@ def install_or_update(parsed: ParsedArgs) -> int:
             print(f"Pane command: <pane executable> --remote-setup {forwarded}".strip())
         return 0
 
+    print(f"runpane: selected {resolved.artifact['name']}")
+    print(f"runpane: downloading {resolved.artifact['name']}...")
     artifact = download_artifact(resolved, parsed.download_dir, parsed.verbose)
+    fallback = " from GitHub fallback" if artifact.used_fallback else ""
+    print(f"runpane: downloaded {artifact.file_name}{fallback}")
+    print("runpane: installing Pane...")
     installed = install_pane_artifact(artifact, parsed, platform, resolved.format, target)
 
     if target == "daemon":
+        print("runpane: starting remote setup...")
         return spawn_pane(installed.executable_path, ["--remote-setup", *parsed.remote_setup_args])
 
     if installed.install_kind == "installed":
@@ -253,6 +384,17 @@ def help_text(topic: Optional[str]) -> str:
 
     if topic == "update":
         return "Usage:\n  runpane update [--version <latest|vX.Y.Z>] [--dry-run] [--yes]"
+    if topic == "setup":
+        return "\n".join([
+            "Usage:",
+            "  runpane setup",
+            "",
+            "Opens the guided setup for desktop install, remote host setup, update, and diagnostics.",
+            "",
+            "Quick start:",
+            "  pipx run runpane",
+            "  python -m pip install runpane && python -m runpane setup",
+        ])
     if topic == "version":
         return "Usage:\n  runpane version\n  runpane --version"
     if topic == "doctor":
@@ -260,16 +402,22 @@ def help_text(topic: Optional[str]) -> str:
 
     return "\n".join([
         "Usage:",
+        "  runpane",
+        "  runpane setup",
         "  runpane install [client|daemon] [options]",
         "  runpane update [options]",
         "  runpane version",
         "  runpane doctor",
         "  runpane help [command]",
         "",
-        "Package manager examples:",
+        "Quick start:",
+        "  pipx run runpane",
+        "  python -m pip install runpane && python -m runpane setup",
+        "",
+        "Advanced examples:",
+        "  pipx run runpane install client",
         '  pipx run runpane install daemon --label "My Server"',
-        '  uvx runpane@latest install daemon --label "My Server"',
-        '  python -m runpane install daemon --label "My Server"',
+        "  uvx runpane@latest",
         "",
         'Run "runpane help install" for install options.',
     ])

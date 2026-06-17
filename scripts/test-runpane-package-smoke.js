@@ -77,13 +77,17 @@ function smokeNpmPackage(tarball) {
   fs.mkdirSync(pnpmInstallDir);
 
   run('npx', ['--yes', '--package', tarball, 'runpane', '--help']);
+  run('npx', ['--yes', '--package', tarball, 'runpane'], { env: { CI: '1' } });
   run('pnpm', ['--package', tarball, 'dlx', 'runpane', '--help']);
+  run('pnpm', ['--package', tarball, 'dlx', 'runpane'], { env: { CI: '1' } });
 
   run('npm', ['install', '--prefix', npmInstallDir, tarball]);
   run(packageBin(npmInstallDir), ['--help']);
+  run(packageBin(npmInstallDir), ['setup'], { env: { CI: '1' } });
 
   run('pnpm', ['--dir', pnpmInstallDir, 'add', tarball]);
   run(packageBin(pnpmInstallDir), ['--help']);
+  run(packageBin(pnpmInstallDir), ['setup'], { env: { CI: '1' } });
 }
 
 function smokePythonPackage() {
@@ -93,6 +97,8 @@ function smokePythonPackage() {
   const isolatedPython = venvPython(venvDir);
   run(isolatedPython, ['-m', 'pip', 'install', pythonPackageDir]);
   run(isolatedPython, ['-m', 'runpane', '--help']);
+  run(isolatedPython, ['-m', 'runpane'], { env: { CI: '1' } });
+  run(isolatedPython, ['-m', 'runpane', 'setup'], { env: { CI: '1' } });
 }
 
 try {
