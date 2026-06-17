@@ -25,28 +25,32 @@
 
 **Quick install (recommended)**
 
-<sub>Package manager</sub><br />
-<pre><code>npx --yes runpane@latest install client</code></pre>
+<pre><code>npx --yes runpane@latest</code></pre>
 
-<sub>pnpm</sub><br />
-<pre><code>pnpm dlx runpane@latest install client</code></pre>
-
-<sub>Python tools</sub><br />
-<pre><code>pipx run runpane install client</code></pre>
-
-<sub>or use the shell installers</sub><br />
-
-<sub>Mac / Linux</sub><br />
-<pre><code>curl -fsSL https://runpane.com/install.sh | sh</code></pre>
-
-<sub>Windows (PowerShell)</sub><br />
-<pre><code>irm https://runpane.com/install.ps1 | iex</code></pre>
-
-<sub><em>Bypasses the macOS Gatekeeper / Windows SmartScreen prompts on direct downloads.</em></sub>
+<sub>Opens a guided setup for desktop install, remote host setup, updates, and diagnostics.</sub>
 
 <br />
+<br />
 
-<sub>or download the installer directly</sub>
+<details>
+<summary><sub>Other install methods</sub></summary>
+<br />
+
+<sub>pnpm</sub><br />
+<pre><code>pnpm dlx runpane@latest</code></pre>
+
+<sub>Python tools</sub><br />
+<pre><code>pipx run runpane</code></pre>
+
+<sub>Persistent npm install</sub><br />
+<pre><code>npm i -g runpane
+runpane setup</code></pre>
+
+<sub>Mac / Linux shell installer</sub><br />
+<pre><code>curl -fsSL https://runpane.com/install.sh | sh</code></pre>
+
+<sub>Windows PowerShell installer</sub><br />
+<pre><code>irm https://runpane.com/install.ps1 | iex</code></pre>
 
 <a href="https://runpane.com/api/download?platform=mac&source=readme">
   <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS">
@@ -57,6 +61,8 @@
 <a href="https://runpane.com/api/download?platform=linux&source=readme">
   <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux">
 </a>
+
+</details>
 
 <br />
 <br />
@@ -189,19 +195,40 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 ### Quick Install
 
-**Package manager:**
+Run the guided setup:
+
+```bash
+npx --yes runpane@latest
+```
+
+The wizard can install Pane on this machine, configure this machine as a remote
+host, update Pane, or run diagnostics.
+
+### Advanced Install Methods
+
+Explicit desktop install:
+
 ```bash
 npx --yes runpane@latest install client
 pnpm dlx runpane@latest install client
 pipx run runpane install client
 ```
 
-**Mac / Linux:**
+Persistent npm install:
+
+```bash
+npm i -g runpane
+runpane setup
+```
+
+Mac / Linux shell installer:
+
 ```bash
 curl -fsSL https://runpane.com/install.sh | sh
 ```
 
-**Windows (PowerShell):**
+Windows PowerShell installer:
+
 ```powershell
 irm https://runpane.com/install.ps1 | iex
 ```

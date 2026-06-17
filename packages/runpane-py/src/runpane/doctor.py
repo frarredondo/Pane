@@ -34,5 +34,5 @@ def run_doctor(parsed, source: str = "pip") -> int:
     else:
         print("Installed Pane: not found")
 
-    print('Remote setup: run "runpane install daemon --label <name>" to configure a headless host.')
+    print('Remote setup: run "runpane setup" for guided setup, or "runpane install daemon --label <name>" for scripting.')
     return 0 if ok else 1

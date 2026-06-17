@@ -36,6 +36,6 @@ export async function runDoctor(parsed: ParsedArgs, source: 'npm' | 'pip' = 'npm
     console.log('Installed Pane: not found');
   }
 
-  console.log('Remote setup: run "runpane install daemon --label <name>" to configure a headless host.');
+  console.log('Remote setup: run "runpane setup" for guided setup, or "runpane install daemon --label <name>" for scripting.');
   return ok ? 0 : 1;
 }

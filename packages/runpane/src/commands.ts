@@ -1,4 +1,4 @@
-export type RunpaneCommand = 'help' | 'install' | 'update' | 'version' | 'doctor';
+export type RunpaneCommand = 'help' | 'setup' | 'install' | 'update' | 'version' | 'doctor';
 export type InstallTarget = 'client' | 'daemon';
 export type ArtifactFormat = 'auto' | 'appimage' | 'deb' | 'dmg' | 'zip' | 'exe';
 
@@ -17,7 +17,7 @@ export interface ParsedArgs {
   remoteSetupArgs: string[];
 }
 
-const COMMANDS = new Set(['help', 'install', 'update', 'version', 'doctor']);
+const COMMANDS = new Set(['help', 'setup', 'install', 'update', 'version', 'doctor']);
 const TARGETS = new Set(['client', 'daemon']);
 const FORMATS = new Set(['auto', 'appimage', 'deb', 'dmg', 'zip', 'exe']);
 const CHANNELS = new Set(['stable', 'nightly']);
@@ -235,6 +235,19 @@ export function helpText(topic?: string): string {
     ].join('\n');
   }
 
+  if (topic === 'setup') {
+    return [
+      'Usage:',
+      '  runpane setup',
+      '',
+      'Opens the guided setup for desktop install, remote host setup, update, and diagnostics.',
+      '',
+      'Quick start:',
+      '  npx --yes runpane@latest',
+      '  npm i -g runpane && runpane setup'
+    ].join('\n');
+  }
+
   if (topic === 'update') {
     return [
       'Usage:',
@@ -263,20 +276,23 @@ export function helpText(topic?: string): string {
 
   return [
     'Usage:',
+    '  runpane',
+    '  runpane setup',
     '  runpane install [client|daemon] [options]',
     '  runpane update [options]',
     '  runpane version',
     '  runpane doctor',
     '  runpane help [command]',
     '',
-    'Package manager examples:',
-    '  npx --yes runpane@latest install daemon --label "My Server"',
-    '  pnpm dlx runpane@latest install daemon --label "My Server"',
-    '  npm i -g runpane && runpane install daemon --label "My Server"',
+    'Quick start:',
+    '  npx --yes runpane@latest',
+    '  npm i -g runpane && runpane setup',
     '',
-    'Python package equivalents:',
-    '  pipx run runpane install daemon --label "My Server"',
-    '  uvx runpane@latest install daemon --label "My Server"',
+    'Advanced examples:',
+    '  npx --yes runpane@latest install client',
+    '  npx --yes runpane@latest install daemon --label "My Server"',
+    '  pnpm dlx runpane@latest',
+    '  pipx run runpane',
     '',
     'Run "runpane help install" for install options.'
   ].join('\n');
