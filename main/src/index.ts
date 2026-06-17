@@ -58,6 +58,7 @@ import { panelManager } from './services/panelManager';
 import { TerminalPanelState } from '../../shared/types/panels';
 import { worktreePoolManager } from './services/worktreePoolManager';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
+import { syncAutoStartOnBoot } from './utils/autoStart';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
@@ -1062,6 +1063,7 @@ if (launchRemoteSetup) {
 
     console.log('[Main] App is ready, initializing services...');
     await initializeServices();
+    syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     console.log('[Main] Services initialized, creating window...');
 
   // Register before any renderer loads. useNotifications pulls this on mount

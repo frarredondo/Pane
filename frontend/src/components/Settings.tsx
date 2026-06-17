@@ -150,6 +150,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
   const [voiceTranscriptionMode, setVoiceTranscriptionMode] = useState<VoiceTranscriptionMode>('streaming');
   const [claudeExecutablePath, setClaudeExecutablePath] = useState('');
   const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
+  const [autoStartOnBoot, setAutoStartOnBoot] = useState(true);
   const [devMode, setDevMode] = useState(false);
   const [usePtyHost, setUsePtyHost] = useState(false);
   const [initialUsePtyHost, setInitialUsePtyHost] = useState(false);
@@ -277,6 +278,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
         ? data.voiceTranscriptionMode
         : 'streaming');
       setAutoCheckUpdates(data.autoCheckUpdates !== false); // Default to true
+      setAutoStartOnBoot(data.autoStartOnBoot !== false); // Default to true
       setDevMode(data.devMode || false);
       setUsePtyHost(data.usePtyHost === true);
       setInitialUsePtyHost(data.usePtyHost === true);
@@ -865,6 +867,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
         deepgramApiKey: deepgramApiKey.trim() || undefined,
         voiceTranscriptionMode,
         autoCheckUpdates,
+        autoStartOnBoot,
         devMode,
         usePtyHost,
         terminalPowerMode,
@@ -2697,6 +2700,20 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
                 </div>
                 <p className="text-xs text-text-tertiary mt-2">
                   We check GitHub for new releases every 24 hours. Updates require manual installation.
+                </p>
+              </SettingsSection>
+              <SettingsSection
+                title="Startup"
+                description="Control whether Pane starts automatically"
+                icon={<Power className="w-4 h-4" />}
+              >
+                <Checkbox
+                  label="Start Pane when you log in"
+                  checked={autoStartOnBoot}
+                  onChange={(e) => setAutoStartOnBoot(e.target.checked)}
+                />
+                <p className="text-xs text-text-tertiary mt-1">
+                  When enabled, Pane asks the operating system to open it automatically after you sign in.
                 </p>
               </SettingsSection>
             </CollapsibleCard>

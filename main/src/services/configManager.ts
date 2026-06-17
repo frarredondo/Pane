@@ -52,6 +52,7 @@ export class ConfigManager extends EventEmitter {
       terminalPowerMode: 'performance',
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',
+      autoStartOnBoot: true,
       stravuApiKey: undefined,
       stravuServerUrl: '', // Stravu integration disabled
       notifications: {

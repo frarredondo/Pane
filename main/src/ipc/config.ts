@@ -6,10 +6,11 @@ import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
+import { syncAutoStartOnBoot } from '../utils/autoStart';
 
 export function registerConfigHandlers(
   ipcMain: IpcMain,
-  { configManager, claudeCodeManager, getMainWindow }: AppServices,
+  { app, configManager, claudeCodeManager, getMainWindow }: AppServices,
   commandRegistry?: PaneCommandRegistry,
 ): void {
   if (commandRegistry) {
@@ -52,6 +53,10 @@ export function registerConfigHandlers(
                                updates.claudeExecutablePath !== oldConfig.claudeExecutablePath;
       
       await configManager.updateConfig(updates);
+
+      if (updates.autoStartOnBoot !== undefined) {
+        syncAutoStartOnBoot(app, updates.autoStartOnBoot !== false);
+      }
       
       // Clear Claude availability cache if the path changed
       if (claudePathChanged) {

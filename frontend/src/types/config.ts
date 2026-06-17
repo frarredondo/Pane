@@ -70,6 +70,8 @@ export interface AppConfig {
   defaultModel?: string;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
+  // Start Pane automatically when the user logs in
+  autoStartOnBoot?: boolean;
   // Stravu MCP integration
   stravuApiKey?: string;
   stravuServerUrl?: string;
@@ -145,6 +147,7 @@ export interface UpdateConfigRequest {
   defaultPermissionMode?: 'approve' | 'ignore';
   defaultModel?: string;
   autoCheckUpdates?: boolean;
+  autoStartOnBoot?: boolean;
   stravuApiKey?: string;
   stravuServerUrl?: string;
   theme?: AppConfig['theme'];
