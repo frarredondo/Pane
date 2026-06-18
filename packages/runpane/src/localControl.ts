@@ -573,10 +573,54 @@ function parsePaneCreateRequestPayload(value: unknown): PaneCreateRequest {
 
   return {
     repo,
-    panes: panes as PaneCreateItem[],
+    panes: panes.map(parsePaneCreateItemPayload),
     dryRun: typeof value.dryRun === 'boolean' ? value.dryRun : undefined,
     timeoutMs: typeof value.timeoutMs === 'number' ? value.timeoutMs : undefined,
   };
+}
+
+function parsePaneCreateItemPayload(value: unknown, index: number): PaneCreateItem {
+  if (!isRecord(value)) {
+    throw new Error(`--from-json pane ${index} must be an object.`);
+  }
+  if (typeof value.name !== 'string' || value.name.trim().length === 0) {
+    throw new Error(`--from-json pane ${index} must include a name.`);
+  }
+
+  return {
+    name: value.name,
+    worktreeName: optionalString(value.worktreeName),
+    baseBranch: optionalString(value.baseBranch),
+    sessionPrompt: optionalString(value.sessionPrompt),
+    tool: parsePaneToolSpecPayload(value.tool, index),
+  };
+}
+
+function parsePaneToolSpecPayload(value: unknown, index: number): PaneToolSpec {
+  if (!isRecord(value)) {
+    throw new Error(`--from-json pane ${index} must include a tool object.`);
+  }
+
+  if (typeof value.agent === 'string') {
+    if (!(RUNPANE_CONTRACT.enums.agents as readonly string[]).includes(value.agent)) {
+      throw new Error(`--from-json pane ${index} includes an unsupported agent.`);
+    }
+    return {
+      agent: value.agent as RunpaneAgent,
+      title: optionalString(value.title),
+      initialInput: optionalString(value.initialInput),
+    };
+  }
+
+  if (typeof value.command === 'string' && value.command.trim().length > 0) {
+    return {
+      command: value.command,
+      title: optionalString(value.title),
+      initialInput: optionalString(value.initialInput),
+    };
+  }
+
+  throw new Error(`--from-json pane ${index} tool must include agent or command.`);
 }
 
 function isRepoSelector(value: unknown): value is PaneCreateRequest['repo'] {
@@ -592,4 +636,8 @@ function isRepoSelector(value: unknown): value is PaneCreateRequest['repo'] {
     typeof value.name === 'string' ||
     value.active === true
   );
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }

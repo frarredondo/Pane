@@ -364,7 +364,7 @@ function outputToRecord(output: SessionOutput): RunpanePanelOutputRecord {
   return {
     type: output.type,
     data: output.data,
-    timestamp: toIsoString(output.timestamp) ?? new Date(0).toISOString(),
+    timestamp: requireIsoString(output.timestamp, 'Panel output timestamp'),
   };
 }
 
@@ -725,6 +725,14 @@ function toIsoString(value: Date | string | undefined): string | undefined {
     return undefined;
   }
   return date.toISOString();
+}
+
+function requireIsoString(value: Date | string | undefined, label: string): string {
+  const isoString = toIsoString(value);
+  if (!isoString) {
+    throw new Error(`${label} is invalid`);
+  }
+  return isoString;
 }
 
 interface RunpaneActionMetadata {
