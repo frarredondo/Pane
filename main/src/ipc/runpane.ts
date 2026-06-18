@@ -49,6 +49,7 @@ const RUNPANE_CHANNELS = [
 
 const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
 const AGENT_IDS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
+const DEFAULT_PANEL_OUTPUT_LIMIT = 200;
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -225,6 +226,7 @@ export function registerRunpaneHandlers(
             paneId: session.id,
             panelId: panel.id,
             worktreePath: session.worktreePath,
+            nextCommand: panelOutputCommand(panel.id),
             tool: describeTool(tool),
           });
         } catch (error) {
@@ -258,14 +260,19 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:output', {}, () => {
       const normalized = parsePanelOutputRequest(request);
       const panel = resolvePanel(normalized.panelId);
-      const outputs = sessionManager.getPanelOutputs(panel.id, normalized.limit);
+      const limit = normalized.limit ?? DEFAULT_PANEL_OUTPUT_LIMIT;
+      const fetchedOutputs = sessionManager.getPanelOutputs(panel.id, limit + 1);
+      const hasMore = fetchedOutputs.length > limit;
+      const outputs = hasMore ? fetchedOutputs.slice(fetchedOutputs.length - limit) : fetchedOutputs;
       const records = outputs.map(outputToRecord);
 
       return {
         ok: true,
         panelId: panel.id,
         paneId: panel.sessionId,
-        limit: normalized.limit,
+        limit,
+        returnedCount: records.length,
+        hasMore,
         outputs: records,
         text: outputs.map(outputToText).join(''),
       };
@@ -297,6 +304,7 @@ export function registerRunpaneHandlers(
         paneId: panel.sessionId,
         inputBytes: Buffer.byteLength(normalized.input, 'utf8'),
         sentAt: new Date().toISOString(),
+        nextCommand: panelOutputCommand(panel.id),
       };
     }, result => ({
       paneId: result.paneId,
@@ -378,6 +386,10 @@ function outputToText(output: SessionOutput): string {
   } catch {
     return `${String(output.data)}\n`;
   }
+}
+
+function panelOutputCommand(panelId: string): string {
+  return `runpane panels output --panel ${panelId} --limit ${DEFAULT_PANEL_OUTPUT_LIMIT} --json`;
 }
 
 function parsePaneListRequest(value: unknown): RunpanePaneListRequest {
