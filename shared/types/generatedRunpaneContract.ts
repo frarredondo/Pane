@@ -375,7 +375,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--limit",
         "value": "<count>",
-        "description": "Maximum number of output records to read."
+        "description": "Maximum recent output lines or records to read."
       },
       {
         "name": "--text",
@@ -569,11 +569,11 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "",
-        "Reads recent terminal output records from a panel.",
+        "Reads bounded recent terminal output from a panel.",
         "",
         "Options:",
         "  --panel <panel-id>             Tool panel id",
-        "  --limit <count>                Maximum output records to read",
+        "  --limit <count>                Maximum recent output lines or records to read",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
@@ -902,7 +902,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested repository, creates Pane sessions, opens terminal-backed tool tabs, and optionally sends initial input to the started tool.",
       "`runpane panels list` lists tool panels inside one Pane session.",
-      "`runpane panels output` reads recent terminal output records from one panel.",
+      "`runpane panels output` reads bounded recent terminal output from one panel.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Include a newline in the input when the agent means Enter.",
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock`. In that case invoke the Windows wrapper through PowerShell, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`."
@@ -2369,7 +2369,7 @@ export const RUNPANE_CONTRACT = {
       "panels output": {
         "name": "panels output",
         "summary": "Read recent terminal output from a panel.",
-        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default.",
+        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default. Live terminal scrollback is returned as bounded recent lines; persisted output fallback is returned as bounded records.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -2383,7 +2383,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--limit",
             "value": "<count>",
             "required": false,
-            "description": "Maximum output records to read. Defaults to 200."
+            "description": "Maximum recent output lines or records to read. Defaults to 200."
           },
           {
             "name": "--json",
@@ -2404,7 +2404,7 @@ export const RUNPANE_CONTRACT = {
           "panelOutputResult"
         ],
         "notes": [
-          "Default output is bounded to the latest 200 records. Use a larger --limit only when hasMore is true and more history is needed.",
+          "Default output is bounded to the latest 200 lines or records. Use a larger --limit only when hasMore is true and more history is needed.",
           "Use --json when an agent needs timestamps, record types, returnedCount, or hasMore."
         ]
       },

@@ -142,7 +142,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane panels list` lists tool panels inside one Pane session.
 
-`runpane panels output` reads recent terminal output records from one panel.
+`runpane panels output` reads bounded recent terminal output from one panel.
 
 `runpane panels input` sends exact input bytes to one terminal panel. Include a newline in the input when the agent means Enter.
 
