@@ -147,6 +147,16 @@
       ]
     },
     {
+      "name": "panes list",
+      "summary": "List Pane sessions in a saved repository.",
+      "usage": [
+        "runpane panes list [--repo <selector>] [--json]"
+      ],
+      "jsonSchemas": [
+        "paneListResult"
+      ]
+    },
+    {
       "name": "panes create",
       "summary": "Create one or more Pane sessions in a saved repository and open a terminal-backed tool tab.",
       "usage": [
@@ -157,6 +167,38 @@
       "jsonSchemas": [
         "paneCreateRequest",
         "paneCreateResult"
+      ]
+    },
+    {
+      "name": "panels list",
+      "summary": "List tool panels inside a Pane session.",
+      "usage": [
+        "runpane panels list --pane <pane-id> [--json]"
+      ],
+      "jsonSchemas": [
+        "panelListResult"
+      ]
+    },
+    {
+      "name": "panels output",
+      "summary": "Read recent terminal output from a panel.",
+      "usage": [
+        "runpane panels output --panel <panel-id> [--limit <count>] [--json]"
+      ],
+      "jsonSchemas": [
+        "panelOutputResult"
+      ]
+    },
+    {
+      "name": "panels input",
+      "summary": "Send input bytes to a terminal panel.",
+      "usage": [
+        "runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "panelInputRequest",
+        "panelInputResult"
       ]
     }
   ],
@@ -261,6 +303,16 @@
         "description": "Repository selector: active, id, exact path, or saved repository name."
       },
       {
+        "name": "--pane",
+        "value": "<pane-id>",
+        "description": "Pane/session id to inspect."
+      },
+      {
+        "name": "--panel",
+        "value": "<panel-id>",
+        "description": "Tool panel id to inspect or control."
+      },
+      {
         "name": "--path",
         "value": "<path>",
         "description": "Existing git repository path to register with Pane."
@@ -317,6 +369,21 @@
         "name": "--timeout-ms",
         "value": "<milliseconds>",
         "description": "Maximum time to wait for each pane creation job."
+      },
+      {
+        "name": "--limit",
+        "value": "<count>",
+        "description": "Maximum number of output records to read."
+      },
+      {
+        "name": "--text",
+        "value": "<text>",
+        "description": "Text bytes to send to a terminal panel."
+      },
+      {
+        "name": "--input-file",
+        "value": "<path|->",
+        "description": "Read panel input from a file or stdin."
       }
     ],
     "localBoolean": [
@@ -339,7 +406,11 @@
         "  runpane agent-context [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude>",
+        "  runpane panels list --pane <pane-id> [--json]",
+        "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels input --panel <panel-id> --text <text> --yes",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -445,6 +516,17 @@
         "  --dry-run                      Validate and preview without adding the repo",
         "  --yes                          Skip confirmation for mutating commands"
       ],
+      "panes list": [
+        "Usage:",
+        "  runpane panes list [--repo <selector>] [--json]",
+        "",
+        "Lists Pane sessions. Pass --repo to limit results to one saved repository.",
+        "",
+        "Options:",
+        "  --repo <selector>              active, id, exact path, or saved repository name",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
       "panes create": [
         "Usage:",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [options]",
@@ -468,6 +550,43 @@
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
+        "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "panels list": [
+        "Usage:",
+        "  runpane panels list --pane <pane-id> [--json]",
+        "",
+        "Lists tool panels in a Pane session.",
+        "",
+        "Options:",
+        "  --pane <pane-id>               Pane/session id",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "panels output": [
+        "Usage:",
+        "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
+        "",
+        "Reads recent terminal output records from a panel.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Tool panel id",
+        "  --limit <count>                Maximum output records to read",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "panels input": [
+        "Usage:",
+        "  runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
+        "",
+        "Sends exact input bytes to a terminal panel. Include a newline in the input when you mean Enter.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Terminal panel id",
+        "  --text <text>                  Text bytes to send",
+        "  --input-file <path|->          Read input from a file or stdin",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for mutating commands"
       ],
       "agent-context": [
@@ -500,7 +619,11 @@
         "  runpane agent-context [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude>",
+        "  runpane panels list --pane <pane-id> [--json]",
+        "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels input --panel <panel-id> --text <text> --yes",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -594,6 +717,17 @@
         "  --dry-run",
         "  --yes"
       ],
+      "panes list": [
+        "Usage:",
+        "  runpane panes list [--repo <selector>] [--json]",
+        "",
+        "Lists Pane sessions. Pass --repo to limit results to one saved repository.",
+        "",
+        "Options:",
+        "  --repo <selector>",
+        "  --pane-dir <path>",
+        "  --json"
+      ],
       "panes create": [
         "Usage:",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [options]",
@@ -617,6 +751,43 @@
         "  --pane-dir <path>",
         "  --json",
         "  --dry-run",
+        "  --yes"
+      ],
+      "panels list": [
+        "Usage:",
+        "  runpane panels list --pane <pane-id> [--json]",
+        "",
+        "Lists tool panels in a Pane session.",
+        "",
+        "Options:",
+        "  --pane <pane-id>",
+        "  --pane-dir <path>",
+        "  --json"
+      ],
+      "panels output": [
+        "Usage:",
+        "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
+        "",
+        "Reads recent terminal output records from a panel.",
+        "",
+        "Options:",
+        "  --panel <panel-id>",
+        "  --limit <count>",
+        "  --pane-dir <path>",
+        "  --json"
+      ],
+      "panels input": [
+        "Usage:",
+        "  runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
+        "",
+        "Sends exact input bytes to a terminal panel. Include a newline in the input when you mean Enter.",
+        "",
+        "Options:",
+        "  --panel <panel-id>",
+        "  --text <text>",
+        "  --input-file <path|->",
+        "  --pane-dir <path>",
+        "  --json",
         "  --yes"
       ],
       "agent-context": [
@@ -704,8 +875,12 @@
       "runpane agent-context --command \"panes create\" --json",
       "runpane repos list --json",
       "runpane repos add --path /path/to/repo --name Pane --yes --json",
+      "runpane panes list --repo active --json",
       "runpane panes create --repo active --name issue-252 --agent codex --prompt \"Kick off the discussion skill for issue 252\" --yes",
       "runpane panes create --from-json panes.json --yes --json",
+      "runpane panels list --pane <pane-id> --json",
+      "runpane panels output --panel <panel-id> --limit 200 --json",
+      "runpane panels input --panel <panel-id> --text \"Continue\\n\" --yes --json",
       "runpane help",
       "runpane <command> --help"
     ],
@@ -722,11 +897,16 @@
       "`runpane agent-context --command \"panes create\"` prints the detailed definition for one command. Add `--json` for machine-readable output.",
       "`runpane repos list` connects to the running local Pane daemon and prints saved repository records.",
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
+      "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested repository, creates Pane sessions, opens terminal-backed tool tabs, and optionally sends initial input to the started tool.",
-      "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field."
+      "`runpane panels list` lists tool panels inside one Pane session.",
+      "`runpane panels output` reads recent terminal output records from one panel.",
+      "`runpane panels input` sends exact input bytes to one terminal panel. Include a newline in the input when the agent means Enter.",
+      "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
+      "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock`. In that case invoke the Windows wrapper through PowerShell, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
-    "localControlFlagNote": "`runpane repos list` and `runpane panes create` use the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running.",
+    "localControlFlagNote": "`runpane repos list`, `runpane panes list`, `runpane panes create`, and `runpane panels ...` commands use the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon.",
     "daemonFlagNote": "Unknown daemon flags should be forwarded rather than dropped so newer Pane versions can extend `--remote-setup` without requiring an immediate wrapper release. Unknown flags for non-daemon commands should fail clearly.",
     "downloadAttribution": [
       "The npm package uses `source=npm` for all npm-registry consumers, including `npx`, `pnpm dlx`, `yarn dlx`, `bunx`, and global npm/pnpm installs.",
@@ -833,6 +1013,13 @@
       ],
       [
         "panes",
+        "list",
+        "--repo",
+        "active",
+        "--json"
+      ],
+      [
+        "panes",
         "create",
         "--repo",
         "active",
@@ -855,6 +1042,32 @@
         "--json"
       ],
       [
+        "panels",
+        "list",
+        "--pane",
+        "session-1",
+        "--json"
+      ],
+      [
+        "panels",
+        "output",
+        "--panel",
+        "panel-1",
+        "--limit",
+        "200",
+        "--json"
+      ],
+      [
+        "panels",
+        "input",
+        "--panel",
+        "panel-1",
+        "--text",
+        "Continue\\n",
+        "--yes",
+        "--json"
+      ],
+      [
         "--version"
       ]
     ],
@@ -867,7 +1080,11 @@
       "runpane agent-context",
       "runpane repos list",
       "runpane repos add",
-      "runpane panes create"
+      "runpane panes list",
+      "runpane panes create",
+      "runpane panels list",
+      "runpane panels output",
+      "runpane panels input"
     ],
     "npmHelpIncludes": [
       "pnpm dlx runpane@latest",
@@ -1253,6 +1470,234 @@
       },
       "additionalProperties": false
     },
+    "paneListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "panes"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "repo": {
+          "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
+        },
+        "panes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "paneId",
+              "name",
+              "status",
+              "worktreePath",
+              "repoId",
+              "panelCount"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "paneId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "worktreePath": {
+                "type": "string"
+              },
+              "repoId": {
+                "type": "number"
+              },
+              "repoName": {
+                "type": "string"
+              },
+              "panelCount": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "lastActivity": {
+                "type": "string"
+              },
+              "archived": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panels"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "panelId",
+              "paneId",
+              "type",
+              "title",
+              "active"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "panelId": {
+                "type": "string"
+              },
+              "paneId": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "initialized": {
+                "type": "boolean"
+              },
+              "agentType": {
+                "type": "string"
+              },
+              "isCliPanel": {
+                "type": "boolean"
+              },
+              "position": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "lastActiveAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelOutputResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "panelId",
+        "outputs",
+        "text"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "data",
+              "timestamp"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "data": {},
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelInputRequest": {
+      "type": "object",
+      "required": [
+        "panelId",
+        "input"
+      ],
+      "properties": {
+        "panelId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelInputResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "panelId",
+        "inputBytes",
+        "sentAt"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "inputBytes": {
+          "type": "number"
+        },
+        "sentAt": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "agentContextBriefResult": {
       "type": "object",
       "required": [
@@ -1395,8 +1840,10 @@
       "summary": "Pane lets a developer manage repositories and user-visible panes. Agents can use runpane to list/add Pane repositories and create panes with terminal-backed tools.",
       "rules": [
         "Start with `runpane repos list --json` to find the saved repository when unsure.",
+        "If WSL cannot find `/tmp/pane-daemon.../daemon.sock`, the user may be running Windows Pane; try `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane panes create` to create a Pane session and open a built-in agent or custom terminal command.",
+        "Use `runpane panels list`, `runpane panels output`, and `runpane panels input` when you need to inspect or drive an existing Pane terminal.",
         "Use `runpane agent-context --command <command>` for detailed command definitions only when needed."
       ],
       "detailCommand": "runpane agent-context --command <command> [--json]",
@@ -1430,6 +1877,15 @@
           ]
         },
         {
+          "name": "panes list",
+          "summary": "List Pane sessions, optionally scoped to a saved repository.",
+          "arguments": [
+            "--repo <selector>",
+            "--json",
+            "--pane-dir <path>"
+          ]
+        },
+        {
           "name": "panes create",
           "summary": "Create one or more Pane sessions in a saved repository and open a terminal-backed tool tab.",
           "arguments": [
@@ -1441,6 +1897,37 @@
             "--from-json <path|->",
             "--yes",
             "--json"
+          ]
+        },
+        {
+          "name": "panels list",
+          "summary": "List tool panels inside a Pane session.",
+          "arguments": [
+            "--pane <pane-id>",
+            "--json",
+            "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "panels output",
+          "summary": "Read recent terminal output from a panel.",
+          "arguments": [
+            "--panel <panel-id>",
+            "--limit <count>",
+            "--json",
+            "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "panels input",
+          "summary": "Send input bytes to a terminal panel.",
+          "arguments": [
+            "--panel <panel-id>",
+            "--text <text>",
+            "--input-file <path|->",
+            "--yes",
+            "--json",
+            "--pane-dir <path>"
           ]
         }
       ]
@@ -1656,7 +2143,8 @@
           "repoListResult"
         ],
         "notes": [
-          "Requires a running Pane app or daemon for the selected Pane data directory."
+          "Requires a running Pane app or daemon for the selected Pane data directory.",
+          "If this fails from WSL with a missing `/tmp/pane-daemon.../daemon.sock`, the user may be running Windows Pane. Retry via `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`."
         ]
       },
       "repos add": {
@@ -1708,7 +2196,43 @@
           "repoAddResult"
         ],
         "notes": [
-          "It does not create directories or initialize git repositories by default."
+          "It does not create directories or initialize git repositories by default.",
+          "For a Windows Pane app managing WSL repositories, prefer a saved WSL repo from `repos list` when possible. Adding a brand-new WSL repo from Windows may require WSL-aware path handling."
+        ]
+      },
+      "panes list": {
+        "name": "panes list",
+        "summary": "List Pane sessions, optionally scoped to a saved repository.",
+        "details": "Use this after selecting a repository to find existing Pane sessions and their ids before inspecting panels.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "Optional repository selector: active, id, exact path, or saved repository name."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes list --repo active --json"
+        ],
+        "jsonSchemas": [
+          "paneListResult"
+        ],
+        "notes": [
+          "Without --repo, this lists sessions across saved Pane repositories."
         ]
       },
       "panes create": {
@@ -1781,7 +2305,139 @@
         ],
         "notes": [
           "At least one of --agent or --tool-command is required unless --from-json is used.",
-          "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user."
+          "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user.",
+          "From WSL with Windows Pane, invoke through PowerShell and select the saved WSL repo by name or id, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane panes create --repo \"WSL Pane\" --name issue-123 --agent codex --prompt \"Plan this issue\" --yes --json'`."
+        ]
+      },
+      "panels list": {
+        "name": "panels list",
+        "summary": "List tool panels inside a Pane session.",
+        "details": "Use this to find the terminal panel id to inspect or control after creating or selecting a Pane session.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane/session id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels list --pane <pane-id> --json"
+        ],
+        "jsonSchemas": [
+          "panelListResult"
+        ],
+        "notes": [
+          "The ids returned here are stable inputs for `panels output` and `panels input`."
+        ]
+      },
+      "panels output": {
+        "name": "panels output",
+        "summary": "Read recent terminal output from a panel.",
+        "details": "Use this to inspect what is currently visible or recently emitted by a terminal-backed panel.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": true,
+            "description": "Tool panel id."
+          },
+          {
+            "name": "--limit",
+            "value": "<count>",
+            "required": false,
+            "description": "Maximum output records to read."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels output --panel <panel-id> --limit 200 --json"
+        ],
+        "jsonSchemas": [
+          "panelOutputResult"
+        ],
+        "notes": [
+          "Default text output concatenates stdout/stderr-like records. Use --json when an agent needs timestamps and record types."
+        ]
+      },
+      "panels input": {
+        "name": "panels input",
+        "summary": "Send input bytes to a terminal panel.",
+        "details": "Use this to answer prompts or continue an agent inside an existing Pane terminal panel.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": true,
+            "description": "Terminal panel id."
+          },
+          {
+            "name": "--text",
+            "value": "<text>",
+            "required": false,
+            "description": "Text bytes to send."
+          },
+          {
+            "name": "--input-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Read input from a file or stdin."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels input --panel <panel-id> --text \"Continue\\n\" --yes --json",
+          "printf 'Continue\\n' | runpane panels input --panel <panel-id> --input-file - --yes"
+        ],
+        "jsonSchemas": [
+          "panelInputRequest",
+          "panelInputResult"
+        ],
+        "notes": [
+          "Input is sent exactly as provided. Include `\\n` or `\\r` when the terminal should receive Enter.",
+          "Runpane records action metadata and errors for observability, but should not log full input text by default."
         ]
       }
     },
@@ -1795,7 +2451,12 @@
       "Common commands:",
       "- `runpane repos list --json`",
       "- `runpane repos add --path <repo> --yes --json`",
-      "- `runpane panes create --repo active --name <name> --agent codex --prompt \"<task>\" --yes`"
+      "- `runpane panes create --repo active --name <name> --agent codex --prompt \"<task>\" --yes`",
+      "- `runpane panels list --pane <pane-id> --json`",
+      "- `runpane panels output --panel <panel-id> --limit 200 --json`",
+      "- `runpane panels input --panel <panel-id> --text \"<input>\" --yes`",
+      "",
+      "WSL note: if `runpane repos list` cannot find `/tmp/pane-daemon.../daemon.sock`, Pane may be running on Windows. Try `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`, then create panes through the same PowerShell form using the saved WSL repo name or id."
     ]
   }
 }

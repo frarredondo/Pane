@@ -345,7 +345,11 @@
         "doctor",
         "repos list",
         "repos add",
+        "panes list",
         "panes create",
+        "panels list",
+        "panels output",
+        "panels input",
         "agent-context"
       ],
       "properties": {
@@ -373,7 +377,19 @@
         "repos add": {
           "$ref": "#/$defs/helpLines"
         },
+        "panes list": {
+          "$ref": "#/$defs/helpLines"
+        },
         "panes create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels output": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels input": {
           "$ref": "#/$defs/helpLines"
         },
         "agent-context": {

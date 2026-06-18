@@ -41,6 +41,19 @@ def run_repos_add(parsed: Any) -> int:
     return 0
 
 
+def run_panes_list(parsed: Any) -> int:
+    result = invoke_daemon("runpane:panes:list", [{
+        "repo": parsed.repo,
+    }], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+        return 0
+
+    print_pane_list_result(result)
+    return 0
+
+
 def run_panes_create(parsed: Any) -> int:
     request = build_pane_create_request(parsed)
     confirm_pane_create(parsed, request)
@@ -59,6 +72,57 @@ def run_panes_create(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_panels_list(parsed: Any) -> int:
+    if not parsed.pane_id:
+        raise ValueError("runpane panels list requires --pane.")
+
+    result = invoke_daemon("runpane:panels:list", [{
+        "paneId": parsed.pane_id,
+    }], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+        return 0
+
+    print_panel_list_result(result)
+    return 0
+
+
+def run_panels_output(parsed: Any) -> int:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels output requires --panel.")
+
+    result = invoke_daemon("runpane:panels:output", [{
+        "panelId": parsed.panel_id,
+        "limit": parsed.limit,
+    }], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+        return 0
+
+    text = result.get("text") or ""
+    sys.stdout.write(text)
+    if text and not text.endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
+
+
+def run_panels_input(parsed: Any) -> int:
+    request = build_panel_input_request(parsed)
+    confirm_panel_input(parsed, request)
+    result = invoke_daemon("runpane:panels:input", [request], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        input_bytes = result.get("inputBytes", 0)
+        suffix = "" if input_bytes == 1 else "s"
+        print(f"Sent {input_bytes} byte{suffix} to panel {result.get('panelId')}.")
+
+    return 0
+
+
 def build_repo_add_request(parsed: Any) -> Dict[str, Any]:
     if not parsed.repo_path:
         raise ValueError("runpane repos add requires --path.")
@@ -67,6 +131,20 @@ def build_repo_add_request(parsed: Any) -> Dict[str, Any]:
         "path": parsed.repo_path,
         **optional_value("name", parsed.name),
         **optional_value("dryRun", True if parsed.dry_run else None),
+    }
+
+
+def build_panel_input_request(parsed: Any) -> Dict[str, Any]:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels input requires --panel.")
+    if parsed.panel_input is not None and parsed.panel_input_file:
+        raise ValueError("Use either --text or --input-file, not both.")
+    if parsed.panel_input is None and not parsed.panel_input_file:
+        raise ValueError("runpane panels input requires --text or --input-file.")
+
+    return {
+        "panelId": parsed.panel_id,
+        "input": read_input_source(parsed.panel_input_file) if parsed.panel_input_file else parsed.panel_input or "",
     }
 
 
@@ -160,6 +238,19 @@ def confirm_pane_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
+def confirm_panel_input(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels input mutates a Pane terminal. Rerun with --yes in non-interactive shells.")
+
+    input_bytes = len(request.get("input", "").encode("utf-8"))
+    suffix = "" if input_bytes == 1 else "s"
+    answer = input(f"Send {input_bytes} byte{suffix} to panel {request.get('panelId')}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
 def ask_agent_choice() -> str:
     agents = RUNPANE_CONTRACT["enums"]["agents"]
     print("Choose an agent:")
@@ -206,6 +297,17 @@ def print_repo_add_result(result: Dict[str, Any]) -> None:
     print("Repo add completed.")
 
 
+def print_pane_list_result(result: Dict[str, Any]) -> None:
+    panes = result.get("panes", [])
+    if not panes:
+        print("No Pane sessions found.")
+        return
+
+    for pane in panes:
+        repo = f" {pane.get('repoName')}" if pane.get("repoName") else ""
+        print(f"{pane.get('id')}\t{pane.get('name')}\t{pane.get('status')}\t{pane.get('panelCount')} panels\t{pane.get('worktreePath')}{repo}")
+
+
 def print_pane_create_result(result: Dict[str, Any]) -> None:
     for item in result.get("items", []):
         name = item.get("name") or f"pane {item.get('index')}"
@@ -215,6 +317,22 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
         else:
             error = item.get("error") or {}
             print(f"Failed {name}: {error.get('message', 'unknown error')}", file=sys.stderr)
+
+
+def print_panel_list_result(result: Dict[str, Any]) -> None:
+    panels = result.get("panels", [])
+    pane_id = result.get("paneId")
+    if not panels:
+        print(f"No panels found for pane {pane_id}.")
+        return
+
+    for panel in panels:
+        marker = "*" if panel.get("active") else " "
+        initialized = ""
+        if panel.get("initialized") is not None:
+            initialized = " initialized" if panel.get("initialized") else " not-initialized"
+        agent = f" {panel.get('agentType')}" if panel.get("agentType") else ""
+        print(f"{marker} {panel.get('id')}\t{panel.get('type')}\t{panel.get('title')}{initialized}{agent}")
 
 
 def optional_value(key: str, value: Any) -> Dict[str, Any]:

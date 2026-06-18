@@ -74,6 +74,75 @@ interface PaneCreateResult {
   }>;
 }
 
+interface PaneSummary {
+  id: string;
+  paneId: string;
+  name: string;
+  status: string;
+  worktreePath: string;
+  repoId: number;
+  repoName?: string;
+  panelCount: number;
+  createdAt?: string;
+  lastActivity?: string;
+  archived?: boolean;
+}
+
+interface PaneListResult {
+  ok: true;
+  repo?: RepoSummary;
+  panes: PaneSummary[];
+}
+
+interface PanelSummary {
+  id: string;
+  panelId: string;
+  paneId: string;
+  type: string;
+  title: string;
+  active: boolean;
+  initialized?: boolean;
+  agentType?: string;
+  isCliPanel?: boolean;
+  position?: number;
+  createdAt?: string;
+  lastActiveAt?: string;
+}
+
+interface PanelListResult {
+  ok: true;
+  paneId: string;
+  panels: PanelSummary[];
+}
+
+interface PanelOutputRecord {
+  type: string;
+  data: unknown;
+  timestamp: string;
+}
+
+interface PanelOutputResult {
+  ok: true;
+  panelId: string;
+  paneId?: string;
+  limit?: number;
+  outputs: PanelOutputRecord[];
+  text: string;
+}
+
+interface PanelInputRequest {
+  panelId: string;
+  input: string;
+}
+
+interface PanelInputResult {
+  ok: true;
+  panelId: string;
+  paneId?: string;
+  inputBytes: number;
+  sentAt: string;
+}
+
 export async function runReposList(parsed: ParsedArgs): Promise<number> {
   const result = await invokeDaemon<RepoListResult>('runpane:repos:list', [], {
     paneDir: parsed.paneDir,
@@ -115,6 +184,22 @@ export async function runReposAdd(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+export async function runPanesList(parsed: ParsedArgs): Promise<number> {
+  const result = await invokeDaemon<PaneListResult>('runpane:panes:list', [{
+    repo: parsed.repo,
+  }], {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+
+  printPaneListResult(result);
+  return 0;
+}
+
 export async function runPanesCreate(parsed: ParsedArgs): Promise<number> {
   const request = await buildPaneCreateRequest(parsed);
   await confirmPaneCreate(parsed, request);
@@ -133,6 +218,67 @@ export async function runPanesCreate(parsed: ParsedArgs): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+export async function runPanelsList(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.paneId) {
+    throw new Error('runpane panels list requires --pane.');
+  }
+
+  const result = await invokeDaemon<PanelListResult>('runpane:panels:list', [{
+    paneId: parsed.paneId,
+  }], {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+
+  printPanelListResult(result);
+  return 0;
+}
+
+export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.panelId) {
+    throw new Error('runpane panels output requires --panel.');
+  }
+
+  const result = await invokeDaemon<PanelOutputResult>('runpane:panels:output', [{
+    panelId: parsed.panelId,
+    limit: parsed.limit,
+  }], {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+
+  output.write(result.text);
+  if (result.text && !result.text.endsWith('\n')) {
+    output.write('\n');
+  }
+  return 0;
+}
+
+export async function runPanelsInput(parsed: ParsedArgs): Promise<number> {
+  const request = buildPanelInputRequest(parsed);
+  await confirmPanelInput(parsed, request);
+
+  const result = await invokeDaemon<PanelInputResult>('runpane:panels:input', [request], {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(`Sent ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} to panel ${result.panelId}.`);
+  }
+
+  return 0;
+}
+
 function buildRepoAddRequest(parsed: ParsedArgs): RepoAddRequest {
   if (!parsed.repoPath) {
     throw new Error('runpane repos add requires --path.');
@@ -142,6 +288,23 @@ function buildRepoAddRequest(parsed: ParsedArgs): RepoAddRequest {
     path: parsed.repoPath,
     name: parsed.name,
     dryRun: parsed.dryRun || undefined,
+  };
+}
+
+function buildPanelInputRequest(parsed: ParsedArgs): PanelInputRequest {
+  if (!parsed.panelId) {
+    throw new Error('runpane panels input requires --panel.');
+  }
+  if (parsed.panelInput !== undefined && parsed.panelInputFile) {
+    throw new Error('Use either --text or --input-file, not both.');
+  }
+  if (parsed.panelInput === undefined && !parsed.panelInputFile) {
+    throw new Error('runpane panels input requires --text or --input-file.');
+  }
+
+  return {
+    panelId: parsed.panelId,
+    input: parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
   };
 }
 
@@ -269,6 +432,27 @@ async function confirmPaneCreate(parsed: ParsedArgs, request: PaneCreateRequest)
   }
 }
 
+async function confirmPanelInput(parsed: ParsedArgs, request: PanelInputRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panels input mutates a Pane terminal. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const byteCount = Buffer.byteLength(request.input, 'utf8');
+    const answer = (await rl.question(`Send ${byteCount} byte${byteCount === 1 ? '' : 's'} to panel ${request.panelId}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function askAgentChoice(): Promise<RunpaneAgent> {
   const agents = RUNPANE_CONTRACT.enums.agents;
   const rl = createInterface({ input, output });
@@ -328,6 +512,18 @@ function printRepoAddResult(result: RepoAddResult): void {
   console.log('Repo add completed.');
 }
 
+function printPaneListResult(result: PaneListResult): void {
+  if (result.panes.length === 0) {
+    console.log('No Pane sessions found.');
+    return;
+  }
+
+  for (const pane of result.panes) {
+    const repo = pane.repoName ? ` ${pane.repoName}` : '';
+    console.log(`${pane.id}\t${pane.name}\t${pane.status}\t${pane.panelCount} panels\t${pane.worktreePath}${repo}`);
+  }
+}
+
 function printPaneCreateResult(result: PaneCreateResult): void {
   for (const item of result.items) {
     if (item.ok) {
@@ -336,6 +532,20 @@ function printPaneCreateResult(result: PaneCreateResult): void {
       continue;
     }
     console.error(`Failed ${item.name ?? `pane ${item.index}`}: ${item.error?.message ?? 'unknown error'}`);
+  }
+}
+
+function printPanelListResult(result: PanelListResult): void {
+  if (result.panels.length === 0) {
+    console.log(`No panels found for pane ${result.paneId}.`);
+    return;
+  }
+
+  for (const panel of result.panels) {
+    const marker = panel.active ? '*' : ' ';
+    const initialized = panel.initialized === undefined ? '' : panel.initialized ? ' initialized' : ' not-initialized';
+    const agent = panel.agentType ? ` ${panel.agentType}` : '';
+    console.log(`${marker} ${panel.id}\t${panel.type}\t${panel.title}${initialized}${agent}`);
   }
 }
 

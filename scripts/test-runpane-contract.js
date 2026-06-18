@@ -140,6 +140,8 @@ function compareParserParity() {
       contextCommand: parsed.contextCommand ?? null,
       paneDir: parsed.paneDir ?? null,
       repo: parsed.repo ?? null,
+      paneId: parsed.paneId ?? null,
+      panelId: parsed.panelId ?? null,
       repoPath: parsed.repoPath ?? null,
       name: parsed.name ?? null,
       worktreeName: parsed.worktreeName ?? null,
@@ -149,8 +151,11 @@ function compareParserParity() {
       title: parsed.title ?? null,
       initialInput: parsed.initialInput ?? null,
       initialInputFile: parsed.initialInputFile ?? null,
+      panelInput: parsed.panelInput ?? null,
+      panelInputFile: parsed.panelInputFile ?? null,
       fromJson: parsed.fromJson ?? null,
       timeoutMs: parsed.timeoutMs ?? null,
+      limit: parsed.limit ?? null,
       remoteSetupArgs: parsed.remoteSetupArgs
     };
   });
@@ -180,6 +185,8 @@ for args in samples:
         "contextCommand": parsed.context_command,
         "paneDir": parsed.pane_dir,
         "repo": parsed.repo,
+        "paneId": parsed.pane_id,
+        "panelId": parsed.panel_id,
         "repoPath": parsed.repo_path,
         "name": parsed.name,
         "worktreeName": parsed.worktree_name,
@@ -189,8 +196,11 @@ for args in samples:
         "title": parsed.title,
         "initialInput": parsed.initial_input,
         "initialInputFile": parsed.initial_input_file,
+        "panelInput": parsed.panel_input,
+        "panelInputFile": parsed.panel_input_file,
         "fromJson": parsed.from_json,
         "timeoutMs": parsed.timeout_ms,
+        "limit": parsed.limit,
         "remoteSetupArgs": parsed.remote_setup_args,
     })
 print(json.dumps(normalized))
