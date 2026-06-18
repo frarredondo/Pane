@@ -21,6 +21,7 @@ vi.mock('../services/terminalPanelManager', () => ({
   terminalPanelManager: {
     initializeTerminal: vi.fn(),
     isTerminalInitialized: vi.fn(),
+    getTerminalScrollback: vi.fn(),
     writeToTerminal: vi.fn(),
   },
 }));
@@ -143,6 +144,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.getPanelsForSession).mockReset();
     vi.mocked(terminalPanelManager.initializeTerminal).mockReset();
     vi.mocked(terminalPanelManager.isTerminalInitialized).mockReset();
+    vi.mocked(terminalPanelManager.getTerminalScrollback).mockReset();
     vi.mocked(terminalPanelManager.writeToTerminal).mockReset();
 
     vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) =>
@@ -152,6 +154,7 @@ describe('runpane IPC handlers', () => {
       sessionId === session.id ? [terminalPanel] : []
     );
     vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+    vi.mocked(terminalPanelManager.getTerminalScrollback).mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -426,6 +429,100 @@ describe('runpane IPC handlers', () => {
         timestamp: '2026-01-01T00:03:00.000Z',
       }],
       text: 'hello\n{"type":"system","message":"ok"}\n',
+    });
+  });
+
+  it('reads live terminal scrollback before persisted output records', async () => {
+    vi.mocked(terminalPanelManager.getTerminalScrollback).mockReturnValue('first\nsecond\nthird\n');
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+      limit: 2,
+    }]);
+
+    expect(services.sessionManager.getPanelOutputs).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      panelId: terminalPanel.id,
+      paneId: session.id,
+      limit: 2,
+      returnedCount: 1,
+      hasMore: true,
+      outputs: [{
+        type: 'stdout',
+        data: 'third\n',
+        timestamp: '2026-01-01T00:01:00.000Z',
+      }],
+      text: 'third\n',
+    });
+  });
+
+  it('strips terminal control sequences from live scrollback output', async () => {
+    vi.mocked(terminalPanelManager.getTerminalScrollback).mockReturnValue('\x1b[31mred\x1b[0m\nnext\n');
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+      limit: 200,
+    }]);
+
+    expect(result).toMatchObject({
+      returnedCount: 1,
+      hasMore: false,
+      text: 'red\nnext\n',
+      outputs: [{
+        type: 'stdout',
+        data: 'red\nnext\n',
+      }],
+    });
+  });
+
+  it('reads persisted terminal scrollback when the terminal is not live', async () => {
+    const panelWithPersistedScrollback: ToolPanel = {
+      ...terminalPanel,
+      state: {
+        ...terminalPanel.state,
+        customState: {
+          ...terminalPanel.state.customState,
+          scrollbackBuffer: 'persisted one\npersisted two\n',
+        },
+      },
+    };
+    vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) =>
+      panelId === terminalPanel.id ? panelWithPersistedScrollback : undefined
+    );
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+      limit: 10,
+    }]);
+
+    expect(services.sessionManager.getPanelOutputs).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      returnedCount: 1,
+      hasMore: false,
+      text: 'persisted one\npersisted two\n',
+    });
+  });
+
+  it('falls back to persisted output records when terminal scrollback is unavailable', async () => {
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+      limit: 2,
+    }]);
+
+    expect(services.sessionManager.getPanelOutputs).toHaveBeenCalledWith(terminalPanel.id, 3);
+    expect(result).toMatchObject({
+      returnedCount: 1,
+      hasMore: false,
+      text: 'ready\n',
     });
   });
 

@@ -51,6 +51,17 @@ const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
 const AGENT_IDS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
 const DEFAULT_PANEL_OUTPUT_LIMIT = 200;
 
+/* eslint-disable no-control-regex */
+const ANSI_PATTERNS: RegExp[] = [
+  /\x1b\[[0-9;]*[a-zA-Z]/g,
+  /\x1b\].*?(?:\x07|\x1b\\)/g,
+  /\x1b\[?[0-9;]*[hl]/g,
+  /\x1b[()][AB012]/g,
+  /[^\n]*\r(?!\n)/g,
+  /\x1b/g,
+];
+/* eslint-enable no-control-regex */
+
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
   services: AppServices,
@@ -261,6 +272,27 @@ export function registerRunpaneHandlers(
       const normalized = parsePanelOutputRequest(request);
       const panel = resolvePanel(normalized.panelId);
       const limit = normalized.limit ?? DEFAULT_PANEL_OUTPUT_LIMIT;
+      const scrollbackResult = panel.type === 'terminal' ? panelScrollbackOutput(panel, limit) : null;
+
+      if (scrollbackResult) {
+        return {
+          ok: true,
+          panelId: panel.id,
+          paneId: panel.sessionId,
+          limit,
+          returnedCount: scrollbackResult.text ? 1 : 0,
+          hasMore: scrollbackResult.hasMore,
+          outputs: scrollbackResult.text
+            ? [{
+                type: 'stdout',
+                data: scrollbackResult.text,
+                timestamp: scrollbackResult.timestamp,
+              }]
+            : [],
+          text: scrollbackResult.text,
+        };
+      }
+
       const fetchedOutputs = sessionManager.getPanelOutputs(panel.id, limit + 1);
       const hasMore = fetchedOutputs.length > limit;
       const outputs = hasMore ? fetchedOutputs.slice(fetchedOutputs.length - limit) : fetchedOutputs;
@@ -386,6 +418,55 @@ function outputToText(output: SessionOutput): string {
   } catch {
     return `${String(output.data)}\n`;
   }
+}
+
+function panelScrollbackOutput(panel: ToolPanel, limit: number): { text: string; hasMore: boolean; timestamp: string } | null {
+  const rawScrollback = getPanelScrollback(panel);
+  if (!rawScrollback) {
+    return null;
+  }
+
+  const stripped = stripAnsiCodes(rawScrollback);
+  if (!stripped) {
+    return null;
+  }
+
+  const allLines = stripped.split('\n');
+  const hasMore = allLines.length > limit;
+  const text = allLines.slice(-limit).join('\n');
+  const timestamp = toIsoString(panel.metadata.lastActiveAt) ?? new Date().toISOString();
+
+  return { text, hasMore, timestamp };
+}
+
+function getPanelScrollback(panel: ToolPanel): string | null {
+  const liveScrollback = terminalPanelManager.getTerminalScrollback(panel.id);
+  if (liveScrollback !== null) {
+    return liveScrollback;
+  }
+
+  const customState = panel.state.customState;
+  if (!isRecord(customState) || !('scrollbackBuffer' in customState)) {
+    return null;
+  }
+
+  const persisted = (customState as TerminalPanelState).scrollbackBuffer;
+  if (typeof persisted === 'string') {
+    return persisted;
+  }
+  if (Array.isArray(persisted)) {
+    return persisted.join('\n');
+  }
+
+  return null;
+}
+
+function stripAnsiCodes(text: string): string {
+  let result = text;
+  for (const pattern of ANSI_PATTERNS) {
+    result = result.replace(pattern, '');
+  }
+  return result;
 }
 
 function panelOutputCommand(panelId: string): string {
