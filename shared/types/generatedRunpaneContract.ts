@@ -1406,6 +1406,9 @@ export const RUNPANE_CONTRACT = {
                   "worktreePath": {
                     "type": "string"
                   },
+                  "nextCommand": {
+                    "type": "string"
+                  },
                   "tool": {
                     "type": "object",
                     "required": [
@@ -1614,6 +1617,9 @@ export const RUNPANE_CONTRACT = {
       "required": [
         "ok",
         "panelId",
+        "limit",
+        "returnedCount",
+        "hasMore",
         "outputs",
         "text"
       ],
@@ -1629,6 +1635,12 @@ export const RUNPANE_CONTRACT = {
         },
         "limit": {
           "type": "number"
+        },
+        "returnedCount": {
+          "type": "number"
+        },
+        "hasMore": {
+          "type": "boolean"
         },
         "outputs": {
           "type": "array",
@@ -1695,6 +1707,9 @@ export const RUNPANE_CONTRACT = {
           "type": "number"
         },
         "sentAt": {
+          "type": "string"
+        },
+        "nextCommand": {
           "type": "string"
         }
       },
@@ -1846,6 +1861,7 @@ export const RUNPANE_CONTRACT = {
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane panes create` to create a Pane session and open a built-in agent or custom terminal command.",
         "Use `runpane panels list`, `runpane panels output`, and `runpane panels input` when you need to inspect or drive an existing Pane terminal.",
+        "After creating panes or sending terminal input, validate with bounded panel output before reporting success.",
         "Use `runpane agent-context --command <command>` for detailed command definitions only when needed."
       ],
       "detailCommand": "runpane agent-context --command <command> [--json]",
@@ -2308,6 +2324,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "At least one of --agent or --tool-command is required unless --from-json is used.",
           "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user.",
+          "When the JSON result includes nextCommand, run it to validate that the terminal produced output before reporting success.",
           "From WSL with Windows Pane, invoke through PowerShell and select the saved WSL repo by name or id, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane panes create --repo \"WSL Pane\" --name issue-123 --agent codex --prompt \"Plan this issue\" --yes --json'`."
         ]
       },
@@ -2349,7 +2366,7 @@ export const RUNPANE_CONTRACT = {
       "panels output": {
         "name": "panels output",
         "summary": "Read recent terminal output from a panel.",
-        "details": "Use this to inspect what is currently visible or recently emitted by a terminal-backed panel.",
+        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -2363,7 +2380,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--limit",
             "value": "<count>",
             "required": false,
-            "description": "Maximum output records to read."
+            "description": "Maximum output records to read. Defaults to 200."
           },
           {
             "name": "--json",
@@ -2384,7 +2401,8 @@ export const RUNPANE_CONTRACT = {
           "panelOutputResult"
         ],
         "notes": [
-          "Default text output concatenates stdout/stderr-like records. Use --json when an agent needs timestamps and record types."
+          "Default output is bounded to the latest 200 records. Use a larger --limit only when hasMore is true and more history is needed.",
+          "Use --json when an agent needs timestamps, record types, returnedCount, or hasMore."
         ]
       },
       "panels input": {
@@ -2439,6 +2457,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Input is sent exactly as provided. Include `\\n` or `\\r` when the terminal should receive Enter.",
+          "After sending input, validate with `runpane panels output --panel <panel-id> --json` before reporting success.",
           "Runpane records action metadata and errors for observability, but should not log full input text by default."
         ]
       }
@@ -2449,6 +2468,8 @@ export const RUNPANE_CONTRACT = {
       "The developer is using Pane for this repository. Pane can manage saved repositories and create user-visible panes with terminal-backed tools for planning, discussion, and implementation work.",
       "",
       "Use `runpane agent-context` for a brief Pane command schema. Use `runpane agent-context --command \"panes create\"` or another command name for the detailed schema only when needed.",
+      "",
+      "After creating panes or sending terminal input, validate with bounded panel output before reporting success.",
       "",
       "Common commands:",
       "- `runpane repos list --json`",

@@ -187,6 +187,8 @@ The developer is using Pane for this repository. Pane can manage saved repositor
 
 Use `runpane agent-context` for a brief Pane command schema. Use `runpane agent-context --command "panes create"` or another command name for the detailed schema only when needed.
 
+After creating panes or sending terminal input, validate with bounded panel output before reporting success.
+
 Common commands:
 - `runpane repos list --json`
 - `runpane repos add --path <repo> --yes --json`

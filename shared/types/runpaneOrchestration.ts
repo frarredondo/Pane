@@ -88,6 +88,7 @@ export interface RunpanePaneCreateSuccessItem {
   paneId?: string;
   panelId?: string;
   worktreePath?: string;
+  nextCommand?: string;
   tool?: {
     title: string;
     command: string;
@@ -176,7 +177,9 @@ export interface RunpanePanelOutputResult {
   ok: true;
   panelId: string;
   paneId?: string;
-  limit?: number;
+  limit: number;
+  returnedCount: number;
+  hasMore: boolean;
   outputs: RunpanePanelOutputRecord[];
   text: string;
 }
@@ -192,6 +195,7 @@ export interface RunpanePanelInputResult {
   paneId?: string;
   inputBytes: number;
   sentAt: string;
+  nextCommand?: string;
 }
 
 export interface RunpaneResolvedTool {

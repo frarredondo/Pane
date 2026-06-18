@@ -408,12 +408,14 @@ describe('runpane IPC handlers', () => {
       limit: 2,
     }]);
 
-    expect(services.sessionManager.getPanelOutputs).toHaveBeenCalledWith(terminalPanel.id, 2);
+    expect(services.sessionManager.getPanelOutputs).toHaveBeenCalledWith(terminalPanel.id, 3);
     expect(result).toMatchObject({
       ok: true,
       panelId: terminalPanel.id,
       paneId: session.id,
       limit: 2,
+      returnedCount: 2,
+      hasMore: false,
       outputs: [{
         type: 'stdout',
         data: 'hello\n',
@@ -424,6 +426,72 @@ describe('runpane IPC handlers', () => {
         timestamp: '2026-01-01T00:03:00.000Z',
       }],
       text: 'hello\n{"type":"system","message":"ok"}\n',
+    });
+  });
+
+  it('defaults panel output reads to the latest 200 records', async () => {
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+    }]);
+
+    expect(services.sessionManager.getPanelOutputs).toHaveBeenCalledWith(terminalPanel.id, 201);
+    expect(result).toMatchObject({
+      ok: true,
+      panelId: terminalPanel.id,
+      limit: 200,
+      returnedCount: 1,
+      hasMore: false,
+    });
+  });
+
+  it('marks panel output as having more history when the internal fetch finds an extra record', async () => {
+    const services = createServices({
+      sessionManager: {
+        ...createServices().sessionManager,
+        getPanelOutputs: vi.fn(() => [{
+          sessionId: session.id,
+          panelId: terminalPanel.id,
+          type: 'stdout',
+          data: 'old\n',
+          timestamp: new Date('2026-01-01T00:01:00.000Z'),
+        }, {
+          sessionId: session.id,
+          panelId: terminalPanel.id,
+          type: 'stdout',
+          data: 'middle\n',
+          timestamp: new Date('2026-01-01T00:02:00.000Z'),
+        }, {
+          sessionId: session.id,
+          panelId: terminalPanel.id,
+          type: 'stdout',
+          data: 'latest\n',
+          timestamp: new Date('2026-01-01T00:03:00.000Z'),
+        }]),
+      } as never,
+    });
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+      limit: 2,
+    }]);
+
+    expect(result).toMatchObject({
+      ok: true,
+      limit: 2,
+      returnedCount: 2,
+      hasMore: true,
+      outputs: [{
+        type: 'stdout',
+        data: 'middle\n',
+      }, {
+        type: 'stdout',
+        data: 'latest\n',
+      }],
+      text: 'middle\nlatest\n',
     });
   });
 
@@ -442,6 +510,7 @@ describe('runpane IPC handlers', () => {
       panelId: terminalPanel.id,
       paneId: session.id,
       inputBytes: 8,
+      nextCommand: `runpane panels output --panel ${terminalPanel.id} --limit 200 --json`,
     });
     expect(services.analyticsManager?.track).toHaveBeenCalledWith(
       'runpane_local_control',
@@ -521,6 +590,7 @@ describe('runpane IPC handlers', () => {
         sessionId: session.id,
         panelId: 'panel-1',
         worktreePath: session.worktreePath,
+        nextCommand: 'runpane panels output --panel panel-1 --limit 200 --json',
       }],
     });
   });
