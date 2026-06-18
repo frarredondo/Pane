@@ -17,7 +17,15 @@ from .installers import (
     should_reuse_existing_pane,
     spawn_pane,
 )
-from .local_control import run_panes_create, run_repos_add, run_repos_list
+from .local_control import (
+    run_panels_input,
+    run_panels_list,
+    run_panels_output,
+    run_panes_create,
+    run_panes_list,
+    run_repos_add,
+    run_repos_list,
+)
 from .platforms import detect_platform
 from .releases import resolve_release
 from .version import print_version
@@ -65,6 +73,8 @@ class ParsedArgs:
     context_command: Optional[str] = None
     pane_dir: Optional[str] = None
     repo: Optional[str] = None
+    pane_id: Optional[str] = None
+    panel_id: Optional[str] = None
     repo_path: Optional[str] = None
     name: Optional[str] = None
     worktree_name: Optional[str] = None
@@ -74,8 +84,11 @@ class ParsedArgs:
     title: Optional[str] = None
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
+    panel_input: Optional[str] = None
+    panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
     timeout_ms: Optional[float] = None
+    limit: Optional[int] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -102,8 +115,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             return run_repos_list(parsed)
         if parsed.command == "repos add":
             return run_repos_add(parsed)
+        if parsed.command == "panes list":
+            return run_panes_list(parsed)
         if parsed.command == "panes create":
             return run_panes_create(parsed)
+        if parsed.command == "panels list":
+            return run_panels_list(parsed)
+        if parsed.command == "panels output":
+            return run_panels_output(parsed)
+        if parsed.command == "panels input":
+            return run_panels_input(parsed)
         if parsed.command in {"install", "update"}:
             return install_or_update(parsed)
         print(help_text(None))
@@ -265,7 +286,7 @@ def parse_flags(args: List[str], parsed: ParsedArgs) -> None:
     while index < len(args):
         arg = args[index]
         is_agent_context_command = parsed.command == "agent-context"
-        is_local_command = parsed.command in {"repos list", "repos add", "panes create"}
+        is_local_command = is_runpane_local_command(parsed.command)
         if arg in {"-h", "--help"}:
             parsed.help_topic = parsed.command
             parsed.command = "help"
@@ -341,6 +362,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--repo":
         parsed.repo = value
         return
+    if flag == "--pane":
+        parsed.pane_id = value
+        return
+    if flag == "--panel":
+        parsed.panel_id = value
+        return
     if flag == "--path":
         parsed.repo_path = value
         return
@@ -367,6 +394,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag in {"--initial-input", "--prompt"}:
         parsed.initial_input = value
         return
+    if flag == "--text":
+        parsed.panel_input = value
+        return
+    if flag == "--input-file":
+        parsed.panel_input_file = value
+        return
     if flag == "--initial-input-file":
         parsed.initial_input_file = value
         return
@@ -382,7 +415,28 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             raise ValueError("--timeout-ms must be a positive number.")
         parsed.timeout_ms = timeout_ms
         return
+    if flag == "--limit":
+        try:
+            limit = int(value)
+        except ValueError as error:
+            raise ValueError("--limit must be a positive integer.") from error
+        if limit <= 0:
+            raise ValueError("--limit must be a positive integer.")
+        parsed.limit = limit
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
+
+
+def is_runpane_local_command(command: str) -> bool:
+    return command in {
+        "repos list",
+        "repos add",
+        "panes list",
+        "panes create",
+        "panels list",
+        "panels output",
+        "panels input",
+    }
 
 
 def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None) -> None:

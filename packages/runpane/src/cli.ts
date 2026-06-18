@@ -13,7 +13,15 @@ import {
   shouldReuseExistingPane,
   spawnPane
 } from './installers';
-import { runPanesCreate, runReposAdd, runReposList } from './localControl';
+import {
+  runPanelsInput,
+  runPanelsList,
+  runPanelsOutput,
+  runPanesCreate,
+  runPanesList,
+  runReposAdd,
+  runReposList
+} from './localControl';
 import { detectPlatform } from './platform';
 import { resolveRelease } from './releases';
 import { printVersion } from './version';
@@ -56,8 +64,24 @@ export async function main(argv: string[]): Promise<number> {
     return runReposAdd(parsed);
   }
 
+  if (parsed.command === 'panes list') {
+    return runPanesList(parsed);
+  }
+
   if (parsed.command === 'panes create') {
     return runPanesCreate(parsed);
+  }
+
+  if (parsed.command === 'panels list') {
+    return runPanelsList(parsed);
+  }
+
+  if (parsed.command === 'panels output') {
+    return runPanelsOutput(parsed);
+  }
+
+  if (parsed.command === 'panels input') {
+    return runPanelsInput(parsed);
   }
 
   if (parsed.command === 'install' || parsed.command === 'update') {

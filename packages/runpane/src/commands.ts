@@ -25,6 +25,8 @@ export interface ParsedArgs {
   contextCommand?: string;
   paneDir?: string;
   repo?: string;
+  paneId?: string;
+  panelId?: string;
   repoPath?: string;
   name?: string;
   worktreeName?: string;
@@ -34,8 +36,11 @@ export interface ParsedArgs {
   title?: string;
   initialInput?: string;
   initialInputFile?: string;
+  panelInput?: string;
+  panelInputFile?: string;
   fromJson?: string;
   timeoutMs?: number;
+  limit?: number;
   remoteSetupArgs: string[];
 }
 
@@ -118,7 +123,7 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     const isAgentContextCommand = parsed.command === 'agent-context';
-    const isLocalCommand = parsed.command === 'repos list' || parsed.command === 'repos add' || parsed.command === 'panes create';
+    const isLocalCommand = isRunpaneLocalCommand(parsed.command);
 
     if (arg === '-h' || arg === '--help') {
       const topic = parsed.command;
@@ -230,6 +235,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.repo = value;
     return;
   }
+  if (flag === '--pane') {
+    parsed.paneId = value;
+    return;
+  }
+  if (flag === '--panel') {
+    parsed.panelId = value;
+    return;
+  }
   if (flag === '--path') {
     parsed.repoPath = value;
     return;
@@ -265,6 +278,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.initialInput = value;
     return;
   }
+  if (flag === '--text') {
+    parsed.panelInput = value;
+    return;
+  }
+  if (flag === '--input-file') {
+    parsed.panelInputFile = value;
+    return;
+  }
   if (flag === '--initial-input-file') {
     parsed.initialInputFile = value;
     return;
@@ -281,8 +302,26 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.timeoutMs = timeoutMs;
     return;
   }
+  if (flag === '--limit') {
+    const limit = Number(value);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new Error('--limit must be a positive integer.');
+    }
+    parsed.limit = limit;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
+}
+
+function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
+  return command === 'repos list'
+    || command === 'repos add'
+    || command === 'panes list'
+    || command === 'panes create'
+    || command === 'panels list'
+    || command === 'panels output'
+    || command === 'panels input';
 }
 
 function appendRemoteArg(parsed: ParsedArgs, flag: string, value?: string): void {

@@ -1,4 +1,4 @@
-import type { ProjectEnvironment } from './panels';
+import type { ProjectEnvironment, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 
 export type RunpaneAgentId = RunpaneAgent;
@@ -110,6 +110,88 @@ export interface RunpanePaneCreateResult {
   ok: boolean;
   repo: RunpaneRepoSummary;
   items: RunpanePaneCreateResultItem[];
+}
+
+export interface RunpanePaneSummary {
+  id: string;
+  paneId: string;
+  name: string;
+  status: string;
+  worktreePath: string;
+  repoId: number;
+  repoName?: string;
+  panelCount: number;
+  createdAt?: string;
+  lastActivity?: string;
+  archived?: boolean;
+}
+
+export interface RunpanePaneListRequest {
+  repo?: RunpaneRepoSelector;
+}
+
+export interface RunpanePaneListResult {
+  ok: true;
+  repo?: RunpaneRepoSummary;
+  panes: RunpanePaneSummary[];
+}
+
+export interface RunpanePanelSummary {
+  id: string;
+  panelId: string;
+  paneId: string;
+  type: ToolPanelType;
+  title: string;
+  active: boolean;
+  initialized?: boolean;
+  agentType?: RunpaneAgentId;
+  isCliPanel?: boolean;
+  position?: number;
+  createdAt?: string;
+  lastActiveAt?: string;
+}
+
+export interface RunpanePanelListRequest {
+  paneId: string;
+}
+
+export interface RunpanePanelListResult {
+  ok: true;
+  paneId: string;
+  panels: RunpanePanelSummary[];
+}
+
+export interface RunpanePanelOutputRecord {
+  type: string;
+  data: unknown;
+  timestamp: string;
+}
+
+export interface RunpanePanelOutputRequest {
+  panelId: string;
+  limit?: number;
+}
+
+export interface RunpanePanelOutputResult {
+  ok: true;
+  panelId: string;
+  paneId?: string;
+  limit?: number;
+  outputs: RunpanePanelOutputRecord[];
+  text: string;
+}
+
+export interface RunpanePanelInputRequest {
+  panelId: string;
+  input: string;
+}
+
+export interface RunpanePanelInputResult {
+  ok: true;
+  panelId: string;
+  paneId?: string;
+  inputBytes: number;
+  sentAt: string;
 }
 
 export interface RunpaneResolvedTool {

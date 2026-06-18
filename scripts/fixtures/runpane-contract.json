@@ -92,6 +92,13 @@
     ],
     [
       "panes",
+      "list",
+      "--repo",
+      "active",
+      "--json"
+    ],
+    [
+      "panes",
       "create",
       "--repo",
       "active",
@@ -114,6 +121,32 @@
       "--json"
     ],
     [
+      "panels",
+      "list",
+      "--pane",
+      "session-1",
+      "--json"
+    ],
+    [
+      "panels",
+      "output",
+      "--panel",
+      "panel-1",
+      "--limit",
+      "200",
+      "--json"
+    ],
+    [
+      "panels",
+      "input",
+      "--panel",
+      "panel-1",
+      "--text",
+      "Continue\\n",
+      "--yes",
+      "--json"
+    ],
+    [
       "--version"
     ]
   ],
@@ -127,7 +160,11 @@
       "runpane agent-context",
       "runpane repos list",
       "runpane repos add",
-      "runpane panes create"
+      "runpane panes list",
+      "runpane panes create",
+      "runpane panels list",
+      "runpane panels output",
+      "runpane panels input"
     ],
     "npmIncludes": [
       "pnpm dlx runpane@latest",

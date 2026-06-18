@@ -7,16 +7,21 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { Project } from '../database/models';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
+import type { ToolPanel } from '../../../shared/types/panels';
 
 vi.mock('../services/panelManager', () => ({
   panelManager: {
     createPanel: vi.fn(),
+    getPanel: vi.fn(),
+    getPanelsForSession: vi.fn(),
   },
 }));
 
 vi.mock('../services/terminalPanelManager', () => ({
   terminalPanelManager: {
     initializeTerminal: vi.fn(),
+    isTerminalInitialized: vi.fn(),
+    writeToTerminal: vi.fn(),
   },
 }));
 
@@ -46,6 +51,25 @@ const session: Session = {
   projectId: project.id,
 };
 
+const terminalPanel: ToolPanel = {
+  id: 'panel-1',
+  sessionId: session.id,
+  type: 'terminal',
+  title: 'Codex',
+  state: {
+    isActive: true,
+    customState: {
+      agentType: 'codex',
+      isCliPanel: true,
+    },
+  },
+  metadata: {
+    createdAt: '2026-01-01T00:00:00.000Z',
+    lastActiveAt: '2026-01-01T00:01:00.000Z',
+    position: 0,
+  },
+};
+
 function createServices(overrides: Partial<AppServices> = {}): AppServices {
   return {
     app: {} as AppServices['app'],
@@ -70,6 +94,13 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     sessionManager: {
       getSessionsForProject: vi.fn(() => [session]),
       getSession: vi.fn(() => session),
+      getPanelOutputs: vi.fn(() => [{
+        sessionId: session.id,
+        panelId: terminalPanel.id,
+        type: 'stdout',
+        data: 'ready\n',
+        timestamp: new Date('2026-01-01T00:02:00.000Z'),
+      }]),
       getProjectContext: vi.fn(() => ({
         commandRunner: {
           wslContext: null,
@@ -78,6 +109,10 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     },
     taskQueue: {
       createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+    },
+    analyticsManager: {
+      track: vi.fn(),
+      hashSessionId: vi.fn((id: string) => `hash-${id}`),
     },
     spotlightManager: {},
     ...overrides,
@@ -104,7 +139,19 @@ function createRegistry(services = createServices()): PaneCommandRegistry {
 describe('runpane IPC handlers', () => {
   beforeEach(() => {
     vi.mocked(panelManager.createPanel).mockReset();
+    vi.mocked(panelManager.getPanel).mockReset();
+    vi.mocked(panelManager.getPanelsForSession).mockReset();
     vi.mocked(terminalPanelManager.initializeTerminal).mockReset();
+    vi.mocked(terminalPanelManager.isTerminalInitialized).mockReset();
+    vi.mocked(terminalPanelManager.writeToTerminal).mockReset();
+
+    vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) =>
+      panelId === terminalPanel.id ? terminalPanel : undefined
+    );
+    vi.mocked(panelManager.getPanelsForSession).mockImplementation((sessionId: string) =>
+      sessionId === session.id ? [terminalPanel] : []
+    );
+    vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -269,6 +316,149 @@ describe('runpane IPC handlers', () => {
       }],
     });
     expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
+  });
+
+  it('lists panes scoped to a repository with panel counts', async () => {
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panes:list', [{
+      repo: 'active',
+    }]);
+
+    expect(result).toMatchObject({
+      ok: true,
+      repo: {
+        id: project.id,
+        name: project.name,
+      },
+      panes: [{
+        id: session.id,
+        paneId: session.id,
+        name: session.name,
+        status: session.status,
+        worktreePath: session.worktreePath,
+        repoId: project.id,
+        repoName: project.name,
+        panelCount: 1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }],
+    });
+    expect(panelManager.getPanelsForSession).toHaveBeenCalledWith(session.id);
+    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
+      'runpane_local_control',
+      expect.objectContaining({
+        action: 'panes:list',
+        status: 'success',
+        repo_id: project.id,
+        result_count: 1,
+      }),
+    );
+  });
+
+  it('lists panels for a pane', async () => {
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:list', [{
+      paneId: session.id,
+    }]);
+
+    expect(result).toMatchObject({
+      ok: true,
+      paneId: session.id,
+      panels: [{
+        id: terminalPanel.id,
+        panelId: terminalPanel.id,
+        paneId: session.id,
+        type: 'terminal',
+        title: 'Codex',
+        active: true,
+        initialized: true,
+        agentType: 'codex',
+        isCliPanel: true,
+        position: 0,
+      }],
+    });
+    expect(terminalPanelManager.isTerminalInitialized).toHaveBeenCalledWith(terminalPanel.id);
+  });
+
+  it('reads panel output as records and concatenated text', async () => {
+    const services = createServices({
+      sessionManager: {
+        ...createServices().sessionManager,
+        getPanelOutputs: vi.fn(() => [{
+          sessionId: session.id,
+          panelId: terminalPanel.id,
+          type: 'stdout',
+          data: 'hello\n',
+          timestamp: new Date('2026-01-01T00:02:00.000Z'),
+        }, {
+          sessionId: session.id,
+          panelId: terminalPanel.id,
+          type: 'json',
+          data: { type: 'system', message: 'ok' },
+          timestamp: new Date('2026-01-01T00:03:00.000Z'),
+        }]),
+      } as never,
+    });
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:output', [{
+      panelId: terminalPanel.id,
+      limit: 2,
+    }]);
+
+    expect(services.sessionManager.getPanelOutputs).toHaveBeenCalledWith(terminalPanel.id, 2);
+    expect(result).toMatchObject({
+      ok: true,
+      panelId: terminalPanel.id,
+      paneId: session.id,
+      limit: 2,
+      outputs: [{
+        type: 'stdout',
+        data: 'hello\n',
+        timestamp: '2026-01-01T00:02:00.000Z',
+      }, {
+        type: 'json',
+        data: { type: 'system', message: 'ok' },
+        timestamp: '2026-01-01T00:03:00.000Z',
+      }],
+      text: 'hello\n{"type":"system","message":"ok"}\n',
+    });
+  });
+
+  it('sends input to an initialized terminal panel without logging input text', async () => {
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:input', [{
+      panelId: terminalPanel.id,
+      input: 'echo hi\r',
+    }]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'echo hi\r');
+    expect(result).toMatchObject({
+      ok: true,
+      panelId: terminalPanel.id,
+      paneId: session.id,
+      inputBytes: 8,
+    });
+    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
+      'runpane_local_control',
+      expect.objectContaining({
+        action: 'panels:input',
+        status: 'success',
+        pane_id_hash: `hash-${session.id}`,
+        panel_id_hash: `hash-${terminalPanel.id}`,
+        input_bytes: 8,
+      }),
+    );
+    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
+      'runpane_local_control',
+      expect.objectContaining({
+        input: 'echo hi\r',
+      }),
+    );
   });
 
   it('creates a session, terminal panel, and initial-input state', async () => {
