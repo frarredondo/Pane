@@ -24,7 +24,7 @@ import {
 const SIDEBAR_ROW_BASE = 'flex w-full items-center text-left transition-colors';
 const SIDEBAR_ROW_PADDING = 'px-4';
 const SIDEBAR_ROW_GAP = 'gap-2.5';
-const SIDEBAR_SECTION_ROW = 'mt-2 flex w-full items-center justify-between gap-2 px-3.5 pt-1 pb-1';
+const SIDEBAR_SECTION_ROW = 'mt-2 flex w-full items-center justify-between gap-2 pl-3.5 pr-2 pt-1 pb-1';
 const SIDEBAR_SECTION_LABEL = 'truncate text-[13px] font-semibold uppercase leading-4 text-text-tertiary';
 
 interface ProjectSessionListProps {
@@ -335,7 +335,7 @@ export function ProjectSessionList({
           </button>
           <button
             onClick={() => setShowAddProjectDialog(true)}
-            className="inline-flex items-center justify-center rounded-md p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
+            className="inline-flex items-center justify-center rounded-md p-1 text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
             title="New repository"
           >
             <FolderPlus className="w-3.5 h-3.5" />
@@ -506,28 +506,39 @@ function SessionRowContent({
   showActivity: boolean;
   showUnviewedCompleted: boolean;
 }) {
+  const title = displayName || gs?.prTitle || session.name || 'Untitled';
+  const prNumber = gs?.prNumber;
+  const showMetadata = Boolean(prNumber || hasDiff);
+
   return (
-    <div className="flex items-center gap-1.5 min-w-0 w-full">
-      {gs?.prNumber ? (
-        <GitPullRequest className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+    <div className="flex min-w-0 w-full items-start gap-1.5">
+      {prNumber ? (
+        <GitPullRequest className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       ) : (
-        <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}
-      <span className={cn(
-        'text-sm font-medium text-text-primary truncate flex-1 min-w-0 decoration-status-info decoration-2 underline-offset-4',
-        showActivity && 'animate-sidebar-active-label',
-        showUnviewedCompleted && 'underline decoration-dashed'
-      )}>
-        {displayName || gs?.prTitle || session.name || 'Untitled'}
-      </span>
-      {gs?.prNumber ? (
-        <span className="text-xs text-text-tertiary flex-shrink-0">#{gs.prNumber}</span>
-      ) : hasDiff ? (
-        <span className="flex items-center gap-1 text-xs flex-shrink-0">
-          <span className="text-status-success font-semibold">+{adds}</span>
-          <span className="text-status-error font-semibold">-{dels}</span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className={cn(
+          'min-w-0 truncate text-sm font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
+          showActivity && 'animate-sidebar-active-label',
+          showUnviewedCompleted && 'underline decoration-dashed'
+        )}>
+          {title}
         </span>
-      ) : null}
+        {showMetadata && (
+          <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
+            {prNumber && (
+              <span className="text-text-tertiary">#{prNumber}</span>
+            )}
+            {hasDiff && (
+              <>
+                <span className="text-status-success">+{adds}</span>
+                <span className="text-status-error">-{dels}</span>
+              </>
+            )}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -625,7 +636,7 @@ function SessionRow({
       interactive
     >
       <div
-        className={`group/session relative w-full text-left pl-2 pr-2 py-1.5 transition-colors flex items-center gap-1 cursor-pointer ${
+        className={`group/session relative w-full text-left pl-2 pr-2 py-2 transition-colors flex items-center gap-1 cursor-pointer ${
           isActive
             ? 'bg-interactive/30 border-l-4 border-interactive'
             : 'hover:bg-surface-hover border-l-4 border-transparent'
