@@ -47,7 +47,13 @@ export function useSessionNavigationHotkeys({
   // because this hook stays mounted when the sidebar is collapsed or immersive
   // mode hides it, keeping mod+1-9 numbering alive and consistent.
   useEffect(() => {
-    registerProjectIds(projects.map(p => p.id));
+    if (projects.length === 0) return;
+    const expandedProjectIds = registerProjectIds(projects.map(p => p.id));
+    if (expandedProjectIds) {
+      void window.electronAPI.uiState.saveExpandedProjects(expandedProjectIds).catch(error => {
+        console.error('Failed to save expanded projects:', error);
+      });
+    }
   }, [projects, registerProjectIds]);
 
   // Sessions in the exact order ProjectSessionList renders them: projects in

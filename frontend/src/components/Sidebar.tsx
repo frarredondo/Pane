@@ -60,6 +60,7 @@ interface SidebarProps {
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
 const REMOTE_DESKTOP_TOOLTIP = 'Use Remote Desktop to access the host device for Electron apps, native windows, and UI running on the remote machine.';
+type SidebarSection = 'pinned' | 'repositories';
 
 function formatMemory(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
@@ -84,6 +85,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
   const [gitCommit, setGitCommit] = useState<string>('');
   const [worktreeName, setWorktreeName] = useState<string>('');
   const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(true); // Default to ascending (newest at bottom)
+  const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
+    pinned: true,
+    repositories: true,
+  });
   const [remoteConnectionState, setRemoteConnectionState] = useState<RemotePaneConnectionState>(createDefaultRemotePaneConnectionState());
   const [remoteHostState, setRemoteHostState] = useState<RemoteDaemonHostRuntimeState>(createDefaultRemoteDaemonHostRuntimeState());
   const resourceMenuButtonRef = useRef<HTMLButtonElement>(null);
@@ -92,6 +97,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
   const [resourcePopoverStyle, setResourcePopoverStyle] = useState<React.CSSProperties>({});
   const [expandedResourceSections, setExpandedResourceSections] = useState<Set<string>>(new Set(['pane-app']));
   const { snapshot, isLoading: resourceLoading, startActive, stopActive, refresh } = useResourceMonitor();
+  const hydrateExpandedProjects = useNavigationStore(s => s.hydrateExpandedProjects);
 
   useEffect(() => {
     // Fetch version info and UI state on component mount
@@ -127,6 +133,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
         const result = await window.electronAPI.uiState.getExpanded();
         if (result.success && result.data) {
           setSessionSortAscending(result.data.sessionSortAscending ?? true);
+          hydrateExpandedProjects(result.data.expandedProjects ?? []);
+          setSidebarSectionExpansion({
+            pinned: result.data.pinnedSectionExpanded ?? true,
+            repositories: result.data.repositoriesSectionExpanded ?? true,
+          });
         }
       } catch (error) {
         console.error('Failed to load UI state:', error);
@@ -135,7 +146,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
 
     fetchVersion();
     loadUIState();
-  }, []);
+  }, [hydrateExpandedProjects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +191,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
       console.error('Failed to save session sort order:', error);
     }
   };
+
+  const handleSidebarSectionExpandedChange = useCallback((section: SidebarSection, expanded: boolean) => {
+    setSidebarSectionExpansion(prev => ({
+      ...prev,
+      [section]: expanded,
+    }));
+
+    void window.electronAPI.uiState.saveSidebarSectionExpanded(section, expanded).catch(error => {
+      console.error('Failed to save sidebar section expanded state:', error);
+    });
+  }, []);
+
+  const handlePinnedSectionExpandedChange = useCallback((expanded: boolean) => {
+    handleSidebarSectionExpandedChange('pinned', expanded);
+  }, [handleSidebarSectionExpandedChange]);
+
+  const handleRepositoriesSectionExpandedChange = useCallback((expanded: boolean) => {
+    handleSidebarSectionExpandedChange('repositories', expanded);
+  }, [handleSidebarSectionExpandedChange]);
 
   const openResourcePopover = useCallback(() => {
     setShowResourcePopover(true);
@@ -571,6 +601,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
         <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
           <ProjectSessionList
             sessionSortAscending={sessionSortAscending}
+            pinnedSectionExpanded={sidebarSectionExpansion.pinned}
+            repositoriesSectionExpanded={sidebarSectionExpansion.repositories}
+            onPinnedSectionExpandedChange={handlePinnedSectionExpandedChange}
+            onRepositoriesSectionExpandedChange={handleRepositoriesSectionExpandedChange}
             showRemoteDesktopLink={showRemoteDesktopLink}
             onRemoteDesktopClick={handleOpenRemoteDesktop}
             remoteDesktopTooltip={REMOTE_DESKTOP_TOOLTIP}

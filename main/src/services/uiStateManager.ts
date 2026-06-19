@@ -1,12 +1,11 @@
 import { DatabaseService } from '../database/database';
 
-interface UIState {
-  treeView: {
-    expandedProjects: number[];
-    expandedFolders: string[];
-    sessionSortAscending: boolean;
-  };
-}
+type SidebarSection = 'pinned' | 'repositories';
+
+const SIDEBAR_SECTION_KEYS: Record<SidebarSection, string> = {
+  pinned: 'treeView.pinnedSectionExpanded',
+  repositories: 'treeView.repositoriesSectionExpanded'
+};
 
 class UIStateManager {
   private db: DatabaseService;
@@ -45,6 +44,17 @@ class UIStateManager {
     }
   }
 
+  getSidebarSectionExpanded(section: SidebarSection): boolean {
+    const value = this.db.getUIState(SIDEBAR_SECTION_KEYS[section]);
+    if (!value) return true;
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === 'boolean' ? parsed : true;
+    } catch {
+      return true;
+    }
+  }
+
   saveExpandedProjects(projectIds: number[]): void {
     this.db.setUIState('treeView.expandedProjects', JSON.stringify(projectIds));
   }
@@ -57,16 +67,28 @@ class UIStateManager {
     this.db.setUIState('treeView.sessionSortAscending', JSON.stringify(ascending));
   }
 
+  saveSidebarSectionExpanded(section: SidebarSection, expanded: boolean): void {
+    this.db.setUIState(SIDEBAR_SECTION_KEYS[section], JSON.stringify(expanded));
+  }
+
   saveExpandedState(projectIds: number[], folderIds: string[]): void {
     this.saveExpandedProjects(projectIds);
     this.saveExpandedFolders(folderIds);
   }
 
-  getExpandedState(): { expandedProjects: number[]; expandedFolders: string[]; sessionSortAscending: boolean } {
+  getExpandedState(): {
+    expandedProjects: number[];
+    expandedFolders: string[];
+    sessionSortAscending: boolean;
+    pinnedSectionExpanded: boolean;
+    repositoriesSectionExpanded: boolean;
+  } {
     return {
       expandedProjects: this.getExpandedProjects(),
       expandedFolders: this.getExpandedFolders(),
-      sessionSortAscending: this.getSessionSortAscending()
+      sessionSortAscending: this.getSessionSortAscending(),
+      pinnedSectionExpanded: this.getSidebarSectionExpanded('pinned'),
+      repositoriesSectionExpanded: this.getSidebarSectionExpanded('repositories')
     };
   }
 
@@ -74,6 +96,8 @@ class UIStateManager {
     this.db.deleteUIState('treeView.expandedProjects');
     this.db.deleteUIState('treeView.expandedFolders');
     this.db.deleteUIState('treeView.sessionSortAscending');
+    this.db.deleteUIState(SIDEBAR_SECTION_KEYS.pinned);
+    this.db.deleteUIState(SIDEBAR_SECTION_KEYS.repositories);
   }
 }
 

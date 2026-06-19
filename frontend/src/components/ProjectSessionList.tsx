@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight, Plus, FolderPlus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, Pin, Monitor } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
@@ -25,6 +25,10 @@ import {
 
 interface ProjectSessionListProps {
   sessionSortAscending: boolean;
+  pinnedSectionExpanded: boolean;
+  repositoriesSectionExpanded: boolean;
+  onPinnedSectionExpandedChange: (expanded: boolean) => void;
+  onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -32,6 +36,10 @@ interface ProjectSessionListProps {
 
 export function ProjectSessionList({
   sessionSortAscending,
+  pinnedSectionExpanded,
+  repositoriesSectionExpanded,
+  onPinnedSectionExpandedChange,
+  onRepositoriesSectionExpandedChange,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -39,8 +47,7 @@ export function ProjectSessionList({
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForProject, setCreateForProject] = useState<Project | null>(null);
-  const [pinnedSectionExpanded, setPinnedSectionExpanded] = useState(true);
-  const [repositoriesSectionExpanded, setRepositoriesSectionExpanded] = useState(true);
+  const knownSessionIdsRef = useRef<Set<string> | null>(null);
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
@@ -50,6 +57,7 @@ export function ProjectSessionList({
   const [dragOverProjectId, setDragOverProjectId] = useState<number | null>(null);
 
   const sessions = useSessionStore(s => s.sessions);
+  const sessionsLoaded = useSessionStore(s => s.isLoaded);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
@@ -101,18 +109,40 @@ export function ProjectSessionList({
   // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
   // (always mounted in Sidebar), and new-project auto-expansion lives there too.
 
-  // Auto-expand the project that contains the active session
-  // (e.g., when a new session is created and auto-activated)
+  const persistExpandedProjects = useCallback((projectIds: number[]) => {
+    void window.electronAPI.uiState.saveExpandedProjects(projectIds).catch(error => {
+      console.error('Failed to save expanded projects:', error);
+    });
+  }, []);
+
+  // Auto-expand only for sessions created after the initial session list is known.
+  // Restoring the previously active session on app launch should not override
+  // the user's saved collapsed project preferences.
   useEffect(() => {
-    if (!activeSessionId) return;
-    const currentSessions = useSessionStore.getState().sessions;
-    const session = currentSessions.find(s => s.id === activeSessionId);
-    if (!session?.projectId) return;
-    expandProject(session.projectId);
-  }, [activeSessionId, expandProject]);
+    if (!sessionsLoaded) return;
+
+    const currentIds = new Set(sessions.map(session => session.id));
+    const previousIds = knownSessionIdsRef.current;
+
+    if (!previousIds) {
+      knownSessionIdsRef.current = currentIds;
+      return;
+    }
+
+    if (activeSessionId && !previousIds.has(activeSessionId)) {
+      const session = sessions.find(item => item.id === activeSessionId);
+      if (session?.projectId) {
+        const expandedProjectIds = expandProject(session.projectId);
+        if (expandedProjectIds) persistExpandedProjects(expandedProjectIds);
+      }
+    }
+
+    knownSessionIdsRef.current = currentIds;
+  }, [activeSessionId, expandProject, persistExpandedProjects, sessions, sessionsLoaded]);
 
   const toggleProject = (id: number) => {
-    toggleProjectExpanded(id);
+    const expandedProjectIds = toggleProjectExpanded(id);
+    persistExpandedProjects(expandedProjectIds);
   };
 
   const handleSessionClick = (sessionId: string, scope: SidebarNavigationScope = 'repositories') => {
@@ -251,7 +281,7 @@ export function ProjectSessionList({
           <>
             <button
               type="button"
-              onClick={() => setPinnedSectionExpanded(expanded => !expanded)}
+              onClick={() => onPinnedSectionExpandedChange(!pinnedSectionExpanded)}
               className="group/section mt-2 flex w-full items-center gap-1.5 px-3 pt-1 pb-1 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
             >
               <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
@@ -285,7 +315,7 @@ export function ProjectSessionList({
         <div className="mt-2 px-3 pt-1 pb-1 flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={() => setRepositoriesSectionExpanded(expanded => !expanded)}
+            onClick={() => onRepositoriesSectionExpandedChange(!repositoriesSectionExpanded)}
             className="group/section flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
           >
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
