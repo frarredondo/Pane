@@ -166,7 +166,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     skipValidation: true,
   });
   const gitDiffManager = new GitDiffManager(logger, analyticsManager);
-  const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger);
+  const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);

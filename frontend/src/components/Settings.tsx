@@ -157,6 +157,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
   const [usePtyHost, setUsePtyHost] = useState(false);
   const [initialUsePtyHost, setInitialUsePtyHost] = useState(false);
   const [terminalPowerMode, setTerminalPowerMode] = useState<PreferredTerminalPowerMode>('performance');
+  const [initialTerminalPowerMode, setInitialTerminalPowerMode] = useState<PreferredTerminalPowerMode>('performance');
   const [additionalPathsText, setAdditionalPathsText] = useState('');
   const [platform, setPlatform] = useState<string>('darwin');
   const [enableCommitFooter, setEnableCommitFooter] = useState(true);
@@ -285,7 +286,11 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
       setDevMode(data.devMode || false);
       setUsePtyHost(data.usePtyHost === true);
       setInitialUsePtyHost(data.usePtyHost === true);
-      setTerminalPowerMode(data.terminalPowerMode === 'batterySaver' ? 'batterySaver' : 'performance');
+      {
+        const loadedTerminalPowerMode = data.terminalPowerMode === 'batterySaver' ? 'batterySaver' : 'performance';
+        setTerminalPowerMode(loadedTerminalPowerMode);
+        setInitialTerminalPowerMode(loadedTerminalPowerMode);
+      }
       setClaudeExecutablePath(data.claudeExecutablePath || '');
       setEnableCommitFooter(data.enableCommitFooter !== false); // Default to true
       setManagedAgentsMd(data.agentContext?.managedAgentsMd !== false); // Default to true
@@ -2808,7 +2813,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
                     >
                       <div className="text-sm font-medium">Performance</div>
                       <div className="text-xs text-text-tertiary mt-1">
-                        Keep mounted terminals live for best scrollback and instant resume. Uses more battery.
+                        Keep mounted terminals live and let Electron or the OS choose the best GPU. Uses more battery.
                       </div>
                     </button>
                     <button
@@ -2822,10 +2827,15 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
                     >
                       <div className="text-sm font-medium">Battery Saver</div>
                       <div className="text-xs text-text-tertiary mt-1">
-                        Suspend inactive or unfocused terminal rendering. May replay scrollback when shown.
+                        Suspend inactive rendering and prefer the low-power GPU where available. Large workspaces may take longer to refresh after startup.
                       </div>
                     </button>
                   </div>
+                  {terminalPowerMode !== initialTerminalPowerMode && (
+                    <p className="text-xs text-status-warning mt-2">
+                      Restart Pane for the GPU preference change to take effect.
+                    </p>
+                  )}
                 </div>
               </SettingsSection>
 
