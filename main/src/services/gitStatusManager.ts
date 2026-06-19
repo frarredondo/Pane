@@ -5,6 +5,7 @@ import type { SessionManager } from './sessionManager';
 import type { WorktreeManager } from './worktreeManager';
 import type { GitDiffManager } from './gitDiffManager';
 import type { CommandRunner } from '../utils/commandRunner';
+import type { DatabaseService } from '../database/database';
 import { GitStatusLogger } from './gitStatusLogger';
 import { GitFileWatcher } from './gitFileWatcher';
 import { fastCheckWorkingDirectory, fastGetAheadBehind, fastGetDiffStats } from './gitPlumbingCommands';
@@ -44,6 +45,7 @@ export class GitStatusManager extends EventEmitter {
   private isInitialLoadInProgress = false;
   private initialLoadQueue: string[] = [];
   private readonly INITIAL_LOAD_DELAY_MS = 200; // Increased to 200ms for better staggering
+  private readonly INITIAL_LOAD_JITTER_MS = 2500;
 
   // Track active session and window visibility for optimized refreshes
   private activeSessionId: string | null = null;
@@ -53,12 +55,17 @@ export class GitStatusManager extends EventEmitter {
   private prCache = new Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>();
   private readonly PR_HIT_CACHE_TTL = 2.5 * 60 * 1000;
   private readonly PR_MISS_CACHE_TTL = 20 * 1000;
+  private readonly PR_ENRICHMENT_JITTER_MS = 10_000;
+  private readonly MAX_CONCURRENT_PR_ENRICHMENT = 1;
+  private activePrEnrichmentOperations = 0;
+  private prEnrichmentTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(
     private sessionManager: SessionManager,
     private worktreeManager: WorktreeManager,
     private gitDiffManager: GitDiffManager,
-    private logger?: Logger
+    private logger?: Logger,
+    private databaseService?: DatabaseService
   ) {
     super();
     // Increase max listeners to prevent warnings when many components listen to git status events
@@ -75,6 +82,35 @@ export class GitStatusManager extends EventEmitter {
         this.logger?.error(`[GitStatus] Failed to refresh after file change for session ${sessionId}:`, error);
       });
     });
+
+    this.hydratePersistentCache();
+  }
+
+  private hydratePersistentCache(): void {
+    if (!this.databaseService) return;
+
+    try {
+      const cachedStatuses = this.databaseService.getAllSessionGitStatusCache();
+      for (const cached of cachedStatuses) {
+        this.cache[cached.sessionId] = {
+          status: cached.gitStatus,
+          lastChecked: cached.lastChecked,
+        };
+      }
+      if (cachedStatuses.length > 0) {
+        this.logger?.info(`[GitStatus] Hydrated ${cachedStatuses.length} cached git statuses`);
+      }
+    } catch (error) {
+      this.logger?.error('[GitStatus] Failed to hydrate persisted git status cache:', error as Error);
+    }
+  }
+
+  private persistCachedStatus(sessionId: string, status: GitStatus, lastChecked: number): void {
+    try {
+      this.databaseService?.saveSessionGitStatusCache(sessionId, status, lastChecked);
+    } catch (error) {
+      this.logger?.error(`[GitStatus] Failed to persist status cache for ${sessionId}:`, error as Error);
+    }
   }
 
 
@@ -159,6 +195,9 @@ export class GitStatusManager extends EventEmitter {
       this.eventThrottleTimer = null;
     }
     this.pendingEvents.clear();
+
+    this.prEnrichmentTimers.forEach(timer => clearTimeout(timer));
+    this.prEnrichmentTimers.clear();
     
     // Cancel all active operations
     this.abortControllers.forEach(controller => controller.abort());
@@ -412,7 +451,7 @@ export class GitStatusManager extends EventEmitter {
             const cached = this.cache[sessionId]?.status || null;
             if (cached) {
               this.emitThrottled(sessionId, 'updated', cached);
-              this.enrichWithPrData(sessionId);
+              this.schedulePrEnrichment(sessionId);
             }
             resolve(cached);
             return;
@@ -423,7 +462,7 @@ export class GitStatusManager extends EventEmitter {
         if (status) {
           this.updateCache(sessionId, status);
           this.emitThrottled(sessionId, 'updated', status);
-          this.enrichWithPrData(sessionId);
+          this.schedulePrEnrichment(sessionId, isUserInitiated);
         }
         resolve(status);
       }, this.DEBOUNCE_MS);
@@ -443,11 +482,14 @@ export class GitStatusManager extends EventEmitter {
       return cached.status;
     }
 
-    // Add to initial load queue if not already there
+    // Add to initial load queue if not already there. Return stale status
+    // immediately so startup can render from the persisted cache while the
+    // authoritative refresh happens in the background.
     if (!this.initialLoadQueue.includes(sessionId)) {
       this.initialLoadQueue.push(sessionId);
-      // Show loading immediately for this session
-      this.emitThrottled(sessionId, 'loading');
+      if (!cached) {
+        this.emitThrottled(sessionId, 'loading');
+      }
     }
 
     // Start processing queue if not already running
@@ -478,11 +520,19 @@ export class GitStatusManager extends EventEmitter {
       const promises = batch.map(sessionId => 
         this.executeWithLimit(async () => {
           try {
+            if (sessionId !== this.activeSessionId) {
+              await new Promise(resolve => setTimeout(
+                resolve,
+                Math.floor(Math.random() * this.INITIAL_LOAD_JITTER_MS),
+              ));
+            }
             const status = await this.fetchGitStatus(sessionId);
             if (status) {
               this.updateCache(sessionId, status);
               this.emitThrottled(sessionId, 'updated', status);
-              this.enrichWithPrData(sessionId);
+              if (sessionId === this.activeSessionId) {
+                this.schedulePrEnrichment(sessionId, true);
+              }
             }
           } catch (error) {
             this.logger?.error(`[GitStatus] Error fetching status for session ${sessionId}:`, error as Error);
@@ -580,50 +630,63 @@ export class GitStatusManager extends EventEmitter {
     return worktreePath.replace(/\\/g, '/').split('/').pop() || null;
   }
 
-  private enrichWithPrData(sessionId: string): void {
-    setImmediate(async () => {
-      try {
-        const session = await this.sessionManager.getSession(sessionId);
-        if (!session?.worktreePath) return;
+  private schedulePrEnrichment(sessionId: string, immediate = false): void {
+    if (this.prEnrichmentTimers.has(sessionId)) return;
 
-        const project = this.sessionManager.getProjectForSession(sessionId);
-        if (!project?.path) return;
+    const jitter = immediate || sessionId === this.activeSessionId
+      ? 0
+      : Math.floor(Math.random() * this.PR_ENRICHMENT_JITTER_MS);
 
-        const ctx = this.sessionManager.getProjectContext(sessionId);
-        if (!ctx) return;
+    const timer = setTimeout(() => {
+      this.prEnrichmentTimers.delete(sessionId);
+      this.executePrEnrichmentWithLimit(() => this.enrichWithPrData(sessionId)).catch(() => {
+        // PR enrichment is best-effort; fetchPrForSession records misses in cache.
+      });
+    }, jitter);
 
-        const branchName = this.getCurrentBranchName(session.worktreePath, ctx.commandRunner);
-        if (!branchName) return;
+    this.prEnrichmentTimers.set(sessionId, timer);
+  }
 
-        const prData = await this.fetchPrForSession(branchName, project.path, ctx.commandRunner);
+  private async enrichWithPrData(sessionId: string): Promise<void> {
+    const session = await this.sessionManager.getSession(sessionId);
+    if (!session?.worktreePath) return;
 
-        if (prData.prNumber !== undefined) {
-          const currentStatus = this.cache[sessionId]?.status;
-          if (currentStatus && (
-            currentStatus.prNumber !== prData.prNumber ||
-            currentStatus.prState !== prData.prState ||
-            currentStatus.prTitle !== prData.prTitle ||
-            currentStatus.prBody !== prData.prBody
-          )) {
-            const enrichedStatus = {
-              ...currentStatus,
-              prNumber: prData.prNumber,
-              prUrl: prData.prUrl,
-              prTitle: prData.prTitle,
-              prState: prData.prState,
-              prBody: prData.prBody
-            };
-            this.cache[sessionId] = {
-              status: enrichedStatus,
-              lastChecked: this.cache[sessionId].lastChecked
-            };
-            this.emit('git-status-updated', sessionId, enrichedStatus);
-          }
-        }
-      } catch {
-        // Silent — PR enrichment is best-effort
+    const project = this.sessionManager.getProjectForSession(sessionId);
+    if (!project?.path) return;
+
+    const ctx = this.sessionManager.getProjectContext(sessionId);
+    if (!ctx) return;
+
+    const branchName = this.getCurrentBranchName(session.worktreePath, ctx.commandRunner);
+    if (!branchName) return;
+
+    const prData = await this.fetchPrForSession(branchName, project.path, ctx.commandRunner);
+
+    if (prData.prNumber !== undefined) {
+      const currentStatus = this.cache[sessionId]?.status;
+      if (currentStatus && (
+        currentStatus.prNumber !== prData.prNumber ||
+        currentStatus.prState !== prData.prState ||
+        currentStatus.prTitle !== prData.prTitle ||
+        currentStatus.prBody !== prData.prBody
+      )) {
+        const enrichedStatus = {
+          ...currentStatus,
+          prNumber: prData.prNumber,
+          prUrl: prData.prUrl,
+          prTitle: prData.prTitle,
+          prState: prData.prState,
+          prBody: prData.prBody
+        };
+        const lastChecked = this.cache[sessionId].lastChecked;
+        this.cache[sessionId] = {
+          status: enrichedStatus,
+          lastChecked
+        };
+        this.persistCachedStatus(sessionId, enrichedStatus, lastChecked);
+        this.emit('git-status-updated', sessionId, enrichedStatus);
       }
-    });
+    }
   }
 
   /**
@@ -910,11 +973,13 @@ export class GitStatusManager extends EventEmitter {
   private updateCache(sessionId: string, status: GitStatus): void {
     const previousStatus = this.cache[sessionId]?.status;
     const hasChanged = !previousStatus || JSON.stringify(previousStatus) !== JSON.stringify(status);
+    const lastChecked = Date.now();
     
     this.cache[sessionId] = {
       status,
-      lastChecked: Date.now()
+      lastChecked
     };
+    this.persistCachedStatus(sessionId, status, lastChecked);
 
     // Only emit event if status actually changed
     if (hasChanged) {
@@ -946,6 +1011,18 @@ export class GitStatusManager extends EventEmitter {
       this.abortControllers.delete(sessionId);
     }
 
+    const prTimer = this.prEnrichmentTimers.get(sessionId);
+    if (prTimer) {
+      clearTimeout(prTimer);
+      this.prEnrichmentTimers.delete(sessionId);
+    }
+
+    try {
+      this.databaseService?.deleteSessionGitStatusCache(sessionId);
+    } catch (error) {
+      this.logger?.error(`[GitStatus] Failed to delete persisted status cache for ${sessionId}:`, error as Error);
+    }
+
     // L3: stop the file watcher for this session. No-op for
     // non-active sessions (they never had a watcher started).
     this.fileWatcher.stopWatching(sessionId);
@@ -956,6 +1033,13 @@ export class GitStatusManager extends EventEmitter {
    */
   clearAllCache(): void {
     this.cache = {};
+    this.prEnrichmentTimers.forEach(timer => clearTimeout(timer));
+    this.prEnrichmentTimers.clear();
+    try {
+      this.databaseService?.clearSessionGitStatusCache();
+    } catch (error) {
+      this.logger?.error('[GitStatus] Failed to clear persisted status cache:', error as Error);
+    }
   }
 
   /**
@@ -1033,6 +1117,19 @@ export class GitStatusManager extends EventEmitter {
           });
         }
       }
+    }
+  }
+
+  private async executePrEnrichmentWithLimit<T>(operation: () => Promise<T>): Promise<T> {
+    while (this.activePrEnrichmentOperations >= this.MAX_CONCURRENT_PR_ENRICHMENT) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+
+    this.activePrEnrichmentOperations++;
+    try {
+      return await operation();
+    } finally {
+      this.activePrEnrichmentOperations--;
     }
   }
 }

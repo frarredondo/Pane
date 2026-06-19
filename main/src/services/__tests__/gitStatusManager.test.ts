@@ -9,6 +9,7 @@ import type { Logger } from '../../utils/logger';
 import type { GitStatus } from '../../types/session';
 import type { GitIndexStatus } from '../gitPlumbingCommands';
 import type { CommandRunner } from '../../utils/commandRunner';
+import type { DatabaseService } from '../../database/database';
 
 // Type for accessing private members in tests
 interface GitStatusManagerPrivates {
@@ -18,7 +19,8 @@ interface GitStatusManagerPrivates {
     projectPath: string,
     commandRunner: CommandRunner
   ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }>;
-  enrichWithPrData(sessionId: string): void;
+  enrichWithPrData(sessionId: string): Promise<void>;
+  updateCache(sessionId: string, status: GitStatus): void;
   cache: Record<string, { status: GitStatus; lastChecked: number }>;
   prCache: Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>;
   activeSessionId: string | null;
@@ -80,6 +82,18 @@ describe('GitStatusManager', () => {
   let mockWorktreeManager: WorktreeManager;
   let mockGitDiffManager: GitDiffManager;
   let mockLogger: Logger;
+  let mockDatabaseService: Partial<Pick<
+    DatabaseService,
+    'getAllSessionGitStatusCache' |
+    'saveSessionGitStatusCache' |
+    'deleteSessionGitStatusCache' |
+    'clearSessionGitStatusCache'
+  >> & {
+    getAllSessionGitStatusCache: Mock;
+    saveSessionGitStatusCache: Mock;
+    deleteSessionGitStatusCache: Mock;
+    clearSessionGitStatusCache: Mock;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,11 +120,19 @@ describe('GitStatusManager', () => {
       verbose: vi.fn(),
     } as Partial<Logger> as Logger;
 
+    mockDatabaseService = {
+      getAllSessionGitStatusCache: vi.fn().mockReturnValue([]),
+      saveSessionGitStatusCache: vi.fn(),
+      deleteSessionGitStatusCache: vi.fn(),
+      clearSessionGitStatusCache: vi.fn(),
+    };
+
     gitStatusManager = new GitStatusManager(
       mockSessionManager,
       mockWorktreeManager,
       mockGitDiffManager,
-      mockLogger
+      mockLogger,
+      mockDatabaseService as DatabaseService
     );
 
     // Default: no uncommitted changes, no ahead/behind
@@ -315,6 +337,42 @@ describe('GitStatusManager', () => {
     });
   });
 
+  describe('persistent cache', () => {
+    it('hydrates cached statuses from the database on construction', () => {
+      const cachedStatus: GitStatus = { state: 'ahead', ahead: 1, lastChecked: '2026-01-01T00:00:00.000Z' };
+      mockDatabaseService.getAllSessionGitStatusCache.mockReturnValue([
+        { sessionId: 'cached-session', gitStatus: cachedStatus, lastChecked: 1234 },
+      ]);
+
+      const manager = new GitStatusManager(
+        mockSessionManager,
+        mockWorktreeManager,
+        mockGitDiffManager,
+        mockLogger,
+        mockDatabaseService as DatabaseService,
+      );
+      const privates = manager as unknown as GitStatusManagerPrivates;
+
+      expect(privates.cache['cached-session']).toEqual({
+        status: cachedStatus,
+        lastChecked: 1234,
+      });
+    });
+
+    it('persists successful cache updates', () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      const status: GitStatus = { state: 'modified', hasUncommittedChanges: true };
+
+      privates.updateCache('test-session', status);
+
+      expect(mockDatabaseService.saveSessionGitStatusCache).toHaveBeenCalledWith(
+        'test-session',
+        status,
+        expect.any(Number),
+      );
+    });
+  });
+
   describe('PR enrichment', () => {
     it('caches PR misses for 20 seconds', async () => {
       const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
@@ -402,7 +460,7 @@ describe('GitStatusManager', () => {
       const updated = new Promise<GitStatus>((resolve) => {
         gitStatusManager.once('git-status-updated', (_sessionId, status) => resolve(status));
       });
-      privates.enrichWithPrData('test-session');
+      void privates.enrichWithPrData('test-session');
       const status = await updated;
 
       expect(mockProjectContext.commandRunner.exec).toHaveBeenCalledWith(

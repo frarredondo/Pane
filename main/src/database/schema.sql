@@ -49,9 +49,19 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- Derived git status cache for fast startup rendering.
+CREATE TABLE IF NOT EXISTS session_git_status_cache (
+  session_id TEXT PRIMARY KEY,
+  status_json TEXT NOT NULL,
+  last_checked_ms INTEGER NOT NULL,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
 -- Index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_session_outputs_session_id ON session_outputs(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_outputs_timestamp ON session_outputs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_session_id ON conversation_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_timestamp ON conversation_messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
+CREATE INDEX IF NOT EXISTS idx_session_git_status_cache_updated_at ON session_git_status_cache(updated_at);

@@ -21,6 +21,7 @@ import type {
   ToolPanelState,
   ToolPanelMetadata,
 } from "../../../shared/types/panels";
+import type { GitStatus } from "../types/session";
 
 // Interface for legacy claude_panel_settings during migration
 interface ClaudePanelSetting {
@@ -61,6 +62,12 @@ interface ExecutionDiffRow {
   after_commit_hash?: string;
   commit_message?: string;
   timestamp: string;
+}
+
+interface SessionGitStatusCacheRow {
+  session_id: string;
+  status_json: string;
+  last_checked_ms: number;
 }
 
 const DEBUG_DB_PANEL_STATE = process.env.PANE_DEBUG_DB_PANEL_STATE === "1";
@@ -2886,6 +2893,67 @@ export class DatabaseService {
         "SELECT * FROM sessions WHERE (archived = 0 OR archived IS NULL) AND (is_main_repo = 0 OR is_main_repo IS NULL) ORDER BY display_order ASC, created_at DESC",
       )
       .all() as Session[];
+  }
+
+  getAllSessionGitStatusCache(): Array<{ sessionId: string; gitStatus: GitStatus; lastChecked: number }> {
+    const rows = this.db
+      .prepare("SELECT session_id, status_json, last_checked_ms FROM session_git_status_cache")
+      .all() as SessionGitStatusCacheRow[];
+
+    return rows.flatMap((row) => {
+      try {
+        return [{
+          sessionId: row.session_id,
+          gitStatus: JSON.parse(row.status_json) as GitStatus,
+          lastChecked: row.last_checked_ms,
+        }];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  getSessionGitStatusCache(sessionId: string): { gitStatus: GitStatus; lastChecked: number } | null {
+    const row = this.db
+      .prepare("SELECT status_json, last_checked_ms FROM session_git_status_cache WHERE session_id = ?")
+      .get(sessionId) as Pick<SessionGitStatusCacheRow, "status_json" | "last_checked_ms"> | undefined;
+
+    if (!row) return null;
+
+    try {
+      return {
+        gitStatus: JSON.parse(row.status_json) as GitStatus,
+        lastChecked: row.last_checked_ms,
+      };
+    } catch {
+      this.deleteSessionGitStatusCache(sessionId);
+      return null;
+    }
+  }
+
+  saveSessionGitStatusCache(sessionId: string, gitStatus: GitStatus, lastChecked = Date.now()): void {
+    this.db
+      .prepare(
+        `
+        INSERT INTO session_git_status_cache (session_id, status_json, last_checked_ms, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(session_id) DO UPDATE SET
+          status_json = excluded.status_json,
+          last_checked_ms = excluded.last_checked_ms,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      )
+      .run(sessionId, JSON.stringify(gitStatus), lastChecked);
+  }
+
+  deleteSessionGitStatusCache(sessionId: string): void {
+    this.db
+      .prepare("DELETE FROM session_git_status_cache WHERE session_id = ?")
+      .run(sessionId);
+  }
+
+  clearSessionGitStatusCache(): void {
+    this.db.prepare("DELETE FROM session_git_status_cache").run();
   }
 
   getAllSessionsIncludingArchived(): Session[] {

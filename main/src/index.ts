@@ -2,6 +2,9 @@
 import './polyfills/readablestream';
 
 import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg } from './utils/runtimeMode';
+import { getAppDirectory } from './utils/appDirectory';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 const launchHeadlessDaemon = hasHeadlessDaemonLaunchArg();
 const launchRemoteSetup = hasRemoteSetupLaunchArg();
@@ -9,6 +12,20 @@ const launchRemoteSetup = hasRemoteSetupLaunchArg();
 // Fix GTK 2/3 and GTK 4 conflict on Linux (Electron 36 issue)
 // This MUST be done before importing electron
 import { app } from 'electron';
+
+function getStartupTerminalPowerMode(): 'performance' | 'batterySaver' {
+  try {
+    const rawConfig = JSON.parse(
+      readFileSync(join(getAppDirectory(), 'config.json'), 'utf-8'),
+    ) as { terminalPowerMode?: unknown };
+
+    return rawConfig.terminalPowerMode === 'batterySaver'
+      ? 'batterySaver'
+      : 'performance';
+  } catch {
+    return 'performance';
+  }
+}
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('gtk-version', '3');
@@ -21,8 +38,9 @@ if (process.platform === 'linux') {
   }
 }
 
-// Force integrated GPU for better battery life on dual-GPU systems
-app.commandLine.appendSwitch('force_low_power_gpu');
+if (getStartupTerminalPowerMode() === 'batterySaver') {
+  app.commandLine.appendSwitch('force_low_power_gpu');
+}
 
 // Set Windows AUMID to match electron-builder's appId so Windows resolves
 // the installed Start Menu shortcut for notification icon and display name.
@@ -46,7 +64,7 @@ import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
-import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory, getAppDirectory } from './utils/appDirectory';
+import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import { getCloudVmManager } from './ipc/cloud';
