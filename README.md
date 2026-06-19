@@ -25,34 +25,18 @@
 
 **Quick install (recommended)**
 
-<pre><code>npx --yes runpane@latest</code></pre>
+<sub>Mac / Linux</sub><br />
+<pre><code>curl -fsSL https://runpane.com/install.sh | sh</code></pre>
 
-<sub>Opens a guided setup for desktop install, remote host setup, updates, and diagnostics.</sub>
+<sub>Windows (PowerShell)</sub><br />
+<pre><code>irm https://runpane.com/install.ps1 | iex</code></pre>
+
+<sub><em>Bypasses the macOS Gatekeeper / Windows SmartScreen prompts on direct downloads.</em></sub>
 
 <br />
 <br />
 
-<details>
-<summary><sub>Other install methods: pnpm, pipx, shell, and direct downloads</sub></summary>
-<br />
-
-<pre><code># pnpm one-shot
-pnpm dlx runpane@latest
-
-# Python tools one-shot
-pipx run runpane
-
-# Persistent npm install
-npm i -g runpane
-runpane setup
-
-# Mac / Linux shell installer
-curl -fsSL https://runpane.com/install.sh | sh
-
-# Windows PowerShell installer
-irm https://runpane.com/install.ps1 | iex</code></pre>
-
-<sub>Prefer a normal app installer?</sub><br />
+<sub>or download the installer directly</sub><br />
 <br />
 
 <a href="https://runpane.com/api/download?platform=mac&source=readme">
@@ -64,6 +48,26 @@ irm https://runpane.com/install.ps1 | iex</code></pre>
 <a href="https://runpane.com/api/download?platform=linux&source=readme">
   <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux">
 </a>
+
+<br />
+<br />
+
+<details>
+<summary><sub>Other install methods: npx, pnpm, and pipx</sub></summary>
+<br />
+
+<pre><code># Guided setup via npm
+npx --yes runpane@latest
+
+# pnpm one-shot
+pnpm dlx runpane@latest
+
+# Python tools one-shot
+pipx run runpane
+
+# Persistent npm install
+npm i -g runpane
+runpane setup</code></pre>
 
 </details>
 
