@@ -47,6 +47,9 @@ export interface ParsedArgs {
   waitCondition?: string;
   contains?: string;
   intervalMs?: number;
+  source?: string;
+  noFocus?: boolean;
+  composerStrategy?: string;
   remoteSetupArgs: string[];
 }
 
@@ -232,6 +235,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.waitReady = true;
     return;
   }
+  if (flag === '--no-focus') {
+    parsed.noFocus = true;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -355,6 +362,20 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.intervalMs = intervalMs;
     return;
   }
+  if (flag === '--source') {
+    if (!['user', 'agent'].includes(value)) {
+      throw new Error('--source must be one of: user, agent.');
+    }
+    parsed.source = value;
+    return;
+  }
+  if (flag === '--strategy') {
+    if (!['auto', 'codex-ctrl-enter', 'enter'].includes(value)) {
+      throw new Error('--strategy must be one of: auto, codex-ctrl-enter, enter.');
+    }
+    parsed.composerStrategy = value;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -365,11 +386,13 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'repos add'
     || command === 'panes list'
     || command === 'panes create'
+    || command === 'panels create'
     || command === 'panels list'
     || command === 'panels output'
     || command === 'panels input'
     || command === 'panels screen'
     || command === 'panels submit'
+    || command === 'panels submit-composer'
     || command === 'panels wait'
     || command === 'agents doctor';
 }

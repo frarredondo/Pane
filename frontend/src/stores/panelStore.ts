@@ -37,6 +37,8 @@ export const usePanelStore = create<PanelStore>()(
         const existing = state.panels[panel.sessionId].find((p: ToolPanel) => p.id === panel.id);
         if (!existing) {
           state.panels[panel.sessionId].push(panel);
+        }
+        if (panel.state.isActive) {
           state.activePanels[panel.sessionId] = panel.id;
         }
       });

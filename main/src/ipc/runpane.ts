@@ -11,7 +11,7 @@ import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/te
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
-import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type {
   RunpaneAgentId,
@@ -27,6 +27,8 @@ import type {
   RunpanePaneCreateResultItem,
   RunpanePaneReadiness,
   RunpanePanelBlockedState,
+  RunpanePanelCreateRequest,
+  RunpanePanelCreateResult,
   RunpanePanelInputRequest,
   RunpanePanelInputResult,
   RunpanePanelListRequest,
@@ -38,6 +40,9 @@ import type {
   RunpanePanelScreenResult,
   RunpanePanelScreenSource,
   RunpanePanelStateSummary,
+  RunpanePanelSubmitComposerRequest,
+  RunpanePanelSubmitComposerResult,
+  RunpanePanelSubmitComposerStrategy,
   RunpanePanelSubmitRequest,
   RunpanePanelSubmitResult,
   RunpanePanelWaitCondition,
@@ -58,11 +63,13 @@ const RUNPANE_CHANNELS = [
   'runpane:repos:add',
   'runpane:panes:list',
   'runpane:panes:create',
+  'runpane:panels:create',
   'runpane:panels:list',
   'runpane:panels:output',
   'runpane:panels:input',
   'runpane:panels:screen',
   'runpane:panels:submit',
+  'runpane:panels:submit-composer',
   'runpane:panels:wait',
   'runpane:agents:doctor',
 ] as const;
@@ -265,6 +272,35 @@ export function registerRunpaneHandlers(
     }, result => ({ paneId: result.paneId, resultCount: result.panels.length }));
   });
 
+  commandRegistry.register('runpane:panels:create', async (request: unknown): Promise<RunpanePanelCreateResult> => {
+    return withRunpaneAction(services, 'panels:create', {}, async () => {
+      const normalized = parsePanelCreateRequest(request);
+      const pane = resolvePane(sessionManager, normalized.paneId);
+      const tool = resolveToolSpec(normalized.tool);
+      const { panel, readiness } = await createTerminalPanelForSession(services, pane, tool, {
+        activate: !(normalized.noFocus || normalized.source === 'agent'),
+        waitReady: normalized.waitReady,
+        readyTimeoutMs: normalized.readyTimeoutMs,
+      });
+
+      return {
+        ok: !readiness || readiness.ok,
+        paneId: pane.id,
+        panelId: panel.id,
+        title: panel.title,
+        active: Boolean(panel.state.isActive),
+        tool: describeTool(tool),
+        readiness,
+        nextCommand: readiness?.nextCommand ?? panelOutputCommand(panel.id),
+      };
+    }, result => ({
+      paneId: result.paneId,
+      panelId: result.panelId,
+      ok: result.ok,
+      resultCount: 1,
+    }));
+  });
+
   commandRegistry.register('runpane:panels:output', async (request: unknown): Promise<RunpanePanelOutputResult> => {
     return withRunpaneAction(services, 'panels:output', {}, () => {
       const normalized = parsePanelOutputRequest(request);
@@ -383,6 +419,34 @@ export function registerRunpaneHandlers(
     }));
   });
 
+  commandRegistry.register('runpane:panels:submit-composer', async (request: unknown): Promise<RunpanePanelSubmitComposerResult> => {
+    return withRunpaneAction(services, 'panels:submit-composer', {}, () => {
+      const normalized = parsePanelSubmitComposerRequest(request);
+      const panel = resolveTerminalPanel(normalized.panelId);
+      if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
+        throw new Error(`Terminal panel ${panel.id} is not initialized`);
+      }
+
+      const state = panelStateSummary(panel, terminalPanelManager.getTerminalSnapshot(panel.id));
+      const submit = resolveComposerSubmit(normalized.strategy, state.agentType);
+      terminalPanelManager.writeToTerminal(panel.id, submit.input);
+
+      return {
+        ok: true,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: Buffer.byteLength(submit.input, 'utf8'),
+        strategy: submit.strategy,
+        sentAt: new Date().toISOString(),
+        nextCommand: panelWaitCommand(panel.id),
+      };
+    }, result => ({
+      paneId: result.paneId,
+      panelId: result.panelId,
+      inputBytes: result.inputBytes,
+    }));
+  });
+
   commandRegistry.register('runpane:panels:wait', async (request: unknown): Promise<RunpanePanelWaitResult> => {
     return withRunpaneAction(services, 'panels:wait', {}, async () => {
       const normalized = parsePanelWaitRequest(request);
@@ -475,6 +539,60 @@ interface PaneCreateItemOptions {
   readyTimeoutMs?: number;
 }
 
+interface TerminalPanelCreateOptions {
+  activate?: boolean;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+}
+
+interface TerminalPanelCreateResult {
+  panel: ToolPanel;
+  readiness?: RunpanePaneReadiness;
+}
+
+async function createTerminalPanelForSession(
+  services: AppServices,
+  session: Session,
+  tool: RunpaneResolvedTool,
+  options: TerminalPanelCreateOptions,
+): Promise<TerminalPanelCreateResult> {
+  const initialState: TerminalPanelState = {
+    initialCommand: tool.command,
+    initialInput: tool.initialInput,
+    agentType: tool.agent,
+    isCliPanel: Boolean(tool.agent),
+  };
+
+  const createRequest: CreatePanelRequest = {
+    sessionId: session.id,
+    type: 'terminal',
+    title: tool.title,
+    initialState,
+  };
+  if (options.activate === false) {
+    createRequest.activate = false;
+  }
+
+  const panel = await panelManager.createPanel(createRequest);
+  const context = services.sessionManager.getProjectContext(session.id);
+  await terminalPanelManager.initializeTerminal(
+    panel,
+    session.worktreePath,
+    context?.commandRunner.wslContext ?? null,
+  );
+
+  const readiness = options.waitReady
+    ? toPaneReadiness(await waitForPanel(panel, {
+      panelId: panel.id,
+      condition: 'ready',
+      timeoutMs: options.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
+      intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
+    }))
+    : undefined;
+
+  return { panel, readiness };
+}
+
 async function createPaneItem(
   services: AppServices,
   repo: Project,
@@ -502,35 +620,10 @@ async function createPaneItem(
       throw new Error(`Created session ${sessionResult.sessionId} was not found`);
     }
 
-    const initialState: TerminalPanelState = {
-      initialCommand: tool.command,
-      initialInput: tool.initialInput,
-      agentType: tool.agent,
-      isCliPanel: Boolean(tool.agent),
-    };
-
-    const panel = await panelManager.createPanel({
-      sessionId: session.id,
-      type: 'terminal',
-      title: tool.title,
-      initialState,
+    const { panel, readiness } = await createTerminalPanelForSession(services, session, tool, {
+      waitReady: options.waitReady,
+      readyTimeoutMs: options.readyTimeoutMs,
     });
-
-    const context = sessionManager.getProjectContext(session.id);
-    await terminalPanelManager.initializeTerminal(
-      panel,
-      session.worktreePath,
-      context?.commandRunner.wslContext ?? null,
-    );
-
-    const readiness = options.waitReady
-      ? toPaneReadiness(await waitForPanel(panel, {
-        panelId: panel.id,
-        condition: 'ready',
-        timeoutMs: options.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
-        intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
-      }))
-      : undefined;
 
     return {
       ok: true,
@@ -805,6 +898,23 @@ function ensureSubmitEnter(input: string): string {
   return `${input}\r`;
 }
 
+function resolveComposerSubmit(
+  strategy: RunpanePanelSubmitComposerStrategy | undefined,
+  agentType: RunpaneAgentId | undefined,
+): { strategy: 'codex-ctrl-enter' | 'enter'; input: string } {
+  if (strategy === 'codex-ctrl-enter' || ((!strategy || strategy === 'auto') && agentType === 'codex')) {
+    return {
+      strategy: 'codex-ctrl-enter',
+      input: '\x1b[13;5u',
+    };
+  }
+
+  return {
+    strategy: 'enter',
+    input: '\r',
+  };
+}
+
 async function runAgentDoctor(
   services: AppServices,
   repo: Project,
@@ -1019,6 +1129,33 @@ function parsePanelListRequest(value: unknown): RunpanePanelListRequest {
   return { paneId };
 }
 
+function parsePanelCreateRequest(value: unknown): RunpanePanelCreateRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel create request must be an object');
+  }
+
+  const paneId = optionalString(value.paneId)?.trim();
+  if (!paneId) {
+    throw new Error('Panel create request must include paneId');
+  }
+  if (value.type !== undefined && value.type !== 'terminal') {
+    throw new Error('Panel create request currently supports only type "terminal"');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Panel create source must be user or agent');
+  }
+
+  return {
+    paneId,
+    type: 'terminal',
+    tool: parseRunpaneToolSpec(value.tool, 'Panel create request'),
+    noFocus: typeof value.noFocus === 'boolean' ? value.noFocus : undefined,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    waitReady: typeof value.waitReady === 'boolean' ? value.waitReady : undefined,
+    readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
+  };
+}
+
 function parsePanelOutputRequest(value: unknown): RunpanePanelOutputRequest {
   if (!isRecord(value)) {
     throw new Error('Panel output request must be an object');
@@ -1086,6 +1223,30 @@ function parsePanelSubmitRequest(value: unknown): RunpanePanelSubmitRequest {
   return {
     panelId,
     input: value.input,
+  };
+}
+
+function parsePanelSubmitComposerRequest(value: unknown): RunpanePanelSubmitComposerRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel submit-composer request must be an object');
+  }
+
+  const panelId = optionalString(value.panelId)?.trim();
+  if (!panelId) {
+    throw new Error('Panel submit-composer request must include panelId');
+  }
+  if (
+    value.strategy !== undefined &&
+    value.strategy !== 'auto' &&
+    value.strategy !== 'codex-ctrl-enter' &&
+    value.strategy !== 'enter'
+  ) {
+    throw new Error('Panel submit-composer strategy must be auto, codex-ctrl-enter, or enter');
+  }
+
+  return {
+    panelId,
+    strategy: value.strategy as RunpanePanelSubmitComposerStrategy | undefined,
   };
 }
 
@@ -1190,7 +1351,7 @@ function parsePaneCreateItem(value: unknown, index: number): RunpanePaneCreateIt
     worktreeName: optionalString(value.worktreeName),
     baseBranch: optionalString(value.baseBranch),
     sessionPrompt: optionalString(value.sessionPrompt),
-    tool: parseToolSpec(value.tool, index),
+    tool: parseRunpaneToolSpec(value.tool, `Pane create item ${index}`),
   };
 }
 
@@ -1221,14 +1382,14 @@ function validateRepositoryPath(repoPath: string): void {
   }
 }
 
-function parseToolSpec(value: unknown, index: number): RunpaneToolSpec {
+function parseRunpaneToolSpec(value: unknown, label: string): RunpaneToolSpec {
   if (!isRecord(value)) {
-    throw new Error(`Pane create item ${index} must include a tool object`);
+    throw new Error(`${label} must include a tool object`);
   }
 
   if (typeof value.agent === 'string') {
     if (!AGENT_IDS.has(value.agent)) {
-      throw new Error(`Unsupported agent "${value.agent}" in pane create item ${index}`);
+      throw new Error(`Unsupported agent "${value.agent}" in ${label}`);
     }
     return {
       agent: value.agent as RunpaneAgentId,
@@ -1245,7 +1406,7 @@ function parseToolSpec(value: unknown, index: number): RunpaneToolSpec {
     };
   }
 
-  throw new Error(`Pane create item ${index} tool must include agent or command`);
+  throw new Error(`${label} tool must include agent or command`);
 }
 
 function parseRepoSelector(value: unknown): RunpaneRepoSelector {

@@ -210,6 +210,32 @@
       "--interval-ms",
       "500",
       "--json"
+    ],
+    [
+      "panels",
+      "create",
+      "--pane",
+      "pane-1",
+      "--agent",
+      "codex",
+      "--source",
+      "agent",
+      "--no-focus",
+      "--wait-ready",
+      "--ready-timeout-ms",
+      "15000",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
+      "submit-composer",
+      "--panel",
+      "panel-1",
+      "--strategy",
+      "auto",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {
