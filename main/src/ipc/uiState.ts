@@ -79,4 +79,23 @@ export function registerUIStateHandlers(services: AppServices) {
       };
     }
   });
+
+  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories', expanded: boolean) => {
+    try {
+      if (section !== 'pinned' && section !== 'repositories') {
+        throw new Error(`Invalid sidebar section: ${section}`);
+      }
+
+      uiStateManager.saveSidebarSectionExpanded(section, expanded);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving sidebar section expanded state:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
 }

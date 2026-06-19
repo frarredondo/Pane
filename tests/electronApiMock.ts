@@ -509,8 +509,18 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:host-state-changed', callback),
       }),
       uiState: namespace({
-        getExpanded: () => success([]),
+        getExpanded: () => success({
+          expandedProjects: [],
+          expandedFolders: [],
+          sessionSortAscending: true,
+          pinnedSectionExpanded: true,
+          repositoriesSectionExpanded: true,
+        }),
+        saveExpanded: () => success(),
+        saveExpandedProjects: () => success(),
+        saveExpandedFolders: () => success(),
         saveSessionSortAscending: () => success(),
+        saveSidebarSectionExpanded: () => success(),
       }),
     };
 

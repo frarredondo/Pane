@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight, Plus, FolderPlus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, Pin, Monitor } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
@@ -21,10 +21,18 @@ import {
   groupSessionsByProject,
 } from '../utils/sessionOrdering';
 
-
+const SIDEBAR_ROW_BASE = 'flex w-full items-center text-left transition-colors';
+const SIDEBAR_ROW_PADDING = 'px-4';
+const SIDEBAR_ROW_GAP = 'gap-2.5';
+const SIDEBAR_SECTION_ROW = 'mt-2 flex w-full items-center justify-between gap-2 px-3.5 pt-1 pb-1';
+const SIDEBAR_SECTION_LABEL = 'truncate text-[13px] font-semibold uppercase leading-4 text-text-tertiary';
 
 interface ProjectSessionListProps {
   sessionSortAscending: boolean;
+  pinnedSectionExpanded: boolean;
+  repositoriesSectionExpanded: boolean;
+  onPinnedSectionExpandedChange: (expanded: boolean) => void;
+  onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -32,6 +40,10 @@ interface ProjectSessionListProps {
 
 export function ProjectSessionList({
   sessionSortAscending,
+  pinnedSectionExpanded,
+  repositoriesSectionExpanded,
+  onPinnedSectionExpandedChange,
+  onRepositoriesSectionExpandedChange,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -39,8 +51,7 @@ export function ProjectSessionList({
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForProject, setCreateForProject] = useState<Project | null>(null);
-  const [pinnedSectionExpanded, setPinnedSectionExpanded] = useState(true);
-  const [repositoriesSectionExpanded, setRepositoriesSectionExpanded] = useState(true);
+  const knownSessionIdsRef = useRef<Set<string> | null>(null);
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
@@ -50,6 +61,7 @@ export function ProjectSessionList({
   const [dragOverProjectId, setDragOverProjectId] = useState<number | null>(null);
 
   const sessions = useSessionStore(s => s.sessions);
+  const sessionsLoaded = useSessionStore(s => s.isLoaded);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
@@ -101,18 +113,40 @@ export function ProjectSessionList({
   // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
   // (always mounted in Sidebar), and new-project auto-expansion lives there too.
 
-  // Auto-expand the project that contains the active session
-  // (e.g., when a new session is created and auto-activated)
+  const persistExpandedProjects = useCallback((projectIds: number[]) => {
+    void window.electronAPI.uiState.saveExpandedProjects(projectIds).catch(error => {
+      console.error('Failed to save expanded projects:', error);
+    });
+  }, []);
+
+  // Auto-expand only for sessions created after the initial session list is known.
+  // Restoring the previously active session on app launch should not override
+  // the user's saved collapsed project preferences.
   useEffect(() => {
-    if (!activeSessionId) return;
-    const currentSessions = useSessionStore.getState().sessions;
-    const session = currentSessions.find(s => s.id === activeSessionId);
-    if (!session?.projectId) return;
-    expandProject(session.projectId);
-  }, [activeSessionId, expandProject]);
+    if (!sessionsLoaded) return;
+
+    const currentIds = new Set(sessions.map(session => session.id));
+    const previousIds = knownSessionIdsRef.current;
+
+    if (!previousIds) {
+      knownSessionIdsRef.current = currentIds;
+      return;
+    }
+
+    if (activeSessionId && !previousIds.has(activeSessionId)) {
+      const session = sessions.find(item => item.id === activeSessionId);
+      if (session?.projectId) {
+        const expandedProjectIds = expandProject(session.projectId);
+        if (expandedProjectIds) persistExpandedProjects(expandedProjectIds);
+      }
+    }
+
+    knownSessionIdsRef.current = currentIds;
+  }, [activeSessionId, expandProject, persistExpandedProjects, sessions, sessionsLoaded]);
 
   const toggleProject = (id: number) => {
-    toggleProjectExpanded(id);
+    const expandedProjectIds = toggleProjectExpanded(id);
+    persistExpandedProjects(expandedProjectIds);
   };
 
   const handleSessionClick = (sessionId: string, scope: SidebarNavigationScope = 'repositories') => {
@@ -228,7 +262,7 @@ export function ProjectSessionList({
             setActiveSession(null);
             navigateToSessions();
           }}
-          className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+          className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'py-2 text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
         >
           <Home className="w-4 h-4" />
           <span>Home</span>
@@ -239,7 +273,7 @@ export function ProjectSessionList({
             <button
               type="button"
               onClick={onRemoteDesktopClick}
-              className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+              className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'py-2 text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
             >
               <Monitor className="w-4 h-4" />
               <span>Remote Desktop</span>
@@ -249,20 +283,22 @@ export function ProjectSessionList({
 
         {pinnedSessions.length > 0 && (
           <>
-            <button
-              type="button"
-              onClick={() => setPinnedSectionExpanded(expanded => !expanded)}
-              className="group/section mt-2 flex w-full items-center gap-1.5 px-3 pt-1 pb-1 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
-            >
-              <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
-                {pinnedSectionExpanded ? (
-                  <ChevronDown className="h-3.5 w-3.5 text-current" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 text-current" />
-                )}
-              </span>
-              <span className="text-sm text-text-tertiary truncate">Pinned</span>
-            </button>
+            <div className={SIDEBAR_SECTION_ROW}>
+              <button
+                type="button"
+                onClick={() => onPinnedSectionExpandedChange(!pinnedSectionExpanded)}
+                className="group/section flex min-w-0 flex-1 items-center justify-between gap-2 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
+              >
+                <span className={SIDEBAR_SECTION_LABEL}>Pinned</span>
+                <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
+                  {pinnedSectionExpanded ? (
+                    <ChevronDown className="h-3.5 w-3.5 text-current" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 text-current" />
+                  )}
+                </span>
+              </button>
+            </div>
             {pinnedSectionExpanded && (
               <div className="mt-0.5">
                 {pinnedSessions.map(({ session, label }) => (
@@ -282,12 +318,13 @@ export function ProjectSessionList({
           </>
         )}
 
-        <div className="mt-2 px-3 pt-1 pb-1 flex items-center justify-between gap-2">
+        <div className={SIDEBAR_SECTION_ROW}>
           <button
             type="button"
-            onClick={() => setRepositoriesSectionExpanded(expanded => !expanded)}
-            className="group/section flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
+            onClick={() => onRepositoriesSectionExpandedChange(!repositoriesSectionExpanded)}
+            className="group/section flex min-w-0 flex-1 items-center justify-between gap-2 text-left text-sm text-text-tertiary hover:text-text-primary focus-visible:text-text-primary transition-colors"
           >
+            <span className={SIDEBAR_SECTION_LABEL}>Repositories</span>
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
               {repositoriesSectionExpanded ? (
                 <ChevronDown className="h-3.5 w-3.5 text-current" />
@@ -295,7 +332,6 @@ export function ProjectSessionList({
                 <ChevronRight className="h-3.5 w-3.5 text-current" />
               )}
             </span>
-            <span className="text-sm text-text-tertiary truncate">Repositories</span>
           </button>
           <button
             onClick={() => setShowAddProjectDialog(true)}
@@ -337,11 +373,11 @@ export function ProjectSessionList({
           ];
 
           return (
-            <div key={project.id} className="mt-3 first:mt-2">
+            <div key={project.id} className="first:mt-2">
               {/* Project header */}
               <div
                 className={cn(
-                  "group/project flex items-center px-4 py-1.5 hover:bg-surface-hover transition-colors cursor-pointer",
+                  "group/project flex items-center gap-1.5 pl-3 pr-2 py-1.5 hover:bg-surface-hover transition-colors cursor-pointer",
                   dragOverProjectId === project.id && dragProjectId !== project.id && "bg-interactive/20",
                   dragProjectId === project.id && "opacity-50"
                 )}
@@ -364,13 +400,13 @@ export function ProjectSessionList({
                 <Tooltip content={<span className="text-[10px] text-text-tertiary font-mono break-all">{project.path}</span>} side="right">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="min-w-0 truncate text-xs font-semibold text-text-primary">{project.name}</span>
                       <span className={cn(
                         "w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all",
                         projectActivity === 'active'
                           ? 'bg-status-info opacity-100 duration-150'
                           : 'bg-text-muted/20 opacity-40 duration-[3s]'
                       )} />
-                      <span className="text-xs font-semibold text-text-primary truncate">{project.name}</span>
                     </div>
                   </div>
                 </Tooltip>
@@ -471,7 +507,7 @@ function SessionRowContent({
   showUnviewedCompleted: boolean;
 }) {
   return (
-    <div className="flex items-center gap-2 min-w-0 w-full">
+    <div className="flex items-center gap-1.5 min-w-0 w-full">
       {gs?.prNumber ? (
         <GitPullRequest className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       ) : (
@@ -589,7 +625,7 @@ function SessionRow({
       interactive
     >
       <div
-        className={`group/session relative w-full text-left pl-3 pr-3 py-1.5 transition-colors flex items-center gap-1 cursor-pointer ${
+        className={`group/session relative w-full text-left pl-2 pr-2 py-1.5 transition-colors flex items-center gap-1 cursor-pointer ${
           isActive
             ? 'bg-interactive/30 border-l-4 border-interactive'
             : 'hover:bg-surface-hover border-l-4 border-transparent'
@@ -618,6 +654,15 @@ function SessionRow({
 
         <div className="flex flex-shrink-0 items-center gap-0.5">
           <button
+            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/session:opacity-100"
+            title="Archive"
+            aria-label="Archive pane"
+          >
+            <Archive className="w-3.5 h-3.5" />
+          </button>
+
+          <button
             onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
             className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-all ${
               session.isFavorite
@@ -628,15 +673,6 @@ function SessionRow({
             aria-label={session.isFavorite ? 'Unpin pane' : 'Pin pane'}
           >
             <Pin className="w-3.5 h-3.5 rotate-45" />
-          </button>
-
-          {/* Archive button - on hover */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onArchive(); }}
-            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/session:opacity-100"
-            title="Archive"
-          >
-            <Archive className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
