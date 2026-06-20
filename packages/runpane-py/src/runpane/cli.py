@@ -111,6 +111,7 @@ class ParsedArgs:
     interval_ms: Optional[float] = None
     source: Optional[str] = None
     no_focus: bool = False
+    focus: bool = False
     composer_strategy: Optional[str] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
@@ -134,6 +135,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
             raise
         apply_parsed_args_to_telemetry_context(telemetry_context, parsed)
+
+        if parsed.command == "version":
+            return dispatch_parsed_command(parsed, telemetry_context)
 
         return run_tracked_command(
             telemetry_context,
@@ -442,6 +446,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--no-focus":
         parsed.no_focus = True
+        return
+    if flag == "--focus":
+        parsed.focus = True
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 

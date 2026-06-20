@@ -80,6 +80,8 @@ const DEFAULT_PANEL_OUTPUT_LIMIT = 200;
 const DEFAULT_PANEL_SCREEN_LIMIT = 80;
 const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
+const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 1_500;
+const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -247,6 +249,7 @@ export function registerRunpaneHandlers(
           timeoutMs: normalized.timeoutMs,
           waitReady: normalized.waitReady,
           readyTimeoutMs: normalized.readyTimeoutMs,
+          activate: resolvePaneCreateActivation(normalized, item),
         }),
       );
 
@@ -278,7 +281,7 @@ export function registerRunpaneHandlers(
       const pane = resolvePane(sessionManager, normalized.paneId);
       const tool = resolveToolSpec(normalized.tool);
       const { panel, readiness } = await createTerminalPanelForSession(services, pane, tool, {
-        activate: !(normalized.noFocus || normalized.source === 'agent'),
+        activate: resolvePanelCreateActivation(normalized, tool),
         waitReady: normalized.waitReady,
         readyTimeoutMs: normalized.readyTimeoutMs,
       });
@@ -289,6 +292,7 @@ export function registerRunpaneHandlers(
         panelId: panel.id,
         title: panel.title,
         active: Boolean(panel.state.isActive),
+        focused: Boolean(panel.state.isActive),
         tool: describeTool(tool),
         readiness,
         nextCommand: readiness?.nextCommand ?? panelOutputCommand(panel.id),
@@ -420,29 +424,35 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:submit-composer', async (request: unknown): Promise<RunpanePanelSubmitComposerResult> => {
-    return withRunpaneAction(services, 'panels:submit-composer', {}, () => {
+    return withRunpaneAction(services, 'panels:submit-composer', {}, async () => {
       const normalized = parsePanelSubmitComposerRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
 
-      const state = panelStateSummary(panel, terminalPanelManager.getTerminalSnapshot(panel.id));
+      const beforeScreen = buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+      const state = beforeScreen.state;
       const submit = resolveComposerSubmit(normalized.strategy, state.agentType);
       terminalPanelManager.writeToTerminal(panel.id, submit.input);
+      const verification = await verifyComposerSubmitted(panel, beforeScreen);
 
       return {
-        ok: true,
+        ok: verification.ok,
         panelId: panel.id,
         paneId: panel.sessionId,
         inputBytes: Buffer.byteLength(submit.input, 'utf8'),
         strategy: submit.strategy,
+        sequenceName: submit.sequenceName,
+        verifiedSubmitted: verification.verifiedSubmitted,
         sentAt: new Date().toISOString(),
-        nextCommand: panelWaitCommand(panel.id),
+        blocked: verification.blocked,
+        nextCommand: verification.blocked?.suggestedCommand ?? panelWaitCommand(panel.id),
       };
     }, result => ({
       paneId: result.paneId,
       panelId: result.panelId,
+      ok: result.ok,
       inputBytes: result.inputBytes,
     }));
   });
@@ -537,6 +547,7 @@ interface PaneCreateItemOptions {
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
+  activate?: boolean;
 }
 
 interface TerminalPanelCreateOptions {
@@ -621,6 +632,7 @@ async function createPaneItem(
     }
 
     const { panel, readiness } = await createTerminalPanelForSession(services, session, tool, {
+      activate: options.activate,
       waitReady: options.waitReady,
       readyTimeoutMs: options.readyTimeoutMs,
     });
@@ -635,6 +647,8 @@ async function createPaneItem(
       worktreePath: session.worktreePath,
       nextCommand: readiness?.nextCommand ?? panelOutputCommand(panel.id),
       tool: describeTool(tool),
+      active: Boolean(panel.state.isActive),
+      focused: Boolean(panel.state.isActive),
       readiness,
     };
   } catch (error) {
@@ -644,6 +658,32 @@ async function createPaneItem(
 
 function isPaneCreateItemSuccessful(item: RunpanePaneCreateResultItem): boolean {
   return item.ok && (!item.readiness || item.readiness.ok);
+}
+
+function resolvePaneCreateActivation(
+  request: RunpanePaneCreateRequest,
+  item: RunpanePaneCreateItem,
+): boolean {
+  if (request.focus === true) {
+    return true;
+  }
+  if (request.noFocus === true || request.source === 'agent') {
+    return false;
+  }
+  return !('agent' in item.tool);
+}
+
+function resolvePanelCreateActivation(
+  request: RunpanePanelCreateRequest,
+  tool: RunpaneResolvedTool,
+): boolean {
+  if (request.focus === true) {
+    return true;
+  }
+  if (request.noFocus === true || request.source === 'agent') {
+    return false;
+  }
+  return !tool.agent;
 }
 
 function toPaneReadiness(result: RunpanePanelWaitResult): RunpanePaneReadiness {
@@ -901,18 +941,74 @@ function ensureSubmitEnter(input: string): string {
 function resolveComposerSubmit(
   strategy: RunpanePanelSubmitComposerStrategy | undefined,
   agentType: RunpaneAgentId | undefined,
-): { strategy: 'codex-ctrl-enter' | 'enter'; input: string } {
+): {
+  strategy: 'codex-ctrl-enter' | 'enter';
+  sequenceName: RunpanePanelSubmitComposerResult['sequenceName'];
+  input: string;
+} {
   if (strategy === 'codex-ctrl-enter' || ((!strategy || strategy === 'auto') && agentType === 'codex')) {
     return {
       strategy: 'codex-ctrl-enter',
-      input: '\x1b[13;5u',
+      sequenceName: 'codex-ctrl-enter-cr',
+      input: '\x1b[13;5u\r',
     };
   }
 
   return {
     strategy: 'enter',
+    sequenceName: 'enter-cr',
     input: '\r',
   };
+}
+
+async function verifyComposerSubmitted(
+  panel: ToolPanel,
+  beforeScreen: RunpanePanelScreenResult,
+): Promise<{
+  ok: boolean;
+  verifiedSubmitted: boolean;
+  blocked?: RunpanePanelBlockedState;
+}> {
+  const beforeHadComposerPrompt = looksLikePendingComposer(beforeScreen.text);
+  if (!beforeHadComposerPrompt && !beforeScreen.text.trim()) {
+    return { ok: true, verifiedSubmitted: false };
+  }
+  let latestScreen = beforeScreen;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
+    await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
+    latestScreen = buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+
+    if (latestScreen.state.activityStatus === 'active') {
+      return { ok: true, verifiedSubmitted: true };
+    }
+
+    if (beforeHadComposerPrompt && !looksLikePendingComposer(latestScreen.text)) {
+      return { ok: true, verifiedSubmitted: true };
+    }
+
+  }
+
+  if (beforeHadComposerPrompt && looksLikePendingComposer(latestScreen.text)) {
+    return {
+      ok: false,
+      verifiedSubmitted: false,
+      blocked: {
+        kind: 'agent-prompt',
+        message: 'Pane sent the composer submit sequence, but the prompt still appears to be sitting in the composer.',
+        suggestedCommand: panelScreenCommand(panel.id),
+      },
+    };
+  }
+
+  return { ok: true, verifiedSubmitted: false };
+}
+
+function looksLikePendingComposer(text: string): boolean {
+  return /\[Pasted Content[^\]]*\]/i.test(text) ||
+    /press (ctrl|control)\+enter to submit/i.test(text) ||
+    /ctrl\+enter to submit/i.test(text);
 }
 
 async function runAgentDoctor(
@@ -1104,6 +1200,12 @@ function parsePaneCreateRequest(value: unknown): RunpanePaneCreateRequest {
   if (!Array.isArray(panesValue) || panesValue.length === 0) {
     throw new Error('Pane create request must include at least one pane');
   }
+  if (value.noFocus === true && value.focus === true) {
+    throw new Error('Pane create request cannot include both noFocus and focus');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Pane create source must be user or agent');
+  }
 
   return {
     repo,
@@ -1113,6 +1215,9 @@ function parsePaneCreateRequest(value: unknown): RunpanePaneCreateRequest {
     waitReady: typeof value.waitReady === 'boolean' ? value.waitReady : undefined,
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
     concurrency: parsePositiveInteger(value.concurrency, 'concurrency'),
+    noFocus: typeof value.noFocus === 'boolean' ? value.noFocus : undefined,
+    focus: typeof value.focus === 'boolean' ? value.focus : undefined,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
 
@@ -1144,12 +1249,16 @@ function parsePanelCreateRequest(value: unknown): RunpanePanelCreateRequest {
   if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
     throw new Error('Panel create source must be user or agent');
   }
+  if (value.noFocus === true && value.focus === true) {
+    throw new Error('Panel create request cannot include both noFocus and focus');
+  }
 
   return {
     paneId,
     type: 'terminal',
     tool: parseRunpaneToolSpec(value.tool, 'Panel create request'),
     noFocus: typeof value.noFocus === 'boolean' ? value.noFocus : undefined,
+    focus: typeof value.focus === 'boolean' ? value.focus : undefined,
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     waitReady: typeof value.waitReady === 'boolean' ? value.waitReady : undefined,
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),

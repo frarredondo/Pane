@@ -125,7 +125,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane update` uses the same release resolution and installer path as `install client`.
 
-`runpane version` prints the wrapper package version, the installed Pane version when detectable, and the latest GitHub release version when reachable.
+`runpane version` prints only wrapper package metadata and does not contact, launch, or focus the Pane app or daemon.
 
 `runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, and remote-daemon hints. Add `--json` for a machine-readable report that agents should run before mutating Pane state.
 
@@ -139,7 +139,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane panes list` lists Pane sessions, optionally scoped to one saved repository.
 
-`runpane panes create` connects to the running local Pane daemon, resolves the requested repository, creates Pane sessions, opens terminal-backed tool tabs, and optionally sends initial input to the started tool.
+`runpane panes create` connects to the running local Pane daemon, resolves the requested repository, creates Pane sessions, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed.
 
 `runpane panels list` lists tool panels inside one Pane session.
 
@@ -270,6 +270,7 @@ These flags are consumed by local daemon-control commands:
 --json
 --wait-ready
 --no-focus
+--focus
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes list`, `runpane panes create`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

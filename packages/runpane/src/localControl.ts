@@ -49,6 +49,9 @@ interface PaneCreateRequest {
   waitReady?: boolean;
   readyTimeoutMs?: number;
   concurrency?: number;
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: 'user' | 'agent';
 }
 
 interface PaneCreateItem {
@@ -125,6 +128,7 @@ interface PanelCreateRequest {
   type?: 'terminal';
   tool: PaneToolSpec;
   noFocus?: boolean;
+  focus?: boolean;
   source?: 'user' | 'agent';
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -136,6 +140,7 @@ interface PanelCreateResult {
   panelId: string;
   title: string;
   active: boolean;
+  focused: boolean;
   tool: {
     title: string;
     command: string;
@@ -227,12 +232,15 @@ interface PanelSubmitResult {
 }
 
 interface PanelSubmitComposerResult {
-  ok: true;
+  ok: boolean;
   panelId: string;
   paneId?: string;
   inputBytes: number;
   strategy: 'codex-ctrl-enter' | 'enter';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  verifiedSubmitted: boolean;
   sentAt: string;
+  blocked?: PanelBlockedState;
   nextCommand?: string;
 }
 
@@ -477,13 +485,17 @@ export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<numbe
   if (parsed.json) {
     printJson(result);
   } else {
-    console.log(`Submitted composer with ${result.strategy} to panel ${result.panelId}.`);
+    const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
+    console.log(`${result.ok ? 'Submitted' : 'Could not verify'} composer with ${result.sequenceName} to panel ${result.panelId}.${verified}`);
+    if (result.blocked) {
+      console.log(`Blocked: ${result.blocked.message}`);
+    }
     if (result.nextCommand) {
       console.log(`Next: ${result.nextCommand}`);
     }
   }
 
-  return 0;
+  return result.ok ? 0 : 1;
 }
 
 export async function runPanelsWait(parsed: ParsedArgs): Promise<number> {
@@ -565,13 +577,17 @@ async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateR
   if (!parsed.paneId) {
     throw new Error('runpane panels create requires --pane.');
   }
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
   const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
 
   return {
     paneId: parsed.paneId,
     type: 'terminal',
     tool: await buildToolSpec(parsed, 'panels create'),
-    noFocus: parsed.noFocus || source === 'agent' || undefined,
+    noFocus: !parsed.focus && (parsed.noFocus || source === 'agent' || Boolean(parsed.agent)) ? true : undefined,
+    focus: parsed.focus || undefined,
     source,
     waitReady: parsed.waitReady || undefined,
     readyTimeoutMs: parsed.readyTimeoutMs,
@@ -597,6 +613,7 @@ async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateReq
     if (parsed.concurrency !== undefined) {
       request.concurrency = parsed.concurrency;
     }
+    applyPaneFocusOptions(parsed, request);
     return request;
   }
 
@@ -608,6 +625,10 @@ async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateReq
   }
 
   const tool = await buildToolSpec(parsed);
+  const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
   const request: PaneCreateRequest = {
     repo: parsed.repo,
     panes: [{
@@ -621,9 +642,28 @@ async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateReq
     waitReady: parsed.waitReady || undefined,
     readyTimeoutMs: parsed.readyTimeoutMs,
     concurrency: parsed.concurrency,
+    noFocus: !parsed.focus && (parsed.noFocus || source === 'agent' || Boolean(parsed.agent)) ? true : undefined,
+    focus: parsed.focus || undefined,
+    source,
   };
 
   return request;
+}
+
+function applyPaneFocusOptions(parsed: ParsedArgs, request: PaneCreateRequest): void {
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+  const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
+  if (!parsed.focus && (parsed.noFocus || source === 'agent' || Boolean(parsed.agent))) {
+    request.noFocus = true;
+  }
+  if (parsed.focus) {
+    request.focus = true;
+  }
+  if (source) {
+    request.source = source;
+  }
 }
 
 async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Promise<void> {
@@ -964,6 +1004,12 @@ function parsePaneCreateRequestPayload(value: unknown): PaneCreateRequest {
   if (!Array.isArray(panes) || panes.length === 0) {
     throw new Error('--from-json payload must include at least one pane.');
   }
+  if (value.noFocus === true && value.focus === true) {
+    throw new Error('--from-json payload cannot include both noFocus and focus.');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('--from-json payload source must be user or agent.');
+  }
 
   return {
     repo,
@@ -973,6 +1019,9 @@ function parsePaneCreateRequestPayload(value: unknown): PaneCreateRequest {
     waitReady: typeof value.waitReady === 'boolean' ? value.waitReady : undefined,
     readyTimeoutMs: typeof value.readyTimeoutMs === 'number' ? value.readyTimeoutMs : undefined,
     concurrency: typeof value.concurrency === 'number' ? value.concurrency : undefined,
+    noFocus: typeof value.noFocus === 'boolean' ? value.noFocus : undefined,
+    focus: typeof value.focus === 'boolean' ? value.focus : undefined,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
 

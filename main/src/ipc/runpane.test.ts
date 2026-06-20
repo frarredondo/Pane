@@ -772,7 +772,32 @@ describe('runpane IPC handlers', () => {
     );
   });
 
-  it('submits a Codex composer with Ctrl+Enter bytes', async () => {
+  it('submits a Codex composer with the effective Ctrl+Enter sequence and verifies composer cleared', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce({
+        initialized: true,
+        scrollbackBuffer: '[Pasted Content 1024 chars]\nCtrl+Enter to submit\n',
+        alternateScreenBuffer: '',
+        isAlternateScreen: false,
+        activityStatus: 'idle',
+        lastActivityTime: '2026-01-01T00:02:00.000Z',
+        currentCommand: 'codex',
+        isCliPanel: true,
+        isCliReady: true,
+        agentType: 'codex',
+      })
+      .mockReturnValueOnce({
+        initialized: true,
+        scrollbackBuffer: 'working on task\n',
+        alternateScreenBuffer: '',
+        isAlternateScreen: false,
+        activityStatus: 'active',
+        lastActivityTime: '2026-01-01T00:02:01.000Z',
+        currentCommand: 'codex',
+        isCliPanel: true,
+        isCliReady: false,
+        agentType: 'codex',
+      });
     const services = createServices();
     const registry = createRegistry(services);
 
@@ -781,13 +806,15 @@ describe('runpane IPC handlers', () => {
       strategy: 'auto',
     }]);
 
-    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\x1b[13;5u');
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\x1b[13;5u\r');
     expect(result).toMatchObject({
       ok: true,
       panelId: terminalPanel.id,
       paneId: session.id,
-      inputBytes: 7,
+      inputBytes: 8,
       strategy: 'codex-ctrl-enter',
+      sequenceName: 'codex-ctrl-enter-cr',
+      verifiedSubmitted: true,
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
     expect(services.analyticsManager?.track).toHaveBeenCalledWith(
@@ -795,9 +822,44 @@ describe('runpane IPC handlers', () => {
       expect.objectContaining({
         action: 'panels:submit-composer',
         status: 'success',
-        input_bytes: 7,
+        input_bytes: 8,
       }),
     );
+  });
+
+  it('blocks submit-composer when the Codex pasted-content composer remains visible', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+      initialized: true,
+      scrollbackBuffer: '[Pasted Content 1024 chars]\nCtrl+Enter to submit\n',
+      alternateScreenBuffer: '',
+      isAlternateScreen: false,
+      activityStatus: 'idle',
+      lastActivityTime: '2026-01-01T00:02:00.000Z',
+      currentCommand: 'codex',
+      isCliPanel: true,
+      isCliReady: true,
+      agentType: 'codex',
+    });
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:submit-composer', [{
+      panelId: terminalPanel.id,
+      strategy: 'auto',
+    }]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\x1b[13;5u\r');
+    expect(result).toMatchObject({
+      ok: false,
+      panelId: terminalPanel.id,
+      inputBytes: 8,
+      strategy: 'codex-ctrl-enter',
+      sequenceName: 'codex-ctrl-enter-cr',
+      verifiedSubmitted: false,
+      blocked: {
+        kind: 'agent-prompt',
+        suggestedCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
+      },
+    });
   });
 
   it('reads compact panel screen state from live alternate-screen output', async () => {
@@ -1056,6 +1118,7 @@ describe('runpane IPC handlers', () => {
         agentType: 'codex',
         isCliPanel: true,
       },
+      activate: false,
     });
     expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'panel-1' }),
@@ -1069,6 +1132,8 @@ describe('runpane IPC handlers', () => {
         sessionId: session.id,
         panelId: 'panel-1',
         worktreePath: session.worktreePath,
+        active: false,
+        focused: false,
         nextCommand: 'runpane panels output --panel panel-1 --limit 200 --json',
       }],
     });

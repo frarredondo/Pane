@@ -1,8 +1,6 @@
 import childProcess from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fetchRelease } from './releases';
-import { resolveExistingPanePath } from './installers';
 
 export function getWrapperVersion(): string {
   const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -14,24 +12,9 @@ export function getWrapperVersion(): string {
   }
 }
 
-export async function printVersion(panePath?: string): Promise<number> {
+export async function printVersion(_panePath?: string): Promise<number> {
   const wrapperVersion = getWrapperVersion();
-  const installedPath = resolveExistingPanePath(panePath);
-  const installedVersion = installedPath ? getPaneVersion(installedPath) : undefined;
-  let latest = 'unavailable';
-
-  try {
-    latest = normalizeVersion((await fetchRelease('latest')).tag_name);
-  } catch {
-    // Keep version output useful when offline.
-  }
-
   console.log(`runpane ${wrapperVersion}`);
-  console.log(`Pane installed: ${installedVersion ?? 'not found'}`);
-  console.log(`Pane latest: ${latest}`);
-  if (installedPath) {
-    console.log(`Pane path: ${installedPath}`);
-  }
   return 0;
 }
 
@@ -46,8 +29,4 @@ export function getPaneVersion(executablePath: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function normalizeVersion(version: string): string {
-  return version.replace(/^v/, '');
 }
