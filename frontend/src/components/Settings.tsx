@@ -69,7 +69,8 @@ import {
   Copy,
   Server,
   ExternalLink,
-  Mic
+  Mic,
+  PanelLeftOpen
 } from 'lucide-react';
 import { Input, Textarea, Checkbox } from './ui/Input';
 import { Button } from './ui/Button';
@@ -111,6 +112,13 @@ function isVoiceTranscriptionMode(value: unknown): value is VoiceTranscriptionMo
 }
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
+const SIDEBAR_PANE_ROW_LAYOUT_PREFERENCE = 'sidebar_pane_row_layout';
+
+type SidebarPaneRowLayout = 'single' | 'two-row';
+
+function normalizeSidebarPaneRowLayout(value: unknown): SidebarPaneRowLayout {
+  return value === 'two-row' ? 'two-row' : 'single';
+}
 
 function formatRemoteBaseUrl(host: string, port: number): string {
   const trimmedHost = host.trim();
@@ -163,6 +171,7 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
   const [enableCommitFooter, setEnableCommitFooter] = useState(true);
   const [managedAgentsMd, setManagedAgentsMd] = useState(true);
   const [autoRenameToPR, setAutoRenameToPR] = useState<boolean>(true);
+  const [sidebarPaneRowLayout, setSidebarPaneRowLayout] = useState<SidebarPaneRowLayout>('single');
   const [uiScale, setUiScale] = useState(1.0);
   const [terminalFontFamily, setTerminalFontFamily] = useState('');
   const [terminalFontSize, setTerminalFontSize] = useState(14);
@@ -369,6 +378,19 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
         }
       };
       loadAutoRename();
+
+      const loadSidebarPaneRowLayout = async () => {
+        try {
+          const result = await window.electron?.invoke(
+            'preferences:get',
+            SIDEBAR_PANE_ROW_LAYOUT_PREFERENCE
+          ) as IPCResponse<string>;
+          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(result?.data));
+        } catch (error) {
+          console.error('Failed to load sidebar pane row layout preference:', error);
+        }
+      };
+      loadSidebarPaneRowLayout();
 
       // Load @terminal preferences
       const loadAtTerminalPrefs = async () => {
@@ -812,6 +834,19 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
       await window.electron?.invoke('preferences:set', 'auto_rename_sessions_to_pr', checked ? 'true' : 'false');
     } catch (error) {
       console.error('Failed to save auto-rename preference:', error);
+    }
+  };
+
+  const handleSidebarPaneRowLayoutChange = async (layout: SidebarPaneRowLayout) => {
+    setSidebarPaneRowLayout(layout);
+    window.dispatchEvent(new CustomEvent('sidebar-pane-row-layout-changed', {
+      detail: { layout },
+    }));
+
+    try {
+      await window.electron?.invoke('preferences:set', SIDEBAR_PANE_ROW_LAYOUT_PREFERENCE, layout);
+    } catch (error) {
+      console.error('Failed to save sidebar pane row layout preference:', error);
     }
   };
 
@@ -1754,6 +1789,32 @@ export function Settings({ isOpen, onClose, initialSection }: SettingsProps) {
                       </button>
                     ))}
                   </div>
+                </div>
+              </SettingsSection>
+
+              <SettingsSection
+                title="Sidebar Pane Rows"
+                description="Choose how pane metadata appears in the left sidebar"
+                icon={<PanelLeftOpen className="w-4 h-4" />}
+              >
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'single' as const, label: 'Single row' },
+                    { id: 'two-row' as const, label: 'Two rows' },
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => handleSidebarPaneRowLayoutChange(option.id)}
+                      className={`px-3 py-2 text-sm font-medium rounded-md border transition-colors ${
+                        sidebarPaneRowLayout === option.id
+                          ? 'bg-interactive text-text-on-interactive border-interactive'
+                          : 'bg-surface-secondary text-text-secondary border-border-secondary hover:bg-surface-hover'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               </SettingsSection>
 

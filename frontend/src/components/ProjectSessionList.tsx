@@ -26,6 +26,13 @@ const SIDEBAR_ROW_PADDING = 'px-4';
 const SIDEBAR_ROW_GAP = 'gap-2.5';
 const SIDEBAR_SECTION_ROW = 'mt-2 flex w-full items-center justify-between gap-2 pl-3.5 pr-2 pt-1 pb-1';
 const SIDEBAR_SECTION_LABEL = 'truncate text-[13px] font-semibold uppercase leading-4 text-text-tertiary';
+const SIDEBAR_PANE_ROW_LAYOUT_PREFERENCE = 'sidebar_pane_row_layout';
+
+type SidebarPaneRowLayout = 'single' | 'two-row';
+
+function normalizeSidebarPaneRowLayout(value: unknown): SidebarPaneRowLayout {
+  return value === 'two-row' ? 'two-row' : 'single';
+}
 
 interface ProjectSessionListProps {
   sessionSortAscending: boolean;
@@ -51,6 +58,7 @@ export function ProjectSessionList({
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForProject, setCreateForProject] = useState<Project | null>(null);
+  const [sidebarPaneRowLayout, setSidebarPaneRowLayout] = useState<SidebarPaneRowLayout>('single');
   const knownSessionIdsRef = useRef<Set<string> | null>(null);
 
   // Add project dialog state
@@ -97,6 +105,37 @@ export function ProjectSessionList({
       window.removeEventListener('project-sessions-refresh', handle);
     };
   }, [loadProjects]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSidebarPaneRowLayout = async () => {
+      try {
+        const result = await window.electron?.invoke(
+          'preferences:get',
+          SIDEBAR_PANE_ROW_LAYOUT_PREFERENCE
+        ) as { success?: boolean; data?: string } | undefined;
+        if (!cancelled) {
+          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(result?.data));
+        }
+      } catch {
+        if (!cancelled) setSidebarPaneRowLayout('single');
+      }
+    };
+
+    const handlePreferenceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ layout?: unknown }>).detail;
+      setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(detail?.layout));
+    };
+
+    void loadSidebarPaneRowLayout();
+    window.addEventListener('sidebar-pane-row-layout-changed', handlePreferenceChanged);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('sidebar-pane-row-layout-changed', handlePreferenceChanged);
+    };
+  }, []);
 
   // Group sessions by project
   const sessionsByProject = useMemo(
@@ -311,6 +350,7 @@ export function ProjectSessionList({
                     onClick={() => handleSessionClick(session.id, 'pinned')}
                     onArchive={() => handleArchiveSession(session.id)}
                     onTogglePinned={() => handleTogglePinnedSession(session.id)}
+                    rowLayout={sidebarPaneRowLayout}
                   />
                 ))}
               </div>
@@ -450,6 +490,7 @@ export function ProjectSessionList({
                       onClick={() => handleSessionClick(session.id, 'repositories')}
                       onArchive={() => handleArchiveSession(session.id)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
+                      rowLayout={sidebarPaneRowLayout}
                     />
                   ))}
                 </div>
@@ -495,6 +536,7 @@ function SessionRowContent({
   displayName,
   showActivity,
   showUnviewedCompleted,
+  rowLayout,
 }: {
   session: Session;
   gs: GitStatus | undefined;
@@ -505,10 +547,38 @@ function SessionRowContent({
   displayName?: string;
   showActivity: boolean;
   showUnviewedCompleted: boolean;
+  rowLayout: SidebarPaneRowLayout;
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
   const prNumber = gs?.prNumber;
   const showMetadata = Boolean(prNumber || hasDiff);
+
+  if (rowLayout === 'single') {
+    return (
+      <div className="flex min-w-0 w-full items-center gap-1.5">
+        {prNumber ? (
+          <GitPullRequest className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        ) : (
+          <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        )}
+        <span className={cn(
+          'min-w-0 flex-1 truncate text-sm font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
+          showActivity && 'animate-sidebar-active-label',
+          showUnviewedCompleted && 'underline decoration-dashed'
+        )}>
+          {title}
+        </span>
+        {prNumber ? (
+          <span className="flex-shrink-0 text-xs text-text-tertiary">#{prNumber}</span>
+        ) : hasDiff ? (
+          <span className="flex flex-shrink-0 items-center gap-1 text-xs">
+            <span className="font-semibold text-status-success">+{adds}</span>
+            <span className="font-semibold text-status-error">-{dels}</span>
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 w-full items-start gap-1.5">
@@ -553,6 +623,7 @@ interface SessionRowProps {
   onArchive: () => void;
   onTogglePinned: () => void;
   displayName?: string;
+  rowLayout: SidebarPaneRowLayout;
 }
 
 interface GitStatusIPCResponse {
@@ -562,7 +633,7 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, displayName,
+  onArchive, onTogglePinned, displayName, rowLayout,
 }: SessionRowProps) {
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
 
@@ -636,11 +707,13 @@ function SessionRow({
       interactive
     >
       <div
-        className={`group/session relative w-full text-left pl-2 pr-2 py-2 transition-colors flex items-center gap-1 cursor-pointer ${
+        className={cn(
+          'group/session relative w-full text-left pl-2 pr-2 transition-colors flex items-center gap-1 cursor-pointer',
+          rowLayout === 'single' ? 'py-1.5' : 'py-2',
           isActive
             ? 'bg-interactive/30 border-l-4 border-interactive'
             : 'hover:bg-surface-hover border-l-4 border-transparent'
-        }`}
+        )}
         onClick={onClick}
         role="button"
         tabIndex={0}
@@ -661,6 +734,7 @@ function SessionRow({
           displayName={displayName}
           showActivity={showActivity}
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
+          rowLayout={rowLayout}
         />
 
         <div className="flex flex-shrink-0 items-center gap-0.5">
