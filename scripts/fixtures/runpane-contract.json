@@ -114,6 +114,8 @@
       "codex",
       "--prompt",
       "Kick off discussion",
+      "--source",
+      "agent",
       "--dry-run",
       "--yes",
       "--json"
@@ -169,6 +171,9 @@
       "create",
       "--from-json",
       "-",
+      "--source",
+      "agent",
+      "--focus",
       "--wait-ready",
       "--ready-timeout-ms",
       "45000",
@@ -224,6 +229,17 @@
       "--wait-ready",
       "--ready-timeout-ms",
       "15000",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
+      "create",
+      "--pane",
+      "pane-1",
+      "--agent",
+      "codex",
+      "--focus",
       "--yes",
       "--json"
     ],

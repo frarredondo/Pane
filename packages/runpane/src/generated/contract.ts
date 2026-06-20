@@ -101,7 +101,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "version",
-      "summary": "Print the runpane wrapper version and installed Pane version when detectable.",
+      "summary": "Print the runpane wrapper version without contacting, launching, or focusing Pane.",
       "usage": [
         "runpane version",
         "runpane --version"
@@ -175,7 +175,7 @@ export const RUNPANE_CONTRACT = {
       "name": "panes create",
       "summary": "Create one or more Pane sessions in a saved repository and open a terminal-backed tool tab.",
       "usage": [
-        "runpane panes create --repo <selector> --name <name> --agent <codex|claude> [options]",
+        "runpane panes create --repo <selector> --name <name> --agent <codex|claude> [--source user|agent] [--focus|--no-focus] [options]",
         "runpane panes create --from-json <path|-> [--yes] [--json]"
       ],
       "mutates": true,
@@ -188,8 +188,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels create",
       "summary": "Create a terminal-backed tool panel inside an existing Pane session.",
       "usage": [
-        "runpane panels create --pane <pane-id> --agent <codex|claude> [--no-focus] [--wait-ready] --yes [--json]",
-        "runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--no-focus] --yes [--json]"
+        "runpane panels create --pane <pane-id> --agent <codex|claude> [--source user|agent] [--focus|--no-focus] [--wait-ready] --yes [--json]",
+        "runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--focus|--no-focus] --yes [--json]"
       ],
       "mutates": true,
       "jsonSchemas": [
@@ -504,7 +504,11 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--no-focus",
-        "description": "Create the panel in the background without changing the active panel."
+        "description": "Create the pane or panel in the background without changing focus."
+      },
+      {
+        "name": "--focus",
+        "description": "Explicitly focus the created pane or panel."
       }
     ]
   },
@@ -692,6 +696,9 @@ export const RUNPANE_CONTRACT = {
         "  --wait-ready                   Wait for terminal readiness before returning",
         "  --ready-timeout-ms <ms>        Readiness wait timeout; defaults to 30000",
         "  --concurrency <count>          Accepted; creation is currently serialized",
+        "  --source <user|agent>          Mark mutation source; agent implies background creation",
+        "  --no-focus                     Create in the background without stealing focus",
+        "  --focus                        Explicitly focus the created pane",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -819,6 +826,7 @@ export const RUNPANE_CONTRACT = {
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
         "  --no-focus                    Create the panel in the background.",
+        "  --focus                       Explicitly focus the created panel.",
         "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
         "  --wait-ready                  Wait until the terminal tool is ready.",
         "  --ready-timeout-ms <ms>       Readiness wait timeout.",
@@ -1010,6 +1018,9 @@ export const RUNPANE_CONTRACT = {
         "  --wait-ready                   Wait for terminal readiness before returning",
         "  --ready-timeout-ms <ms>        Readiness wait timeout; defaults to 30000",
         "  --concurrency <count>          Accepted; creation is currently serialized",
+        "  --source <user|agent>          Mark mutation source; agent implies background creation",
+        "  --no-focus                     Create in the background without stealing focus",
+        "  --focus                        Explicitly focus the created pane",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -1137,6 +1148,7 @@ export const RUNPANE_CONTRACT = {
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
         "  --no-focus                    Create the panel in the background.",
+        "  --focus                       Explicitly focus the created panel.",
         "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
         "  --wait-ready                  Wait until the terminal tool is ready.",
         "  --ready-timeout-ms <ms>       Readiness wait timeout.",
@@ -1240,14 +1252,14 @@ export const RUNPANE_CONTRACT = {
       "`runpane install daemon` downloads or installs Pane, resolves a stable Pane executable path, and spawns `<pane executable> --remote-setup <forwarded remote setup args>`.",
       "The wrapper must stream Pane stdout/stderr without reformatting because `pane --remote-setup` prints the one-time `pane-remote://...` connection code.",
       "`runpane update` uses the same release resolution and installer path as `install client`.",
-      "`runpane version` prints the wrapper package version, the installed Pane version when detectable, and the latest GitHub release version when reachable.",
+      "`runpane version` prints only wrapper package metadata and does not contact, launch, or focus the Pane app or daemon.",
       "`runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, and remote-daemon hints. Add `--json` for a machine-readable report that agents should run before mutating Pane state.",
       "`runpane agent-context` prints a brief, token-efficient command schema for coding agents without connecting to the Pane daemon.",
       "`runpane agent-context --command \"panes create\"` prints the detailed definition for one command. Add `--json` for machine-readable output.",
       "`runpane repos list` connects to the running local Pane daemon and prints saved repository records.",
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
-      "`runpane panes create` connects to the running local Pane daemon, resolves the requested repository, creates Pane sessions, opens terminal-backed tool tabs, and optionally sends initial input to the started tool.",
+      "`runpane panes create` connects to the running local Pane daemon, resolves the requested repository, creates Pane sessions, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed.",
       "`runpane panels list` lists tool panels inside one Pane session.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
@@ -1387,6 +1399,8 @@ export const RUNPANE_CONTRACT = {
         "codex",
         "--prompt",
         "Kick off discussion",
+        "--source",
+        "agent",
         "--dry-run",
         "--yes",
         "--json"
@@ -1442,6 +1456,9 @@ export const RUNPANE_CONTRACT = {
         "create",
         "--from-json",
         "-",
+        "--source",
+        "agent",
+        "--focus",
         "--wait-ready",
         "--ready-timeout-ms",
         "45000",
@@ -1497,6 +1514,17 @@ export const RUNPANE_CONTRACT = {
         "--wait-ready",
         "--ready-timeout-ms",
         "15000",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "create",
+        "--pane",
+        "pane-1",
+        "--agent",
+        "codex",
+        "--focus",
         "--yes",
         "--json"
       ],
@@ -1972,6 +2000,18 @@ export const RUNPANE_CONTRACT = {
         },
         "concurrency": {
           "type": "number"
+        },
+        "noFocus": {
+          "type": "boolean"
+        },
+        "focus": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
         }
       },
       "additionalProperties": false
@@ -2047,6 +2087,12 @@ export const RUNPANE_CONTRACT = {
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "focused": {
+                    "type": "boolean"
                   },
                   "readiness": {
                     "type": "object",
@@ -2920,6 +2966,9 @@ export const RUNPANE_CONTRACT = {
         "noFocus": {
           "type": "boolean"
         },
+        "focus": {
+          "type": "boolean"
+        },
         "source": {
           "enum": [
             "user",
@@ -2943,6 +2992,7 @@ export const RUNPANE_CONTRACT = {
         "panelId",
         "title",
         "active",
+        "focused",
         "tool"
       ],
       "properties": {
@@ -2959,6 +3009,9 @@ export const RUNPANE_CONTRACT = {
           "type": "string"
         },
         "active": {
+          "type": "boolean"
+        },
+        "focused": {
           "type": "boolean"
         },
         "tool": {
@@ -3111,11 +3164,13 @@ export const RUNPANE_CONTRACT = {
         "panelId",
         "inputBytes",
         "strategy",
+        "sequenceName",
+        "verifiedSubmitted",
         "sentAt"
       ],
       "properties": {
         "ok": {
-          "const": true
+          "type": "boolean"
         },
         "panelId": {
           "type": "string"
@@ -3132,8 +3187,40 @@ export const RUNPANE_CONTRACT = {
             "enter"
           ]
         },
+        "sequenceName": {
+          "enum": [
+            "codex-ctrl-enter-cr",
+            "enter-cr"
+          ]
+        },
+        "verifiedSubmitted": {
+          "type": "boolean"
+        },
         "sentAt": {
           "type": "string"
+        },
+        "blocked": {
+          "type": "object",
+          "required": [
+            "kind",
+            "message"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex-update",
+                "agent-prompt",
+                "unknown"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "suggestedCommand": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         },
         "nextCommand": {
           "type": "string"
@@ -3154,7 +3241,7 @@ export const RUNPANE_CONTRACT = {
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane agents doctor --agent <codex|claude> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
         "Use `runpane panes create --wait-ready` to create panes and validate initial terminal readiness in one call.",
-        "Use `runpane panels screen` for compact current state, `panels wait` for readiness/text checks, and `panels submit` for ordinary Enter-submitted input.",
+        "Use `runpane panels screen` for compact current state, `panels wait` for readiness/text checks, `panels submit` for ordinary Enter-submitted input, and `panels submit-composer --strategy auto` for agent composers.",
         "Use `runpane panels input` only when exact bytes are required, such as Ctrl-C or handcrafted terminal input.",
         "After creating panes or sending terminal input, validate with `panels wait` or bounded `panels screen` before reporting success."
       ],
@@ -3226,6 +3313,9 @@ export const RUNPANE_CONTRACT = {
             "--prompt <text>",
             "--initial-input-file <path|->",
             "--from-json <path|->",
+            "--source <user|agent>",
+            "--no-focus",
+            "--focus",
             "--wait-ready",
             "--ready-timeout-ms <ms>",
             "--concurrency <count>",
@@ -3242,6 +3332,7 @@ export const RUNPANE_CONTRACT = {
             "--tool-command <command>",
             "--source <user|agent>",
             "--no-focus",
+            "--focus",
             "--wait-ready",
             "--yes",
             "--json"
@@ -3436,8 +3527,8 @@ export const RUNPANE_CONTRACT = {
       },
       "version": {
         "name": "version",
-        "summary": "Print the runpane wrapper version and installed Pane version when detectable.",
-        "details": "Use this for diagnostics or to confirm which wrapper is available.",
+        "summary": "Print the runpane wrapper version without contacting, launching, or focusing Pane.",
+        "details": "Use this to confirm which wrapper is available. App, daemon, and release diagnostics belong in doctor.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -3445,7 +3536,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--pane-path",
             "value": "<path>",
             "required": false,
-            "description": "Inspect a specific Pane executable."
+            "description": "Ignored for version; retained only for parser compatibility."
           }
         ],
         "examples": [
@@ -3701,6 +3792,22 @@ export const RUNPANE_CONTRACT = {
             "value": "<path|->",
             "required": false,
             "description": "Read a full panes.create request JSON payload."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source; agent implies background/no-focus creation."
+          },
+          {
+            "name": "--no-focus",
+            "required": false,
+            "description": "Create the pane in the background without stealing focus."
+          },
+          {
+            "name": "--focus",
+            "required": false,
+            "description": "Explicitly focus the created pane."
           },
           {
             "name": "--yes",
@@ -4146,6 +4253,11 @@ export const RUNPANE_CONTRACT = {
             "description": "Create the panel in the background without changing active panel."
           },
           {
+            "name": "--focus",
+            "required": false,
+            "description": "Explicitly focus the created panel."
+          },
+          {
             "name": "--wait-ready",
             "required": false,
             "description": "Wait until the terminal tool is ready."
@@ -4183,7 +4295,7 @@ export const RUNPANE_CONTRACT = {
       "panels submit-composer": {
         "name": "panels submit-composer",
         "summary": "Submit an agent composer using the panel-appropriate key sequence.",
-        "details": "Use this after sending text into an agent composer when plain Enter is not the right submit action. Auto mode sends Ctrl+Enter for Codex panels and Enter for other panels.",
+        "details": "Use this after sending text into an agent composer when plain Enter is not the right submit action. Agents should use --strategy auto; Pane owns per-agent submit sequences internally and verifies visible composer state when possible.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -4220,7 +4332,8 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Use `panels input` or `panels submit` to write prompt text first; this command only submits the current composer.",
-          "Codex composer submission uses ESC [13;5u, not a plain Enter."
+          "Use --strategy auto for agent workflows; explicit strategies are diagnostic escape hatches.",
+          "The JSON result includes sequenceName and verifiedSubmitted. If ok is false, follow blocked.suggestedCommand instead of assuming submission happened."
         ]
       }
     },

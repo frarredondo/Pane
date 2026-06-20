@@ -167,6 +167,7 @@ function compareParserParity() {
       intervalMs: parsed.intervalMs ?? null,
       source: parsed.source ?? null,
       noFocus: parsed.noFocus ?? false,
+      focus: parsed.focus ?? false,
       composerStrategy: parsed.composerStrategy ?? null,
       remoteSetupArgs: parsed.remoteSetupArgs
     };
@@ -221,6 +222,7 @@ for args in samples:
         "intervalMs": parsed.interval_ms,
         "source": parsed.source,
         "noFocus": parsed.no_focus,
+        "focus": parsed.focus,
         "composerStrategy": parsed.composer_strategy,
         "remoteSetupArgs": parsed.remote_setup_args,
     })

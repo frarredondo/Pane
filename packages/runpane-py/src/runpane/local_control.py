@@ -189,10 +189,14 @@ def run_panels_submit_composer(parsed: Any) -> int:
     if parsed.json:
         print_json(result)
     else:
-        print(f"Submitted composer with {result.get('strategy')} to panel {result.get('panelId')}.")
+        verb = "Submitted" if result.get("ok") else "Could not verify"
+        verified = " verified" if result.get("verifiedSubmitted") else " unverified"
+        print(f"{verb} composer with {result.get('sequenceName')} to panel {result.get('panelId')}.{verified}")
+        if result.get("blocked"):
+            print(f"Blocked: {result['blocked'].get('message')}")
         if result.get("nextCommand"):
             print(f"Next: {result.get('nextCommand')}")
-    return 0
+    return 0 if result.get("ok") else 1
 
 
 def run_panels_wait(parsed: Any) -> int:
@@ -258,12 +262,15 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
 def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
     if not parsed.pane_id:
         raise ValueError("runpane panels create requires --pane.")
+    if parsed.no_focus and parsed.focus:
+        raise ValueError("Use either --focus or --no-focus, not both.")
 
     return {
         "paneId": parsed.pane_id,
         "type": "terminal",
         "tool": build_tool_spec(parsed, "panels create"),
-        **optional_value("noFocus", True if parsed.no_focus or parsed.source == "agent" else None),
+        **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)) else None),
+        **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source),
         **optional_value("waitReady", True if parsed.wait_ready else None),
         **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
@@ -285,12 +292,15 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
             payload["readyTimeoutMs"] = parsed.ready_timeout_ms
         if parsed.concurrency is not None:
             payload["concurrency"] = parsed.concurrency
+        apply_pane_focus_options(parsed, payload)
         return payload
 
     if not parsed.repo:
         raise ValueError("runpane panes create requires --repo unless --from-json is used.")
     if not parsed.name:
         raise ValueError("runpane panes create requires --name unless --from-json is used.")
+    if parsed.no_focus and parsed.focus:
+        raise ValueError("Use either --focus or --no-focus, not both.")
 
     return {
         "repo": parsed.repo,
@@ -305,7 +315,21 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("waitReady", True if parsed.wait_ready else None),
         **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
         **optional_value("concurrency", parsed.concurrency),
+        **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)) else None),
+        **optional_value("focus", True if parsed.focus else None),
+        **optional_value("source", parsed.source),
     }
+
+
+def apply_pane_focus_options(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.no_focus and parsed.focus:
+        raise ValueError("Use either --focus or --no-focus, not both.")
+    if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)):
+        request["noFocus"] = True
+    if parsed.focus:
+        request["focus"] = True
+    if parsed.source:
+        request["source"] = parsed.source
 
 
 def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any]:

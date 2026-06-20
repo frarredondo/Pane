@@ -49,6 +49,7 @@ export interface ParsedArgs {
   intervalMs?: number;
   source?: string;
   noFocus?: boolean;
+  focus?: boolean;
   composerStrategy?: string;
   remoteSetupArgs: string[];
 }
@@ -237,6 +238,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--no-focus') {
     parsed.noFocus = true;
+    return;
+  }
+  if (flag === '--focus') {
+    parsed.focus = true;
     return;
   }
 

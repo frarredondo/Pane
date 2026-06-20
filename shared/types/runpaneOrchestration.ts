@@ -97,6 +97,9 @@ export interface RunpanePaneCreateRequest {
   waitReady?: boolean;
   readyTimeoutMs?: number;
   concurrency?: number;
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: RunpanePanelCreateSource;
 }
 
 export interface RunpaneErrorPayload {
@@ -150,6 +153,8 @@ export interface RunpanePaneCreateSuccessItem {
     command: string;
     agent?: RunpaneAgentId;
   };
+  active?: boolean;
+  focused?: boolean;
   readiness?: RunpanePaneReadiness;
 }
 
@@ -226,6 +231,7 @@ export interface RunpanePanelCreateRequest {
   type?: 'terminal';
   tool: RunpaneToolSpec;
   noFocus?: boolean;
+  focus?: boolean;
   source?: RunpanePanelCreateSource;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -237,6 +243,7 @@ export interface RunpanePanelCreateResult {
   panelId: string;
   title: string;
   active: boolean;
+  focused: boolean;
   tool: {
     title: string;
     command: string;
@@ -323,12 +330,15 @@ export interface RunpanePanelSubmitComposerRequest {
 }
 
 export interface RunpanePanelSubmitComposerResult {
-  ok: true;
+  ok: boolean;
   panelId: string;
   paneId?: string;
   inputBytes: number;
   strategy: 'codex-ctrl-enter' | 'enter';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  verifiedSubmitted: boolean;
   sentAt: string;
+  blocked?: RunpanePanelBlockedState;
   nextCommand?: string;
 }
 

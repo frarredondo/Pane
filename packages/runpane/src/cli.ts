@@ -59,6 +59,10 @@ export async function main(argv: string[]): Promise<number> {
   }
   applyParsedArgsToTelemetryContext(telemetryContext, parsed);
 
+  if (parsed.command === 'version') {
+    return dispatchParsedCommand(parsed, telemetryContext);
+  }
+
   return runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
 }
 
