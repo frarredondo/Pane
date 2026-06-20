@@ -1107,6 +1107,7 @@ describe('runpane IPC handlers', () => {
       projectId: project.id,
       baseBranch: 'main',
       toolType: 'none',
+      activateOnCreate: false,
     }, { timeoutMs: 1234 });
     expect(panelManager.createPanel).toHaveBeenCalledWith({
       sessionId: session.id,

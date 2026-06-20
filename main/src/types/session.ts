@@ -28,6 +28,7 @@ export interface Session {
   baseCommit?: string;
   baseBranch?: string;
   pr_renamed?: boolean;
+  activateOnCreate?: boolean;
 }
 
 export interface GitStatus {

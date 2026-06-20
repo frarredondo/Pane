@@ -40,6 +40,7 @@ interface CreateSessionJob {
   baseBranch?: string;
   toolType?: 'claude' | 'none';
   startPinned?: boolean;
+  activateOnCreate?: boolean;
 }
 
 interface ContinueSessionJob {
@@ -291,7 +292,9 @@ export class TaskQueue {
         }
 
         // Emit the session-created event BEFORE running build script so UI shows immediately
-        sessionManager.emitSessionCreated(session);
+        sessionManager.emitSessionCreated(session, {
+          activateOnCreate: job.data.activateOnCreate !== false,
+        });
 
         // Worktree file sync — copy gitignored files in background, then run install
         // Fire-and-forget: copies first, then writes install command to the terminal
