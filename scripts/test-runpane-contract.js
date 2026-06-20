@@ -675,8 +675,20 @@ function checkHelpOutput() {
   };
   const nodeHelp = childProcess.execFileSync(process.execPath, [npmCli, '--help'], { encoding: 'utf8' });
   const nodeInstallHelp = childProcess.execFileSync(process.execPath, [npmCli, 'help', 'install'], { encoding: 'utf8' });
+  const nodePanesHelp = childProcess.execFileSync(process.execPath, [npmCli, 'panes', '--help'], { encoding: 'utf8' });
+  const nodePanelsHelp = childProcess.execFileSync(process.execPath, [npmCli, 'panels', '--help'], { encoding: 'utf8' });
   const pyHelp = childProcess.execFileSync(python, ['-m', 'runpane', '--help'], { encoding: 'utf8', env: pythonEnv, cwd: rootDir });
   const pyInstallHelp = childProcess.execFileSync(python, ['-m', 'runpane', 'help', 'install'], {
+    encoding: 'utf8',
+    env: pythonEnv,
+    cwd: rootDir
+  });
+  const pyPanesHelp = childProcess.execFileSync(python, ['-m', 'runpane', 'panes', '--help'], {
+    encoding: 'utf8',
+    env: pythonEnv,
+    cwd: rootDir
+  });
+  const pyPanelsHelp = childProcess.execFileSync(python, ['-m', 'runpane', 'panels', '--help'], {
     encoding: 'utf8',
     env: pythonEnv,
     cwd: rootDir
@@ -699,6 +711,19 @@ function checkHelpOutput() {
     for (const text of contractFixture.help.installIncludes) {
       assertIncludes(output, text);
     }
+  }
+
+  for (const output of [nodePanesHelp, pyPanesHelp]) {
+    assertIncludes(output, 'Pane session commands.');
+    assertIncludes(output, 'runpane panes list');
+    assertIncludes(output, 'runpane panes create');
+  }
+
+  for (const output of [nodePanelsHelp, pyPanelsHelp]) {
+    assertIncludes(output, 'Terminal-backed panel commands.');
+    assertIncludes(output, 'runpane panels create');
+    assertIncludes(output, 'runpane panels submit-composer');
+    assertIncludes(output, 'runpane panels wait');
   }
 }
 

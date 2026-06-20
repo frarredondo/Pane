@@ -55,6 +55,7 @@ TARGETS = set(RUNPANE_CONTRACT["enums"]["installTargets"])
 FORMATS = set(RUNPANE_CONTRACT["enums"]["artifactFormats"])
 CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
+COMMAND_GROUP_HELP_TOPICS = {"panes", "panels"}
 
 REMOTE_VALUE_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteValue"]}
 REMOTE_BOOLEAN_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteBoolean"]}
@@ -349,6 +350,10 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         args.pop(0)
         return ParsedArgs(command="help", help_topic=" ".join(args) or None)
 
+    group_help_topic = match_command_group_help(args)
+    if group_help_topic:
+        return ParsedArgs(command="help", help_topic=group_help_topic)
+
     matched = match_command(args)
     if not matched:
         raise ValueError(f"Unknown command: {first}\n\n{help_text(None)}")
@@ -435,6 +440,12 @@ def match_command(args: List[str]) -> Optional[Tuple[str, List[str]]]:
         if args[:len(tokens)] == tokens:
             return command, tokens
     return None
+
+
+def match_command_group_help(args: List[str]) -> Optional[str]:
+    if len(args) != 2 or args[1] not in {"-h", "--help"}:
+        return None
+    return args[0] if args[0] in COMMAND_GROUP_HELP_TOPICS else None
 
 
 def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:

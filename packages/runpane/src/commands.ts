@@ -61,6 +61,7 @@ const TARGETS = new Set<string>(RUNPANE_CONTRACT.enums.installTargets);
 const FORMATS = new Set<string>(RUNPANE_CONTRACT.enums.artifactFormats);
 const CHANNELS = new Set<string>(RUNPANE_CONTRACT.enums.channels);
 const AGENTS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels']);
 
 const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.map((flag) => flag.name));
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
@@ -96,6 +97,15 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     return {
       command: 'help',
       helpTopic: args.join(' ') || undefined,
+      ...DEFAULTS
+    };
+  }
+
+  const groupHelpTopic = matchCommandGroupHelp(args);
+  if (groupHelpTopic) {
+    return {
+      command: 'help',
+      helpTopic: groupHelpTopic,
       ...DEFAULTS
     };
   }
@@ -221,6 +231,13 @@ function matchCommand(args: string[]): { name: string; tokens: string[] } | unde
   return COMMAND_MATCHERS.find((command) =>
     command.tokens.every((token, index) => args[index] === token)
   );
+}
+
+function matchCommandGroupHelp(args: string[]): string | undefined {
+  if (args.length !== 2 || !['-h', '--help'].includes(args[1])) {
+    return undefined;
+  }
+  return COMMAND_GROUP_HELP_TOPICS.has(args[0]) ? args[0] : undefined;
 }
 
 function createFlagSet(flags: readonly { name: string; aliases?: readonly string[] }[]): Set<string> {
