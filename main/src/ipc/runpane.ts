@@ -80,7 +80,7 @@ const DEFAULT_PANEL_OUTPUT_LIMIT = 200;
 const DEFAULT_PANEL_SCREEN_LIMIT = 80;
 const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
-const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 1_500;
+const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
 const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
 
 export function registerRunpaneHandlers(
@@ -926,11 +926,11 @@ function detectPanelBlocker(
 }
 
 function ensureSubmitEnter(input: string): string {
-  if (input.endsWith('\r')) {
-    return input;
-  }
   if (input.endsWith('\r\n')) {
     return `${input.slice(0, -2)}\r`;
+  }
+  if (input.endsWith('\r')) {
+    return input;
   }
   if (input.endsWith('\n')) {
     return `${input.slice(0, -1)}\r`;
@@ -1007,8 +1007,7 @@ async function verifyComposerSubmitted(
 
 function looksLikePendingComposer(text: string): boolean {
   return /\[Pasted Content[^\]]*\]/i.test(text) ||
-    /press (ctrl|control)\+enter to submit/i.test(text) ||
-    /ctrl\+enter to submit/i.test(text);
+    /(?:press\s+)?(?:ctrl|control)\+enter\s+to\s+submit/i.test(text);
 }
 
 async function runAgentDoctor(
