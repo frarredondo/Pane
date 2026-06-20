@@ -165,6 +165,9 @@ function compareParserParity() {
       waitCondition: parsed.waitCondition ?? null,
       contains: parsed.contains ?? null,
       intervalMs: parsed.intervalMs ?? null,
+      source: parsed.source ?? null,
+      noFocus: parsed.noFocus ?? false,
+      composerStrategy: parsed.composerStrategy ?? null,
       remoteSetupArgs: parsed.remoteSetupArgs
     };
   });
@@ -216,6 +219,9 @@ for args in samples:
         "waitCondition": parsed.wait_condition,
         "contains": parsed.contains,
         "intervalMs": parsed.interval_ms,
+        "source": parsed.source,
+        "noFocus": parsed.no_focus,
+        "composerStrategy": parsed.composer_strategy,
         "remoteSetupArgs": parsed.remote_setup_args,
     })
 print(json.dumps(normalized))

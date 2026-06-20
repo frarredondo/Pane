@@ -19,11 +19,13 @@ from .installers import (
 )
 from .local_control import (
     run_agents_doctor,
+    run_panels_create,
     run_panels_input,
     run_panels_list,
     run_panels_output,
     run_panels_screen,
     run_panels_submit,
+    run_panels_submit_composer,
     run_panels_wait,
     run_panes_create,
     run_panes_list,
@@ -107,6 +109,9 @@ class ParsedArgs:
     wait_condition: Optional[str] = None
     contains: Optional[str] = None
     interval_ms: Optional[float] = None
+    source: Optional[str] = None
+    no_focus: bool = False
+    composer_strategy: Optional[str] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -161,6 +166,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panes_create(parsed)
     if parsed.command == "panels list":
         return run_panels_list(parsed)
+    if parsed.command == "panels create":
+        return run_panels_create(parsed)
     if parsed.command == "panels output":
         return run_panels_output(parsed)
     if parsed.command == "panels input":
@@ -169,6 +176,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_screen(parsed)
     if parsed.command == "panels submit":
         return run_panels_submit(parsed)
+    if parsed.command == "panels submit-composer":
+        return run_panels_submit_composer(parsed)
     if parsed.command == "panels wait":
         return run_panels_wait(parsed)
     if parsed.command == "agents doctor":
@@ -431,6 +440,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--wait-ready":
         parsed.wait_ready = True
         return
+    if flag == "--no-focus":
+        parsed.no_focus = True
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -538,6 +550,16 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             raise ValueError("--interval-ms must be a positive number.")
         parsed.interval_ms = interval_ms
         return
+    if flag == "--source":
+        if value not in {"user", "agent"}:
+            raise ValueError("--source must be one of: user, agent.")
+        parsed.source = value
+        return
+    if flag == "--strategy":
+        if value not in {"auto", "codex-ctrl-enter", "enter"}:
+            raise ValueError("--strategy must be one of: auto, codex-ctrl-enter, enter.")
+        parsed.composer_strategy = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -548,11 +570,13 @@ def is_runpane_local_command(command: str) -> bool:
         "repos add",
         "panes list",
         "panes create",
+        "panels create",
         "panels list",
         "panels output",
         "panels input",
         "panels screen",
         "panels submit",
+        "panels submit-composer",
         "panels wait",
         "agents doctor",
     }

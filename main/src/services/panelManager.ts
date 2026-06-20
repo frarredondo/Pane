@@ -102,34 +102,43 @@ export class PanelManager {
         metadata
       };
       
-      // Save to database and set as active in a single transaction
-      databaseService.createPanelAndSetActive({
+      const panelRecord = {
         id: panel.id,
         sessionId: panel.sessionId,
         type: panel.type,
         title: panel.title,
         state: panel.state,
         metadata: panel.metadata
-      });
-      
-      // Update the panel state to reflect it's now active
-      panel.state.isActive = true;
-      panel.metadata.lastActiveAt = new Date().toISOString();
+      };
+
+      const shouldActivate = request.activate !== false;
+      if (shouldActivate) {
+        // Save to database and set as active in a single transaction
+        databaseService.createPanelAndSetActive(panelRecord);
+
+        // Update the panel state to reflect it's now active
+        panel.state.isActive = true;
+        panel.metadata.lastActiveAt = new Date().toISOString();
+      } else {
+        databaseService.createPanel(panelRecord);
+      }
       
       // Cache in memory
       this.panels.set(panelId, panel);
       
-      // Update panel states to reflect the new active panel
-      const panels = this.getPanelsForSession(request.sessionId);
-      panels.forEach(p => {
-        const isActive = p.id === panelId;
-        if (p.state.isActive !== isActive) {
-          p.state.isActive = isActive;
-          if (isActive) {
-            p.metadata.lastActiveAt = new Date().toISOString();
+      if (shouldActivate) {
+        // Update panel states to reflect the new active panel
+        const panels = this.getPanelsForSession(request.sessionId);
+        panels.forEach(p => {
+          const isActive = p.id === panelId;
+          if (p.state.isActive !== isActive) {
+            p.state.isActive = isActive;
+            if (isActive) {
+              p.metadata.lastActiveAt = new Date().toISOString();
+            }
           }
-        }
-      });
+        });
+      }
       
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:created', panel);

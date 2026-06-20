@@ -183,6 +183,19 @@
       ]
     },
     {
+      "name": "panels create",
+      "summary": "Create a terminal-backed tool panel inside an existing Pane session.",
+      "usage": [
+        "runpane panels create --pane <pane-id> --agent <codex|claude> [--no-focus] [--wait-ready] --yes [--json]",
+        "runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--no-focus] --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "panelCreateRequest",
+        "panelCreateResult"
+      ]
+    },
+    {
       "name": "panels list",
       "summary": "List tool panels inside a Pane session.",
       "usage": [
@@ -234,6 +247,18 @@
       "jsonSchemas": [
         "panelSubmitRequest",
         "panelSubmitResult"
+      ]
+    },
+    {
+      "name": "panels submit-composer",
+      "summary": "Submit an agent composer using the panel-appropriate key sequence.",
+      "usage": [
+        "runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "panelSubmitComposerRequest",
+        "panelSubmitComposerResult"
       ]
     },
     {
@@ -454,6 +479,16 @@
         "name": "--input-file",
         "value": "<path|->",
         "description": "Read panel input from a file or stdin."
+      },
+      {
+        "name": "--source",
+        "value": "<user|agent>",
+        "description": "Identify whether a local-control mutation is user-initiated or agent/orchestrator-initiated."
+      },
+      {
+        "name": "--strategy",
+        "value": "<auto|codex-ctrl-enter|enter>",
+        "description": "Composer submit key sequence strategy for panels submit-composer."
       }
     ],
     "localBoolean": [
@@ -464,6 +499,10 @@
       {
         "name": "--wait-ready",
         "description": "Wait for created terminal panels to be ready before returning."
+      },
+      {
+        "name": "--no-focus",
+        "description": "Create the panel in the background without changing the active panel."
       }
     ]
   },
@@ -483,6 +522,7 @@
         "  runpane repos add --path <path> [--name <name>]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [--wait-ready]",
+        "  runpane panels create --pane <pane-id> --agent codex --no-focus --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
@@ -761,6 +801,39 @@
         "  --interval-ms <milliseconds>   Poll interval; defaults to 500",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "panels create": [
+        "Create a terminal-backed tool panel inside an existing Pane session.",
+        "",
+        "Usage:",
+        "  runpane panels create --pane <pane-id> --agent <codex|claude> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--no-focus] --yes [--json]",
+        "",
+        "Options:",
+        "  --pane <pane-id>              Existing Pane session to add the panel to.",
+        "  --agent <codex|claude>        Built-in agent command template to launch.",
+        "  --tool-command <command>      Custom terminal command to launch.",
+        "  --title <title>               Panel title override.",
+        "  --initial-input, --prompt     Initial input to send after the tool starts.",
+        "  --initial-input-file <path|-> Read initial input from a file or stdin.",
+        "  --no-focus                    Create the panel in the background.",
+        "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
+        "  --wait-ready                  Wait until the terminal tool is ready.",
+        "  --ready-timeout-ms <ms>       Readiness wait timeout.",
+        "  --yes                         Skip confirmation prompts.",
+        "  --json                        Print JSON output."
+      ],
+      "panels submit-composer": [
+        "Submit an agent composer using the panel-appropriate key sequence.",
+        "",
+        "Usage:",
+        "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
+        "",
+        "Options:",
+        "  --panel <panel-id>            Terminal panel id.",
+        "  --strategy <strategy>         Defaults to auto; Codex sends Ctrl+Enter and other panels send Enter.",
+        "  --yes                         Skip confirmation prompts.",
+        "  --json                        Print JSON output."
       ]
     },
     "pip": {
@@ -778,6 +851,7 @@
         "  runpane repos add --path <path> [--name <name>]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [--wait-ready]",
+        "  python -m runpane panels create --pane <pane-id> --agent codex --no-focus --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
@@ -1045,6 +1119,39 @@
         "  --interval-ms <milliseconds>   Poll interval; defaults to 500",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "panels create": [
+        "Create a terminal-backed tool panel inside an existing Pane session.",
+        "",
+        "Usage:",
+        "  python -m runpane panels create --pane <pane-id> --agent <codex|claude> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  python -m runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--no-focus] --yes [--json]",
+        "",
+        "Options:",
+        "  --pane <pane-id>              Existing Pane session to add the panel to.",
+        "  --agent <codex|claude>        Built-in agent command template to launch.",
+        "  --tool-command <command>      Custom terminal command to launch.",
+        "  --title <title>               Panel title override.",
+        "  --initial-input, --prompt     Initial input to send after the tool starts.",
+        "  --initial-input-file <path|-> Read initial input from a file or stdin.",
+        "  --no-focus                    Create the panel in the background.",
+        "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
+        "  --wait-ready                  Wait until the terminal tool is ready.",
+        "  --ready-timeout-ms <ms>       Readiness wait timeout.",
+        "  --yes                         Skip confirmation prompts.",
+        "  --json                        Print JSON output."
+      ],
+      "panels submit-composer": [
+        "Submit an agent composer using the panel-appropriate key sequence.",
+        "",
+        "Usage:",
+        "  python -m runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
+        "",
+        "Options:",
+        "  --panel <panel-id>            Terminal panel id.",
+        "  --strategy <strategy>         Defaults to auto; Codex sends Ctrl+Enter and other panels send Enter.",
+        "  --yes                         Skip confirmation prompts.",
+        "  --json                        Print JSON output."
       ]
     }
   },
@@ -1373,6 +1480,32 @@
         "30000",
         "--interval-ms",
         "500",
+        "--json"
+      ],
+      [
+        "panels",
+        "create",
+        "--pane",
+        "pane-1",
+        "--agent",
+        "codex",
+        "--source",
+        "agent",
+        "--no-focus",
+        "--wait-ready",
+        "--ready-timeout-ms",
+        "15000",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "submit-composer",
+        "--panel",
+        "panel-1",
+        "--strategy",
+        "auto",
+        "--yes",
         "--json"
       ]
     ],
@@ -2764,6 +2897,247 @@
         }
       },
       "additionalProperties": false
+    },
+    "panelCreateRequest": {
+      "type": "object",
+      "required": [
+        "paneId",
+        "tool"
+      ],
+      "properties": {
+        "paneId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "terminal"
+        },
+        "tool": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "noFocus": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "waitReady": {
+          "type": "boolean"
+        },
+        "readyTimeoutMs": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelCreateResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panelId",
+        "title",
+        "active",
+        "tool"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "tool": {
+          "type": "object",
+          "required": [
+            "title",
+            "command"
+          ],
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "agent": {
+              "enum": [
+                "codex",
+                "claude"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "readiness": {
+          "type": "object",
+          "required": [
+            "ok",
+            "condition",
+            "matched",
+            "timedOut",
+            "elapsedMs",
+            "state"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "condition": {
+              "enum": [
+                "initialized",
+                "ready",
+                "idle",
+                "text"
+              ]
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "timedOut": {
+              "type": "boolean"
+            },
+            "elapsedMs": {
+              "type": "number"
+            },
+            "state": {
+              "type": "object",
+              "required": [
+                "initialized"
+              ],
+              "properties": {
+                "initialized": {
+                  "type": "boolean"
+                },
+                "isAlternateScreen": {
+                  "type": "boolean"
+                },
+                "activityStatus": {
+                  "enum": [
+                    "active",
+                    "idle"
+                  ]
+                },
+                "isCliReady": {
+                  "type": "boolean"
+                },
+                "isCliPanel": {
+                  "type": "boolean"
+                },
+                "agentType": {
+                  "enum": [
+                    "codex",
+                    "claude"
+                  ]
+                },
+                "lastActivity": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "blocked": {
+              "type": "object",
+              "required": [
+                "kind",
+                "message"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "codex-update",
+                    "agent-prompt",
+                    "unknown"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "suggestedCommand": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "nextCommand": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "nextCommand": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelSubmitComposerRequest": {
+      "type": "object",
+      "required": [
+        "panelId"
+      ],
+      "properties": {
+        "panelId": {
+          "type": "string"
+        },
+        "strategy": {
+          "enum": [
+            "auto",
+            "codex-ctrl-enter",
+            "enter"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelSubmitComposerResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "panelId",
+        "inputBytes",
+        "strategy",
+        "sentAt"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "inputBytes": {
+          "type": "number"
+        },
+        "strategy": {
+          "enum": [
+            "codex-ctrl-enter",
+            "enter"
+          ]
+        },
+        "sentAt": {
+          "type": "string"
+        },
+        "nextCommand": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -2858,6 +3232,20 @@
           ]
         },
         {
+          "name": "panels create",
+          "summary": "Create sibling reviewer or helper tabs inside an existing pane without stealing focus from the implementation tab.",
+          "arguments": [
+            "--pane <pane-id>",
+            "--agent <codex|claude>",
+            "--tool-command <command>",
+            "--source <user|agent>",
+            "--no-focus",
+            "--wait-ready",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
           "name": "panels list",
           "summary": "List tool panels inside a Pane session.",
           "arguments": [
@@ -2908,6 +3296,16 @@
             "--yes",
             "--json",
             "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "panels submit-composer",
+          "summary": "Submit an agent composer with the correct key sequence, including Ctrl+Enter for Codex.",
+          "arguments": [
+            "--panel <panel-id>",
+            "--strategy <auto|codex-ctrl-enter|enter>",
+            "--yes",
+            "--json"
           ]
         },
         {
@@ -3689,6 +4087,138 @@
         "notes": [
           "If blocked is present, do not assume success. Use blocked.suggestedCommand or inspect `panels screen`.",
           "The default timeout and screen are intentionally small for agent context safety."
+        ]
+      },
+      "panels create": {
+        "name": "panels create",
+        "summary": "Create a terminal-backed tool panel inside an existing pane.",
+        "details": "Use this to add reviewer or helper tabs to the current pane without creating a new session. Agent/orchestrator-created panels should pass --source agent or --no-focus so the user stays in the implementation tab. The daemon initializes the terminal immediately and can wait for CLI readiness.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Existing Pane session id to add the panel to."
+          },
+          {
+            "name": "--agent",
+            "value": "<codex|claude>",
+            "required": false,
+            "description": "Built-in agent command template to launch."
+          },
+          {
+            "name": "--tool-command",
+            "value": "<command>",
+            "required": false,
+            "description": "Custom terminal command to launch instead of a built-in agent."
+          },
+          {
+            "name": "--title",
+            "value": "<title>",
+            "required": false,
+            "description": "Panel title override."
+          },
+          {
+            "name": "--initial-input",
+            "value": "<text>",
+            "required": false,
+            "description": "Initial input to send after the tool starts."
+          },
+          {
+            "name": "--initial-input-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Read initial input from a file or stdin."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source; agent implies background creation."
+          },
+          {
+            "name": "--no-focus",
+            "required": false,
+            "description": "Create the panel in the background without changing active panel."
+          },
+          {
+            "name": "--wait-ready",
+            "required": false,
+            "description": "Wait until the terminal tool is ready."
+          },
+          {
+            "name": "--ready-timeout-ms",
+            "value": "<ms>",
+            "required": false,
+            "description": "Readiness wait timeout."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panels create --pane <pane-id> --agent claude --source agent --no-focus --wait-ready --yes --json",
+          "runpane panels create --pane <pane-id> --agent codex --source agent --no-focus --wait-ready --yes --json"
+        ],
+        "jsonSchemas": [
+          "panelCreateRequest",
+          "panelCreateResult"
+        ],
+        "notes": [
+          "Use this for same-pane reviewer loops after PR creation/testing.",
+          "For agent-created panels, prefer --source agent or --no-focus to avoid stealing focus from the user or implementation tab."
+        ]
+      },
+      "panels submit-composer": {
+        "name": "panels submit-composer",
+        "summary": "Submit an agent composer using the panel-appropriate key sequence.",
+        "details": "Use this after sending text into an agent composer when plain Enter is not the right submit action. Auto mode sends Ctrl+Enter for Codex panels and Enter for other panels.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": true,
+            "description": "Terminal panel id."
+          },
+          {
+            "name": "--strategy",
+            "value": "<auto|codex-ctrl-enter|enter>",
+            "required": false,
+            "description": "Composer submit key sequence strategy."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panels submit-composer --panel <codex-panel-id> --strategy auto --yes --json",
+          "runpane panels submit-composer --panel <panel-id> --strategy enter --yes --json"
+        ],
+        "jsonSchemas": [
+          "panelSubmitComposerRequest",
+          "panelSubmitComposerResult"
+        ],
+        "notes": [
+          "Use `panels input` or `panels submit` to write prompt text first; this command only submits the current composer.",
+          "Codex composer submission uses ESC [13;5u, not a plain Enter."
         ]
       }
     },

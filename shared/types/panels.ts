@@ -160,6 +160,7 @@ export interface CreatePanelRequest {
   title?: string;                // Optional custom title
   initialState?: TerminalPanelState | DiffPanelState | ExplorerPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | BrowserPanelState | { customState?: unknown };
   metadata?: Partial<ToolPanelMetadata>; // Optional metadata overrides
+  activate?: boolean;            // Defaults to true; false creates the panel in the background.
 }
 
 export interface UpdatePanelRequest {

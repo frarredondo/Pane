@@ -88,6 +88,23 @@ def run_panels_list(parsed: Any) -> int:
     return 0
 
 
+def run_panels_create(parsed: Any) -> int:
+    request = build_panel_create_request(parsed)
+    confirm_panel_create(parsed, request)
+    result = invoke_daemon(
+        "runpane:panels:create",
+        [request],
+        pane_dir=parsed.pane_dir,
+        timeout_ms=(parsed.ready_timeout_ms or 30_000) + 10_000,
+    )
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print_panel_create_result(result)
+    return 0 if result.get("ok") else 1
+
+
 def run_panels_output(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels output requires --panel.")
@@ -159,6 +176,25 @@ def run_panels_submit(parsed: Any) -> int:
     return 0
 
 
+def run_panels_submit_composer(parsed: Any) -> int:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels submit-composer requires --panel.")
+    confirm_panel_submit_composer(parsed)
+
+    result = invoke_daemon("runpane:panels:submit-composer", [{
+        "panelId": parsed.panel_id,
+        "strategy": parsed.composer_strategy,
+    }], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print(f"Submitted composer with {result.get('strategy')} to panel {result.get('panelId')}.")
+        if result.get("nextCommand"):
+            print(f"Next: {result.get('nextCommand')}")
+    return 0
+
+
 def run_panels_wait(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels wait requires --panel.")
@@ -219,6 +255,21 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
     }
 
 
+def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
+    if not parsed.pane_id:
+        raise ValueError("runpane panels create requires --pane.")
+
+    return {
+        "paneId": parsed.pane_id,
+        "type": "terminal",
+        "tool": build_tool_spec(parsed, "panels create"),
+        **optional_value("noFocus", True if parsed.no_focus or parsed.source == "agent" else None),
+        **optional_value("source", parsed.source),
+        **optional_value("waitReady", True if parsed.wait_ready else None),
+        **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
+    }
+
+
 def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
     if parsed.from_json:
         payload = json.loads(read_input_source(parsed.from_json))
@@ -257,7 +308,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
     }
 
 
-def build_tool_spec(parsed: Any) -> Dict[str, Any]:
+def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any]:
     if parsed.agent and parsed.tool_command:
         raise ValueError("Use either --agent or --tool-command, not both.")
 
@@ -266,7 +317,7 @@ def build_tool_spec(parsed: Any) -> Dict[str, Any]:
 
     if not agent and not parsed.tool_command:
         if not is_interactive_shell():
-            raise ValueError("runpane panes create requires --agent or --tool-command in non-interactive shells.")
+            raise ValueError(f"runpane {command} requires --agent or --tool-command in non-interactive shells.")
         agent = ask_agent_choice()
 
     if agent:
@@ -277,7 +328,7 @@ def build_tool_spec(parsed: Any) -> Dict[str, Any]:
         }
 
     if not parsed.tool_command:
-        raise ValueError("runpane panes create requires --agent or --tool-command.")
+        raise ValueError(f"runpane {command} requires --agent or --tool-command.")
 
     return {
         "command": parsed.tool_command,
@@ -318,6 +369,19 @@ def confirm_pane_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
+def confirm_panel_create(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels create mutates Pane state. Rerun with --yes in non-interactive shells.")
+
+    tool = request.get("tool") or {}
+    label = tool.get("agent") or tool.get("command")
+    answer = input(f"Create a terminal panel for {label} in pane {request.get('paneId')}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
 def confirm_panel_input(parsed: Any, request: Dict[str, Any], command: str = "input") -> None:
     if parsed.yes:
         return
@@ -329,6 +393,17 @@ def confirm_panel_input(parsed: Any, request: Dict[str, Any], command: str = "in
     verb = "Submit" if command == "submit" else "Send"
     enter_suffix = " plus Enter" if command == "submit" else ""
     answer = input(f"{verb} {input_bytes} byte{suffix}{enter_suffix} to panel {request.get('panelId')}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def confirm_panel_submit_composer(parsed: Any) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels submit-composer mutates a Pane terminal. Rerun with --yes in non-interactive shells.")
+
+    answer = input(f"Submit composer in panel {parsed.panel_id}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 
@@ -408,6 +483,20 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
         else:
             error = item.get("error") or {}
             print(f"Failed {name}: {error.get('message', 'unknown error')}", file=sys.stderr)
+
+
+def print_panel_create_result(result: Dict[str, Any]) -> None:
+    active = " active" if result.get("active") else " background"
+    print(f"Created panel {result.get('panelId')} in pane {result.get('paneId')}: {result.get('title')}{active}")
+    readiness = result.get("readiness")
+    if readiness:
+        ready_state = "yes" if readiness.get("ok") else "timed out" if readiness.get("timedOut") else "blocked"
+        print(f"Ready: {ready_state} after {readiness.get('elapsedMs')}ms")
+        blocked = readiness.get("blocked")
+        if blocked:
+            print(f"Blocked: {blocked.get('message')}")
+    if result.get("nextCommand"):
+        print(f"Next: {result.get('nextCommand')}")
 
 
 def print_panel_wait_result(result: Dict[str, Any]) -> None:

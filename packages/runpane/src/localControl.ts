@@ -120,6 +120,31 @@ interface PanelListResult {
   panels: PanelSummary[];
 }
 
+interface PanelCreateRequest {
+  paneId: string;
+  type?: 'terminal';
+  tool: PaneToolSpec;
+  noFocus?: boolean;
+  source?: 'user' | 'agent';
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+}
+
+interface PanelCreateResult {
+  ok: boolean;
+  paneId: string;
+  panelId: string;
+  title: string;
+  active: boolean;
+  tool: {
+    title: string;
+    command: string;
+    agent?: RunpaneAgent;
+  };
+  readiness?: PanelReadiness;
+  nextCommand?: string;
+}
+
 interface PanelOutputRecord {
   type: string;
   data: unknown;
@@ -197,6 +222,16 @@ interface PanelSubmitResult {
   paneId?: string;
   inputBytes: number;
   enter: 'cr';
+  sentAt: string;
+  nextCommand?: string;
+}
+
+interface PanelSubmitComposerResult {
+  ok: true;
+  panelId: string;
+  paneId?: string;
+  inputBytes: number;
+  strategy: 'codex-ctrl-enter' | 'enter';
   sentAt: string;
   nextCommand?: string;
 }
@@ -323,6 +358,24 @@ export async function runPanelsList(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+export async function runPanelsCreate(parsed: ParsedArgs): Promise<number> {
+  const request = await buildPanelCreateRequest(parsed);
+  await confirmPanelCreate(parsed, request);
+
+  const result = await invokeDaemon<PanelCreateResult>('runpane:panels:create', [request], {
+    paneDir: parsed.paneDir,
+    timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    printPanelCreateResult(result);
+  }
+
+  return result.ok ? 0 : 1;
+}
+
 export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
   if (!parsed.panelId) {
     throw new Error('runpane panels output requires --panel.');
@@ -408,6 +461,31 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.panelId) {
+    throw new Error('runpane panels submit-composer requires --panel.');
+  }
+  await confirmPanelSubmitComposer(parsed);
+
+  const result = await invokeDaemon<PanelSubmitComposerResult>('runpane:panels:submit-composer', [{
+    panelId: parsed.panelId,
+    strategy: parsed.composerStrategy,
+  }], {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(`Submitted composer with ${result.strategy} to panel ${result.panelId}.`);
+    if (result.nextCommand) {
+      console.log(`Next: ${result.nextCommand}`);
+    }
+  }
+
+  return 0;
+}
+
 export async function runPanelsWait(parsed: ParsedArgs): Promise<number> {
   if (!parsed.panelId) {
     throw new Error('runpane panels wait requires --panel.');
@@ -483,6 +561,23 @@ function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 'submit' 
   };
 }
 
+async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateRequest> {
+  if (!parsed.paneId) {
+    throw new Error('runpane panels create requires --pane.');
+  }
+  const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
+
+  return {
+    paneId: parsed.paneId,
+    type: 'terminal',
+    tool: await buildToolSpec(parsed, 'panels create'),
+    noFocus: parsed.noFocus || source === 'agent' || undefined,
+    source,
+    waitReady: parsed.waitReady || undefined,
+    readyTimeoutMs: parsed.readyTimeoutMs,
+  };
+}
+
 async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateRequest> {
   if (parsed.fromJson) {
     const payload = JSON.parse(readInputSource(parsed.fromJson)) as unknown;
@@ -552,7 +647,7 @@ async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Prom
   }
 }
 
-async function buildToolSpec(parsed: ParsedArgs): Promise<PaneToolSpec> {
+async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Promise<PaneToolSpec> {
   if (parsed.agent && parsed.toolCommand) {
     throw new Error('Use either --agent or --tool-command, not both.');
   }
@@ -562,7 +657,7 @@ async function buildToolSpec(parsed: ParsedArgs): Promise<PaneToolSpec> {
 
   if (!agent && !parsed.toolCommand) {
     if (!isInteractiveShell()) {
-      throw new Error('runpane panes create requires --agent or --tool-command in non-interactive shells.');
+      throw new Error(`runpane ${command} requires --agent or --tool-command in non-interactive shells.`);
     }
     agent = await askAgentChoice();
   }
@@ -576,7 +671,7 @@ async function buildToolSpec(parsed: ParsedArgs): Promise<PaneToolSpec> {
   }
 
   if (!parsed.toolCommand) {
-    throw new Error('runpane panes create requires --agent or --tool-command.');
+    throw new Error(`runpane ${command} requires --agent or --tool-command.`);
   }
 
   return {
@@ -619,6 +714,27 @@ async function confirmPaneCreate(parsed: ParsedArgs, request: PaneCreateRequest)
   }
 }
 
+async function confirmPanelCreate(parsed: ParsedArgs, request: PanelCreateRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panels create mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const label = 'agent' in request.tool ? request.tool.agent : request.tool.command;
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Create a terminal panel for ${label} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function confirmPanelInput(
   parsed: ParsedArgs,
   request: PanelInputRequest,
@@ -638,6 +754,26 @@ async function confirmPanelInput(
     const verb = command === 'submit' ? 'Submit' : 'Send';
     const suffix = command === 'submit' ? ' plus Enter' : '';
     const answer = (await rl.question(`${verb} ${byteCount} byte${byteCount === 1 ? '' : 's'}${suffix} to panel ${request.panelId}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmPanelSubmitComposer(parsed: ParsedArgs): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panels submit-composer mutates a Pane terminal. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Submit composer in panel ${parsed.panelId}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }
@@ -734,6 +870,19 @@ function printPaneCreateResult(result: PaneCreateResult): void {
       continue;
     }
     console.error(`Failed ${item.name ?? `pane ${item.index}`}: ${item.error?.message ?? 'unknown error'}`);
+  }
+}
+
+function printPanelCreateResult(result: PanelCreateResult): void {
+  console.log(`Created panel ${result.panelId} in pane ${result.paneId}: ${result.title}${result.active ? ' active' : ' background'}`);
+  if (result.readiness) {
+    console.log(`Ready: ${result.readiness.ok ? 'yes' : result.readiness.timedOut ? 'timed out' : 'blocked'} after ${result.readiness.elapsedMs}ms`);
+    if (result.readiness.blocked) {
+      console.log(`Blocked: ${result.readiness.blocked.message}`);
+    }
+  }
+  if (result.nextCommand) {
+    console.log(`Next: ${result.nextCommand}`);
   }
 }
 

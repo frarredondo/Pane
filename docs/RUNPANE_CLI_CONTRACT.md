@@ -183,11 +183,13 @@ Brief tools:
 - `repos add`: Register an existing git repository with the running Pane app.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes create`: Create one or more Pane sessions in a saved repository and open a terminal-backed tool tab.
+- `panels create`: Create sibling reviewer or helper tabs inside an existing pane without stealing focus from the implementation tab.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
 - `panels screen`: Read a compact current-screen view from a terminal panel.
 - `panels input`: Send input bytes to a terminal panel.
 - `panels submit`: Send text plus terminal Enter to a terminal panel.
+- `panels submit-composer`: Submit an agent composer with the correct key sequence, including Ctrl+Enter for Codex.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 
 Managed AGENTS.md block body:
@@ -263,8 +265,11 @@ These flags are consumed by local daemon-control commands:
 --interval-ms <milliseconds>
 --text <text>
 --input-file <path|->
+--source <user|agent>
+--strategy <auto|codex-ctrl-enter|enter>
 --json
 --wait-ready
+--no-focus
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes list`, `runpane panes create`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

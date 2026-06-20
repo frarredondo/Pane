@@ -15,11 +15,13 @@ import {
 } from './installers';
 import {
   runAgentsDoctor,
+  runPanelsCreate,
   runPanelsInput,
   runPanelsList,
   runPanelsOutput,
   runPanelsScreen,
   runPanelsSubmit,
+  runPanelsSubmitComposer,
   runPanelsWait,
   runPanesCreate,
   runPanesList,
@@ -102,6 +104,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return runPanelsList(parsed);
   }
 
+  if (parsed.command === 'panels create') {
+    return runPanelsCreate(parsed);
+  }
+
   if (parsed.command === 'panels output') {
     return runPanelsOutput(parsed);
   }
@@ -116,6 +122,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panels submit') {
     return runPanelsSubmit(parsed);
+  }
+
+  if (parsed.command === 'panels submit-composer') {
+    return runPanelsSubmitComposer(parsed);
   }
 
   if (parsed.command === 'panels wait') {

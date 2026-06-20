@@ -434,6 +434,66 @@ describe('runpane IPC handlers', () => {
     expect(terminalPanelManager.isTerminalInitialized).toHaveBeenCalledWith(terminalPanel.id);
   });
 
+  it('creates a background terminal panel inside an existing pane', async () => {
+    const reviewerPanel: ToolPanel = {
+      id: 'panel-reviewer',
+      sessionId: session.id,
+      type: 'terminal',
+      title: 'Claude Code',
+      state: {
+        isActive: false,
+        customState: {
+          agentType: 'claude',
+          isCliPanel: true,
+        },
+      },
+      metadata: {
+        createdAt: '2026-01-01T00:03:00.000Z',
+        lastActiveAt: '2026-01-01T00:03:00.000Z',
+        position: 1,
+      },
+    };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(reviewerPanel);
+
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:create', [{
+      paneId: session.id,
+      tool: {
+        agent: 'claude',
+        initialInput: '/review',
+      },
+      source: 'agent',
+      noFocus: true,
+    }]);
+
+    expect(panelManager.createPanel).toHaveBeenCalledWith({
+      sessionId: session.id,
+      type: 'terminal',
+      title: RUNPANE_CONTRACT.agentTemplates.claude.title,
+      initialState: {
+        initialCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
+        initialInput: '/review',
+        agentType: 'claude',
+        isCliPanel: true,
+      },
+      activate: false,
+    });
+    expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(
+      reviewerPanel,
+      session.worktreePath,
+      null,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      paneId: session.id,
+      panelId: reviewerPanel.id,
+      active: false,
+      nextCommand: `runpane panels output --panel ${reviewerPanel.id} --limit 200 --json`,
+    });
+  });
+
   it('reads panel output as records and concatenated text', async () => {
     const services = createServices({
       sessionManager: {
@@ -708,6 +768,34 @@ describe('runpane IPC handlers', () => {
       'runpane_local_control',
       expect.objectContaining({
         input: 'echo hello\n',
+      }),
+    );
+  });
+
+  it('submits a Codex composer with Ctrl+Enter bytes', async () => {
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:submit-composer', [{
+      panelId: terminalPanel.id,
+      strategy: 'auto',
+    }]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\x1b[13;5u');
+    expect(result).toMatchObject({
+      ok: true,
+      panelId: terminalPanel.id,
+      paneId: session.id,
+      inputBytes: 7,
+      strategy: 'codex-ctrl-enter',
+      nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
+    });
+    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
+      'runpane_local_control',
+      expect.objectContaining({
+        action: 'panels:submit-composer',
+        status: 'success',
+        input_bytes: 7,
       }),
     );
   });

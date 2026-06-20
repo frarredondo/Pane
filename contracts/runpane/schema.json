@@ -348,11 +348,13 @@
         "repos add",
         "panes list",
         "panes create",
+        "panels create",
         "panels list",
         "panels output",
         "panels input",
         "panels screen",
         "panels submit",
+        "panels submit-composer",
         "panels wait",
         "agent-context"
       ],
@@ -390,6 +392,9 @@
         "panes create": {
           "$ref": "#/$defs/helpLines"
         },
+        "panels create": {
+          "$ref": "#/$defs/helpLines"
+        },
         "panels list": {
           "$ref": "#/$defs/helpLines"
         },
@@ -403,6 +408,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels submit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels submit-composer": {
           "$ref": "#/$defs/helpLines"
         },
         "panels wait": {

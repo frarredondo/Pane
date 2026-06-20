@@ -219,6 +219,33 @@ export interface RunpanePanelListResult {
   panels: RunpanePanelSummary[];
 }
 
+export type RunpanePanelCreateSource = 'user' | 'agent';
+
+export interface RunpanePanelCreateRequest {
+  paneId: string;
+  type?: 'terminal';
+  tool: RunpaneToolSpec;
+  noFocus?: boolean;
+  source?: RunpanePanelCreateSource;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+}
+
+export interface RunpanePanelCreateResult {
+  ok: boolean;
+  paneId: string;
+  panelId: string;
+  title: string;
+  active: boolean;
+  tool: {
+    title: string;
+    command: string;
+    agent?: RunpaneAgentId;
+  };
+  readiness?: RunpanePaneReadiness;
+  nextCommand?: string;
+}
+
 export interface RunpanePanelOutputRecord {
   type: string;
   data: unknown;
@@ -284,6 +311,23 @@ export interface RunpanePanelSubmitResult {
   paneId?: string;
   inputBytes: number;
   enter: 'cr';
+  sentAt: string;
+  nextCommand?: string;
+}
+
+export type RunpanePanelSubmitComposerStrategy = 'auto' | 'codex-ctrl-enter' | 'enter';
+
+export interface RunpanePanelSubmitComposerRequest {
+  panelId: string;
+  strategy?: RunpanePanelSubmitComposerStrategy;
+}
+
+export interface RunpanePanelSubmitComposerResult {
+  ok: true;
+  panelId: string;
+  paneId?: string;
+  inputBytes: number;
+  strategy: 'codex-ctrl-enter' | 'enter';
   sentAt: string;
   nextCommand?: string;
 }
