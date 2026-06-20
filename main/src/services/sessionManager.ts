@@ -491,8 +491,11 @@ export class SessionManager extends EventEmitter {
     });
   }
 
-  emitSessionCreated(session: Session): void {
-    this.emit('session-created', session);
+  emitSessionCreated(session: Session, options: { activateOnCreate?: boolean } = {}): void {
+    this.emit('session-created', {
+      ...session,
+      activateOnCreate: options.activateOnCreate !== false,
+    });
   }
 
   updateSession(id: string, update: SessionUpdate): void {

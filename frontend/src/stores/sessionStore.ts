@@ -92,6 +92,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   
   addSession: (session) => set((state) => {
     const normalizedSession = normalizeSession(session);
+    const shouldActivate = normalizedSession.activateOnCreate !== false;
     
     // Initialize arrays if they don't exist
     const sessionWithArrays = {
@@ -102,7 +103,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     
     return {
       sessions: [sessionWithArrays, ...state.sessions],  // Add new sessions at the top
-      activeSessionId: normalizedSession.id  // Automatically set as active
+      activeSessionId: shouldActivate ? normalizedSession.id : state.activeSessionId
     };
   }),
   

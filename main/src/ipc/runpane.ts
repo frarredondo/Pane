@@ -624,6 +624,7 @@ async function createPaneItem(
       projectId: repo.id,
       baseBranch: item.baseBranch,
       toolType: 'none',
+      activateOnCreate: options.activate !== false,
     }, { timeoutMs: options.timeoutMs });
 
     const session = sessionManager.getSession(sessionResult.sessionId);
