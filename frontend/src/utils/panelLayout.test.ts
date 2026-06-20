@@ -116,6 +116,13 @@ describe('addPanelToGroup', () => {
     expect(next.activePanelId).toBe('b');
   });
 
+  it('appends the panel without activating it when requested', () => {
+    const root = group('g1', ['a'], 'a');
+    const next = addPanelToGroup(root, 'g1', 'b', { activate: false }) as PanelGroupNode;
+    expect(next.panelIds).toEqual(['a', 'b']);
+    expect(next.activePanelId).toBe('a');
+  });
+
   it('is idempotent: returns the same tree when the panel exists anywhere', () => {
     const root = split('s1', 'row', [group('g1', ['a']), group('g2', ['b'])]);
     expect(addPanelToGroup(root, 'g1', 'b')).toBe(root);

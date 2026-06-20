@@ -100,25 +100,30 @@ export function createSingleGroupLayout(
 }
 
 /**
- * Add a panel to a group (appended, made active). Idempotent: if the panel id
- * already exists anywhere in the tree, the tree is returned unchanged. This
- * guards against the create-path double-append (handlePanelCreate and the
- * panel:created event both try to insert the same panel).
+ * Add a panel to a group. Idempotent: if the panel id already exists anywhere
+ * in the tree, the tree is returned unchanged. This guards against the
+ * create-path double-append (handlePanelCreate and the panel:created event
+ * both try to insert the same panel).
  */
 export function addPanelToGroup(
   root: PanelLayoutNode,
   groupId: string,
   panelId: string,
+  options: { activate?: boolean } = {},
 ): PanelLayoutNode {
   if (allPanelIds(root).includes(panelId)) return root;
+  const activate = options.activate !== false;
 
   function insert(node: PanelLayoutNode): PanelLayoutNode {
     if (node.type === 'group') {
       if (node.id !== groupId) return node;
+      const activePanelId = activate || !node.activePanelId
+        ? panelId
+        : node.activePanelId;
       return {
         ...node,
         panelIds: [...node.panelIds, panelId],
-        activePanelId: panelId,
+        activePanelId,
       };
     }
     return { ...node, children: node.children.map(insert) };

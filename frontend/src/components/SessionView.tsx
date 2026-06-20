@@ -352,7 +352,9 @@ export const SessionView = memo(() => {
             const focusedGid = usePanelStore.getState().focusedGroupIds[sid];
             const group = (focusedGid && findGroup(currentLayout.root, focusedGid))
               || primaryGroup(currentLayout.root);
-            const nextRoot = addPanelToGroup(currentLayout.root, group.id, panel.id);
+            const nextRoot = addPanelToGroup(currentLayout.root, group.id, panel.id, {
+              activate: panel.state.isActive,
+            });
             if (nextRoot !== currentLayout.root) {
               applyLayout(sid, { ...currentLayout, root: nextRoot });
             }
