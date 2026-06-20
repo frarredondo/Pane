@@ -346,8 +346,10 @@
         "agents doctor",
         "repos list",
         "repos add",
+        "panes",
         "panes list",
         "panes create",
+        "panels",
         "panels create",
         "panels list",
         "panels output",
@@ -386,10 +388,16 @@
         "repos add": {
           "$ref": "#/$defs/helpLines"
         },
+        "panes": {
+          "$ref": "#/$defs/helpLines"
+        },
         "panes list": {
           "$ref": "#/$defs/helpLines"
         },
         "panes create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels": {
           "$ref": "#/$defs/helpLines"
         },
         "panels create": {
