@@ -37,10 +37,11 @@ export interface ResolveReleaseOptions {
   platform: PanePlatform;
   format: ArtifactFormat;
   target: 'client' | 'daemon';
+  fetchTimeoutMs?: number;
 }
 
 export async function resolveRelease(options: ResolveReleaseOptions): Promise<ResolvedRelease> {
-  const release = await fetchRelease(options.version);
+  const release = await fetchRelease(options.version, options.fetchTimeoutMs);
   const format = options.format === 'auto' ? defaultFormat(options.platform, options.target) : options.format;
   const artifact = findArtifact(release, options.platform, format);
   const preferredDownloadUrl = buildPreferredDownloadUrl(options, format, release);
@@ -55,24 +56,41 @@ export async function resolveRelease(options: ResolveReleaseOptions): Promise<Re
   };
 }
 
-export async function fetchRelease(version: string): Promise<GitHubRelease> {
+export async function fetchRelease(version: string, timeoutMs?: number): Promise<GitHubRelease> {
   const normalized = version === 'latest' ? 'latest' : version.startsWith('v') ? `tags/${version}` : `tags/v${version}`;
-  const response = await fetch(`${GITHUB_API_BASE}/${normalized}`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      'user-agent': 'runpane-installer'
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+
+  try {
+    const response = await fetch(`${GITHUB_API_BASE}/${normalized}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'runpane-installer'
+      },
+      signal: controller?.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Pane release ${version}: ${response.status} ${response.statusText}`);
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch Pane release ${version}: ${response.status} ${response.statusText}`);
+    const release = await response.json() as GitHubRelease;
+    if (release.draft || release.prerelease) {
+      throw new Error(`Release ${release.tag_name} is not a stable public release.`);
+    }
+    return release;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Timed out fetching Pane release ${version} after ${timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
   }
-
-  const release = await response.json() as GitHubRelease;
-  if (release.draft || release.prerelease) {
-    throw new Error(`Release ${release.tag_name} is not a stable public release.`);
-  }
-  return release;
 }
 
 export function findArtifact(

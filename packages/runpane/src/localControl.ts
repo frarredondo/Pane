@@ -596,7 +596,7 @@ async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateR
 
 async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateRequest> {
   if (parsed.fromJson) {
-    const payload = JSON.parse(readInputSource(parsed.fromJson)) as unknown;
+    const payload = JSON.parse(stripUtf8Bom(readInputSource(parsed.fromJson))) as unknown;
     const request = parsePaneCreateRequestPayload(payload);
     if (parsed.dryRun) {
       request.dryRun = true;
@@ -856,6 +856,10 @@ function readInputSource(source: string): string {
     return fs.readFileSync(0, 'utf8');
   }
   return fs.readFileSync(source, 'utf8');
+}
+
+function stripUtf8Bom(value: string): string {
+  return value.replace(/^\uFEFF+/, '');
 }
 
 function printJson(value: unknown): void {

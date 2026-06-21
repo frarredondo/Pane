@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from .generated_contract import RUNPANE_CONTRACT
@@ -41,11 +42,17 @@ def build_agent_context_result(command_name: Optional[str] = None) -> Dict[str, 
 
 
 def get_command_detail(command_name: str) -> Dict[str, Any]:
+    normalized = normalize_command_name(command_name)
     for command in RUNPANE_CONTRACT["agentContext"]["commands"].values():
-        if command["name"] == command_name:
+        if normalize_command_name(command["name"]) == normalized:
             return command
 
     raise ValueError(f"Unknown runpane command: {command_name}. Expected one of: {', '.join(command_names())}")
+
+
+def normalize_command_name(command_name: str) -> str:
+    without_binary = re.sub(r"^runpane\s+", "", command_name.strip(), flags=re.IGNORECASE)
+    return re.sub(r"[._\s-]+", "", without_binary.lower())
 
 
 def render_brief(result: Dict[str, Any]) -> str:

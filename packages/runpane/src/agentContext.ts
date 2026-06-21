@@ -59,13 +59,22 @@ export function buildAgentContextResult(commandName?: string): AgentContextResul
 }
 
 function getCommandDetail(commandName: string): AgentContextCommand {
+  const normalized = normalizeCommandName(commandName);
   const detail = Object.values(RUNPANE_CONTRACT.agentContext.commands)
-    .find((command) => command.name === commandName);
+    .find((command) => normalizeCommandName(command.name) === normalized);
   if (detail) {
     return detail;
   }
 
   throw new Error(`Unknown runpane command: ${commandName}. Expected one of: ${commandNames().join(', ')}`);
+}
+
+function normalizeCommandName(commandName: string): string {
+  return commandName
+    .trim()
+    .replace(/^runpane\s+/i, '')
+    .toLowerCase()
+    .replace(/[._\s-]+/g, '');
 }
 
 function renderBrief(result: AgentContextBriefResult): string {
