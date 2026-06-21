@@ -688,6 +688,80 @@ finally:
   });
 }
 
+function checkWindowsPaneVersionDoesNotLaunchExecutable() {
+  if (process.platform === 'win32') {
+    const versionModule = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'version.js'));
+    const originalSpawnSync = childProcess.spawnSync;
+    const paneExe = 'C:\\Program Files\\Pane\\Pane.exe';
+    const calls = [];
+
+    try {
+      childProcess.spawnSync = (command, args, options) => {
+        calls.push({ command, args, options });
+        assert.notStrictEqual(command, paneExe);
+        assert.strictEqual(command, 'powershell.exe');
+        assert.strictEqual(options.env.RUNPANE_PANE_VERSION_PATH, paneExe);
+        return { stdout: '2.3.19\r\n', stderr: '', status: 0 };
+      };
+
+      assert.strictEqual(versionModule.getPaneVersion(paneExe), '2.3.19');
+      assert.strictEqual(calls.length, 1);
+
+      childProcess.spawnSync = (command) => {
+        assert.notStrictEqual(command, paneExe);
+        return { error: new Error('metadata unavailable'), stdout: '', stderr: '' };
+      };
+      assert.strictEqual(versionModule.getPaneVersion(paneExe), undefined);
+    } finally {
+      childProcess.spawnSync = originalSpawnSync;
+    }
+  }
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import runpane.version as version
+
+original_platform = version.sys.platform
+original_run = version.subprocess.run
+pane_exe = r"C:\\Program Files\\Pane\\Pane.exe"
+calls = []
+
+class Result:
+    def __init__(self, stdout):
+        self.stdout = stdout
+        self.stderr = ""
+
+def fake_run(args, **kwargs):
+    calls.append(args)
+    assert args[0] == "powershell.exe"
+    assert kwargs["env"]["RUNPANE_PANE_VERSION_PATH"] == pane_exe
+    return Result("2.3.19\\n")
+
+try:
+    version.sys.platform = "win32"
+    version.subprocess.run = fake_run
+    first = version.pane_version(pane_exe)
+
+    def missing_metadata(args, **kwargs):
+        assert args[0] == "powershell.exe"
+        return Result("")
+
+    version.subprocess.run = missing_metadata
+    second = version.pane_version(pane_exe)
+finally:
+    version.sys.platform = original_platform
+    version.subprocess.run = original_run
+
+print(json.dumps({"first": first, "second": second, "calls": len(calls)}))
+`);
+
+  assert.deepStrictEqual(JSON.parse(pythonOutput), {
+    first: '2.3.19',
+    second: null,
+    calls: 1
+  });
+}
+
 async function checkFromJsonAcceptsBom() {
   const payloadPath = path.join(os.tmpdir(), `runpane-from-json-bom-${process.pid}.json`);
   const payload = {
@@ -920,6 +994,7 @@ async function runChecks() {
   compareExistingReusePolicy();
   checkPlatformMatchingEdgeCases();
   await checkExistingDaemonShortCircuit();
+  checkWindowsPaneVersionDoesNotLaunchExecutable();
   await checkFromJsonAcceptsBom();
   checkHelpOutput();
   compareAgentContextParity();
