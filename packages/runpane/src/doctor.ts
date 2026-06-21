@@ -11,6 +11,7 @@ import { resolveRelease } from './releases';
 import { getPaneVersion, getWrapperVersion } from './version';
 
 const DOCTOR_DAEMON_TIMEOUT_MS = 5_000;
+const DOCTOR_RELEASE_TIMEOUT_MS = 5_000;
 
 interface DaemonDoctorResult {
   ok: true;
@@ -96,11 +97,12 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
   const paneDir = resolvePaneDirectory(parsed.paneDir);
   const endpoint = getPaneDaemonEndpoint(paneDir);
   const platform = collectPlatform();
-  const release = platform.ok
-    ? await collectReleaseCheck(parsed, source, platform.platform)
-    : { ok: false, error: platform.error };
+  const releasePromise = platform.ok
+    ? collectReleaseCheck(parsed, source, platform.platform)
+    : Promise.resolve({ ok: false, error: platform.error });
   const installedPane = collectInstalledPane(parsed.panePath);
-  const daemon = await collectDaemonHealth(parsed.paneDir, endpoint);
+  const daemonPromise = collectDaemonHealth(parsed.paneDir, endpoint);
+  const [release, daemon] = await Promise.all([releasePromise, daemonPromise]);
 
   return {
     ok: release.ok && daemon.reachable,
@@ -144,6 +146,7 @@ async function collectReleaseCheck(
       platform,
       format: parsed.format,
       target: 'client',
+      fetchTimeoutMs: DOCTOR_RELEASE_TIMEOUT_MS,
     });
     return {
       ok: true,

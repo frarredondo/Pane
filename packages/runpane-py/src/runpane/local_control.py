@@ -279,7 +279,7 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
 
 def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
     if parsed.from_json:
-        payload = json.loads(read_input_source(parsed.from_json))
+        payload = json.loads(strip_utf8_bom(read_input_source(parsed.from_json)))
         if not isinstance(payload, dict):
             raise ValueError("--from-json payload must be an object.")
         if parsed.dry_run:
@@ -454,6 +454,10 @@ def read_input_source(source: str) -> str:
         return sys.stdin.read()
     with open(source, "r", encoding="utf-8") as handle:
         return handle.read()
+
+
+def strip_utf8_bom(value: str) -> str:
+    return value.lstrip("\ufeff")
 
 
 def print_json(value: Any) -> None:

@@ -32,8 +32,9 @@ def resolve_release(
     platform: PanePlatform,
     format_name: str,
     target: str,
+    fetch_timeout_seconds: float = 30,
 ) -> ResolvedRelease:
-    release = fetch_release(version)
+    release = fetch_release(version, timeout_seconds=fetch_timeout_seconds)
     selected_format = default_format(platform, target) if format_name == "auto" else format_name
     artifact = find_artifact(release, platform, selected_format)
     preferred = build_preferred_download_url(channel, source, platform, selected_format, release)
@@ -48,13 +49,13 @@ def resolve_release(
     )
 
 
-def fetch_release(version: str) -> Dict[str, Any]:
+def fetch_release(version: str, timeout_seconds: float = 30) -> Dict[str, Any]:
     normalized = "latest" if version == "latest" else f"tags/{version if version.startswith('v') else 'v' + version}"
     req = urllib.request.Request(
         f"{GITHUB_API_BASE}/{normalized}",
         headers={"Accept": "application/vnd.github+json", "User-Agent": "runpane-installer"},
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
+    with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
         release = json.loads(response.read().decode("utf-8"))
 
     if release.get("draft") or release.get("prerelease"):

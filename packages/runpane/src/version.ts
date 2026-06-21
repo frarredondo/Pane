@@ -2,6 +2,8 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+const PANE_VERSION_TIMEOUT_MS = 2_000;
+
 export function getWrapperVersion(): string {
   const packagePath = path.resolve(__dirname, '..', 'package.json');
   try {
@@ -22,8 +24,13 @@ export function getPaneVersion(executablePath: string): string | undefined {
   try {
     const result = childProcess.spawnSync(executablePath, ['--version'], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: PANE_VERSION_TIMEOUT_MS,
+      windowsHide: true
     });
+    if (result.error) {
+      return undefined;
+    }
     const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
     return output || undefined;
   } catch {

@@ -379,7 +379,7 @@ import runpane.releases as releases
 from runpane.platforms import PanePlatform
 
 release = json.loads(sys.stdin.read())
-releases.fetch_release = lambda version: release
+releases.fetch_release = lambda version, **kwargs: release
 resolved = releases.resolve_release(
     version="latest",
     channel="stable",
@@ -400,6 +400,28 @@ print(resolved.preferred_download_url)
   assert.strictEqual(parsedPythonUrl.searchParams.get('file'), null);
   assert.strictEqual(parsedPythonUrl.searchParams.get('channel'), 'stable');
   assert.strictEqual(parsedPythonUrl.searchParams.get('source'), 'pip');
+}
+
+async function checkNodeReleaseTimeout() {
+  const releases = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'releases.js'));
+  const originalFetch = global.fetch;
+
+  global.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => {
+      const error = new Error('Aborted');
+      error.name = 'AbortError';
+      reject(error);
+    });
+  });
+
+  try {
+    await assert.rejects(
+      () => releases.fetchRelease('latest', 1),
+      /Timed out fetching Pane release latest after 1ms/
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
 }
 
 function assertNoSensitiveTelemetryValues(properties) {
@@ -666,6 +688,95 @@ finally:
   });
 }
 
+async function checkFromJsonAcceptsBom() {
+  const payloadPath = path.join(os.tmpdir(), `runpane-from-json-bom-${process.pid}.json`);
+  const payload = {
+    repo: 'active',
+    panes: [{
+      name: 'bom-test',
+      tool: {
+        command: 'echo hello'
+      }
+    }]
+  };
+  fs.writeFileSync(payloadPath, `\uFEFF\uFEFF${JSON.stringify(payload)}`, 'utf8');
+
+  const daemonClientPath = path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js');
+  const localControlPath = path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js');
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const daemonClient = require(daemonClientPath);
+  const { runPanesCreate } = require(localControlPath);
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  let capturedNodeRequest;
+
+  daemonClient.invokeDaemon = async (_channel, args) => {
+    capturedNodeRequest = args[0];
+    return { ok: true, dryRun: true, preview: { panes: [] }, items: [] };
+  };
+  console.log = () => {};
+
+  try {
+    const parsed = parseRunpaneArgs(['panes', 'create', '--from-json', payloadPath, '--dry-run', '--yes', '--json']);
+    const code = await runPanesCreate(parsed);
+    assert.strictEqual(code, 0);
+    assert.strictEqual(capturedNodeRequest.repo, 'active');
+    assert.strictEqual(capturedNodeRequest.panes[0].name, 'bom-test');
+    assert.strictEqual(capturedNodeRequest.dryRun, true);
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+    fs.rmSync(payloadPath, { force: true });
+  }
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import os
+import tempfile
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+payload = {
+    "repo": "active",
+    "panes": [{
+        "name": "bom-test",
+        "tool": {"command": "echo hello"},
+    }],
+}
+handle = tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8")
+handle.write("\\ufeff\\ufeff")
+json.dump(payload, handle)
+handle.close()
+captured = {}
+
+def fake_invoke(channel, args, **kwargs):
+    captured["request"] = args[0]
+    return {"ok": True, "dryRun": True, "preview": {"panes": []}, "items": []}
+
+local_control.invoke_daemon = fake_invoke
+try:
+    parsed = parse_args(["panes", "create", "--from-json", handle.name, "--dry-run", "--yes", "--json"])
+    code = local_control.run_panes_create(parsed)
+    print(json.dumps({"code": code, "request": captured["request"]}))
+finally:
+    os.unlink(handle.name)
+`);
+  const pythonJson = pythonOutput.split(/\r?\n/).filter(Boolean).pop();
+  assert.deepStrictEqual(JSON.parse(pythonJson), {
+    code: 0,
+    request: {
+      repo: 'active',
+      panes: [{
+        name: 'bom-test',
+        tool: {
+          command: 'echo hello'
+        }
+      }],
+      dryRun: true
+    }
+  });
+}
+
 function checkHelpOutput() {
   const python = findPython();
   const pythonEnv = {
@@ -755,6 +866,16 @@ function compareAgentContextParity() {
   assert.strictEqual(nodeDetail.mode, 'command');
   assert.strictEqual(nodeDetail.command.name, 'panes create');
 
+  const nodeDottedDetail = JSON.parse(runNode(['agent-context', '--command', 'panes.create', '--json']));
+  const pyDottedDetail = JSON.parse(runPython(['agent-context', '--command', 'panes.create', '--json']));
+  assert.deepStrictEqual(nodeDottedDetail, nodeDetail);
+  assert.deepStrictEqual(pyDottedDetail, nodeDetail);
+
+  const nodePrefixedDetail = JSON.parse(runNode(['agent-context', '--command', 'runpane panels submit-composer', '--json']));
+  const pyPrefixedDetail = JSON.parse(runPython(['agent-context', '--command', 'runpane panels submit-composer', '--json']));
+  assert.deepStrictEqual(pyPrefixedDetail, nodePrefixedDetail);
+  assert.strictEqual(nodePrefixedDetail.command.name, 'panels submit-composer');
+
   assertIncludes(runNode(['agent-context']), 'Detailed definitions: runpane agent-context --command <command> [--json]');
   assertIncludes(runPython(['agent-context', '--command', 'panes create']), 'runpane panes create');
 }
@@ -799,8 +920,10 @@ async function runChecks() {
   compareExistingReusePolicy();
   checkPlatformMatchingEdgeCases();
   await checkExistingDaemonShortCircuit();
+  await checkFromJsonAcceptsBom();
   checkHelpOutput();
   compareAgentContextParity();
+  await checkNodeReleaseTimeout();
   checkNoArgsAndSetupFallback();
   console.log('runpane CLI contract checks passed');
 }

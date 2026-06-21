@@ -3300,6 +3300,7 @@ export const RUNPANE_CONTRACT = {
       "rules": [
         "Start with `runpane doctor --json` to understand wrapper, platform, daemon reachability, and the next safe commands before mutating Pane state.",
         "Use `runpane agent-context --json` for the full agent-facing CLI context, or `runpane agent-context --command <command> --json` for one detailed command definition.",
+        "For `agent-context --command`, use canonical spaced names like `panes create`; copied forms like `panes.create` or `runpane panes create` are accepted too.",
         "Use `runpane repos list --json` to find the saved repository when unsure after doctor shows the daemon is reachable.",
         "If WSL cannot reach Pane or `runpane` resolves to a broken Windows shim, the user may be running Windows Pane; try `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`.",
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
@@ -3686,7 +3687,8 @@ export const RUNPANE_CONTRACT = {
           "agentContextCommandResult"
         ],
         "notes": [
-          "Default output is brief so AGENTS.md can point here without bloating context."
+          "Default output is brief so AGENTS.md can point here without bloating context.",
+          "`--command` accepts canonical spaced names and common copied forms, including `panes.create` and `runpane panes create`."
         ]
       },
       "repos list": {

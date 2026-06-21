@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 from .daemon_client import get_pane_daemon_endpoint, invoke_daemon, resolve_pane_directory
@@ -10,6 +11,7 @@ from .releases import resolve_release
 from .version import pane_version, wrapper_version
 
 DOCTOR_DAEMON_TIMEOUT_MS = 5_000
+DOCTOR_RELEASE_TIMEOUT_SECONDS = 5
 
 
 def run_doctor(parsed, source: str = "pip") -> int:
@@ -27,13 +29,20 @@ def build_doctor_report(parsed, source: str) -> Dict[str, Any]:
     pane_dir = resolve_pane_directory(parsed.pane_dir)
     endpoint = get_pane_daemon_endpoint(pane_dir)
     platform_result = collect_platform()
-    release = (
-        collect_release_check(parsed, source, platform_result["platform"])
-        if platform_result["ok"]
-        else {"ok": False, "error": platform_result["error"]}
-    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        release_future = (
+            executor.submit(collect_release_check, parsed, source, platform_result["platform"])
+            if platform_result["ok"]
+            else None
+        )
+        daemon_future = executor.submit(collect_daemon_health, parsed.pane_dir, endpoint)
+        release = (
+            release_future.result()
+            if release_future
+            else {"ok": False, "error": platform_result["error"]}
+        )
+        daemon = daemon_future.result()
     installed_pane = collect_installed_pane(parsed.pane_path)
-    daemon = collect_daemon_health(parsed.pane_dir, endpoint)
 
     return {
         "ok": bool(release["ok"] and daemon["reachable"]),
@@ -72,6 +81,7 @@ def collect_release_check(parsed, source: str, platform: PanePlatform) -> Dict[s
             platform=platform,
             format_name=parsed.format,
             target="client",
+            fetch_timeout_seconds=DOCTOR_RELEASE_TIMEOUT_SECONDS,
         )
         return {
             "ok": True,
