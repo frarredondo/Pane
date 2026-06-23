@@ -31,6 +31,9 @@ export interface TerminalPanelState {
   shellType?: string;            // bash, zsh, etc.
   initialCommand?: string;       // Command to run on terminal init (e.g., "claude --dangerously-skip-permissions")
   initialInput?: string;         // First input to send once the initial command is ready
+  initialInputMode?: 'stdin' | 'argument'; // How initialInput is delivered to the initial command
+  initialInputSubmitStrategy?: 'enter' | 'codex-ctrl-enter'; // How stdin initialInput should be submitted
+  initialInputDeliveryVersion?: number; // Bumps when a feature changes delivery semantics
   initialInputSentAt?: string;   // Set after initialInput has been written once
   initialInputError?: string;    // Best-effort error if initialInput could not be written
   
@@ -155,6 +158,7 @@ export interface ToolPanelMetadata {
 }
 
 export interface CreatePanelRequest {
+  id?: string;                    // Optional stable ID for managed singleton panels
   sessionId: string;
   type: ToolPanelType;
   title?: string;                // Optional custom title

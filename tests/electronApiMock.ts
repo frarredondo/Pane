@@ -87,7 +87,62 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     const configState: Record<string, unknown> = {
       remoteDaemon: clone(remoteDaemonConfig),
+      defaultOrchestratorAgent: 'claude',
       ...clone(mockOptions.initialConfig ?? {}),
+    };
+    const paneChatSession = {
+      id: '__pane_chat_session__',
+      name: 'Pane Chat',
+      worktreePath: '/tmp/.pane',
+      prompt: '',
+      status: 'stopped',
+      createdAt: new Date(0).toISOString(),
+      lastActivity: new Date(0).toISOString(),
+      output: [],
+      jsonMessages: [],
+      isRunning: false,
+      permissionMode: 'ignore',
+      displayOrder: 0,
+      isFavorite: false,
+      toolType: 'none',
+      archived: false,
+      isHidden: true,
+    };
+    const createPaneChatPanel = (agent: 'claude' | 'codex') => ({
+      id: agent === 'codex' ? '__pane_chat_terminal_codex__' : '__pane_chat_terminal__',
+      sessionId: '__pane_chat_session__',
+      type: 'terminal',
+      title: agent === 'codex' ? 'Pane Chat - Codex' : 'Pane Chat',
+      state: {
+        isActive: true,
+        hasBeenViewed: false,
+        customState: {
+          initialCommand: agent === 'codex' ? 'codex' : 'claude --dangerously-skip-permissions',
+          initialInput: 'Use the pane-orchestrator skill and initialize yourself as Pane Chat.',
+          initialInputMode: 'argument',
+          initialInputSubmitStrategy: 'enter',
+          agentType: agent,
+          isCliPanel: true,
+          isCliReady: false,
+        },
+      },
+      metadata: {
+        createdAt: new Date(0).toISOString(),
+        lastActiveAt: new Date(0).toISOString(),
+        position: agent === 'codex' ? 1 : 0,
+        permanent: true,
+      },
+    });
+    const createPaneChatState = () => {
+      const agent = configState.defaultOrchestratorAgent === 'codex' ? 'codex' : 'claude';
+      return {
+        session: clone(paneChatSession),
+        panel: clone(createPaneChatPanel(agent)),
+        agent,
+        cwd: '/tmp/.pane',
+        guidePath: '/tmp/.pane/skills/pane-chat/runpane-orchestrator.md',
+        started: false,
+      };
     };
     let mockSessions: Array<Record<string, unknown>> = [];
     let cloudDisconnectError: string | null = null;
@@ -280,6 +335,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onGitHubAuthTerminalExit: (callback: (...args: unknown[]) => void) => subscribe('onboarding:github-auth-pty-exit', callback),
         setupDefaultRepo: () => success({}),
         supportProject: () => success({}),
+      }),
+      paneChat: namespace({
+        getOrCreate: () => success(createPaneChatState()),
+        setAgent: (agent: 'claude' | 'codex') => {
+          configState.defaultOrchestratorAgent = agent === 'codex' ? 'codex' : 'claude';
+          return success(createPaneChatState());
+        },
       }),
       panels: namespace({
         getSessionPanels: () => success([]),

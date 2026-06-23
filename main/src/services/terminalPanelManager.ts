@@ -4,6 +4,7 @@ import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntime
 import { panelManager } from './panelManager';
 import * as os from 'os';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { getShellPath } from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import type { AnalyticsManager } from './analyticsManager';
@@ -27,6 +28,12 @@ const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
 const MAX_ALTERNATE_SCREEN_BUFFER_SIZE = 100_000; // 100KB of recent TUI redraw state
 
 type CliAgentType = NonNullable<TerminalPanelState['agentType']>;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
 
 export interface TerminalPanelSnapshot {
   initialized: true;
@@ -196,6 +203,10 @@ export class TerminalPanelManager {
     return undefined;
   }
 
+  private quoteCommandArgument(value: string): string {
+    return `"${value.replace(/(["$`])/g, '\\$1')}"`;
+  }
+
   private resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState): {
     commandToRun: string;
     customState: TerminalPanelState;
@@ -218,12 +229,29 @@ export class TerminalPanelManager {
       !initialCommand.includes('--session-id') &&
       !initialCommand.includes('--resume')
     ) {
+      const existingClaudeSessionId = isValidUuid(customState.agentSessionId)
+        ? customState.agentSessionId
+        : isValidUuid(panelId)
+          ? panelId
+          : undefined;
+      const claudeSessionId = existingClaudeSessionId ?? randomUUID();
+      const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId);
+      const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
+        ? ` ${this.quoteCommandArgument(customState.initialInput)}`
+        : '';
+
       nextState.hasClaudeSessionId = true;
+      nextState.agentSessionId = claudeSessionId;
       nextState.wasInterrupted = undefined;
+      if (initialPromptArg && !canResumeClaudeSession) {
+        nextState.initialInputSentAt = new Date().toISOString();
+        nextState.initialInputError = undefined;
+      }
+
       return {
-        commandToRun: customState.hasClaudeSessionId
-          ? `claude --resume ${panelId} --dangerously-skip-permissions`
-          : `${initialCommand} --session-id ${panelId}`,
+        commandToRun: canResumeClaudeSession
+          ? `claude --resume ${claudeSessionId} --dangerously-skip-permissions`
+          : `${initialCommand} --session-id ${claudeSessionId}${initialPromptArg}`,
         customState: nextState,
         isCliCommand: true,
       };
@@ -253,10 +281,28 @@ export class TerminalPanelManager {
       };
     }
 
+    if (
+      agentType === 'codex' &&
+      customState.initialInputMode === 'argument' &&
+      customState.initialInput?.trim() &&
+      !customState.initialInputSentAt
+    ) {
+      nextState.initialInputSentAt = new Date().toISOString();
+      nextState.initialInputError = undefined;
+      return {
+        commandToRun: `${initialCommand} ${this.quoteCommandArgument(customState.initialInput)}`,
+        customState: nextState,
+        isCliCommand: true,
+      };
+    }
+
     return { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
   }
 
-  private async markInitialInputSent(panelId: string): Promise<string | null> {
+  private async markInitialInputSent(panelId: string): Promise<{
+    input: string;
+    submitStrategy: NonNullable<TerminalPanelState['initialInputSubmitStrategy']>;
+  } | null> {
     const currentPanel = panelManager.getPanel(panelId);
     if (!currentPanel) {
       return null;
@@ -269,11 +315,12 @@ export class TerminalPanelManager {
     }
 
     const input = customState.initialInput;
+    const submitStrategy = customState.initialInputSubmitStrategy ?? 'enter';
     customState.initialInputSentAt = new Date().toISOString();
     customState.initialInputError = undefined;
     state.customState = customState;
     await panelManager.updatePanel(panelId, { state });
-    return input;
+    return { input, submitStrategy };
   }
 
   private async markInitialInputError(panelId: string, error: unknown): Promise<void> {
@@ -290,16 +337,32 @@ export class TerminalPanelManager {
   }
 
   private sendInitialInputOnce(panelId: string): void {
-    this.markInitialInputSent(panelId).then((initialInput) => {
-      if (!initialInput) {
+    this.markInitialInputSent(panelId).then((delivery) => {
+      if (!delivery) {
         return;
       }
 
-      this.writeToTerminal(panelId, initialInput.endsWith('\r') ? initialInput : `${initialInput}\r`);
+      this.writeInitialInput(panelId, delivery.input, delivery.submitStrategy);
     }).catch((error) => {
       console.warn(`[TerminalPanelManager] Failed to send initial input for panel ${panelId}:`, error);
       this.markInitialInputError(panelId, error).catch(() => {});
     });
+  }
+
+  private writeInitialInput(
+    panelId: string,
+    input: string,
+    submitStrategy: NonNullable<TerminalPanelState['initialInputSubmitStrategy']>,
+  ): void {
+    if (submitStrategy === 'codex-ctrl-enter') {
+      this.writeToTerminal(panelId, input);
+      setTimeout(() => {
+        this.writeToTerminal(panelId, '\x1b[13;5u\r');
+      }, 500);
+      return;
+    }
+
+    this.writeToTerminal(panelId, input.endsWith('\r') ? input : `${input}\r`);
   }
 
   private stripAnsiSequences(output: string): string {
