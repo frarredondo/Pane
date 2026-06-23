@@ -1404,7 +1404,7 @@ export const SessionView = memo(() => {
     setLayoutSwapped(prev => !prev);
   }, []);
 
-  // Auto-collapse sidebars for immersive panels (diff, explorer)
+  // Focused tool panels reserve the right/detail rail for the main workspace.
   const isImmersivePanel = currentActivePanel ? currentActivePanel.type === 'diff' || currentActivePanel.type === 'explorer' : false;
   const setImmersiveMode = useNavigationStore(s => s.setImmersiveMode);
   const immersiveMode = useNavigationStore(s => s.immersiveMode);
@@ -1487,13 +1487,6 @@ export const SessionView = memo(() => {
   // Layout-aware detail panel toggle that also handles immersive mode override
   const handleToggleDetailPanel = useCallback(() => {
     if (immersiveMode) {
-      setImmersiveMode(false);
-      if (layoutSwapped) {
-        setIsDetailCollapsed(false);
-        localStorage.setItem('pane-detail-collapsed', 'false');
-      } else {
-        setDetailVisible(true);
-      }
       return;
     }
     if (layoutSwapped) {
@@ -1501,7 +1494,7 @@ export const SessionView = memo(() => {
     } else {
       setDetailVisible(v => !v);
     }
-  }, [immersiveMode, layoutSwapped, setImmersiveMode, toggleDetailCollapse]);
+  }, [immersiveMode, layoutSwapped, toggleDetailCollapse]);
 
   // Terminal collapse state with localStorage persistence (collapsed by default)
   const [isTerminalCollapsed, setIsTerminalCollapsed] = useState(() => {
@@ -1533,7 +1526,7 @@ export const SessionView = memo(() => {
     label: 'Toggle Detail Panel',
     keys: 'mod+shift+b',
     category: 'view',
-    enabled: () => isInSessionView,
+    enabled: () => isInSessionView && !immersiveMode,
     action: handleToggleDetailPanel,
   });
 
@@ -1731,6 +1724,8 @@ export const SessionView = memo(() => {
           onPanelCreate={handlePanelCreate}
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
+          detailPanelToggleDisabled={immersiveMode}
+          detailPanelToggleDisabledReason="Hidden in Explorer and Diff views"
           primaryGroupPanels={topBarPanels}
           primaryGroupActivePanelId={isSplitLayout ? (currentActivePanel?.id ?? null) : primaryGroupNode?.activePanelId}
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}
