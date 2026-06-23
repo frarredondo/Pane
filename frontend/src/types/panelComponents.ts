@@ -24,6 +24,8 @@ export interface PanelTabBarProps {
   context?: PanelContext;  // Optional context to filter available panels
   onToggleDetailPanel?: () => void;
   detailPanelVisible?: boolean;
+  detailPanelToggleDisabled?: boolean;
+  detailPanelToggleDisabledReason?: string;
 
   // --- Optional split tab group integration ---
   /** Panels in layout order for the primary group (overrides internal sort). */

@@ -60,6 +60,9 @@ interface SidebarProps {
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
 const REMOTE_DESKTOP_TOOLTIP = 'Use Remote Desktop to access the host device for Electron apps, native windows, and UI running on the remote machine.';
+const RESOURCE_POPOVER_WIDTH = 320;
+const RESOURCE_POPOVER_GAP = 8;
+const RESOURCE_POPOVER_VIEWPORT_MARGIN = 8;
 type SidebarSection = 'pinned' | 'repositories';
 
 function formatMemory(mb: number): string {
@@ -241,10 +244,21 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
     const updatePosition = () => {
       if (!resourceMenuButtonRef.current) return;
       const rect = resourceMenuButtonRef.current.getBoundingClientRect();
+      const popoverWidth = Math.min(
+        RESOURCE_POPOVER_WIDTH,
+        window.innerWidth - RESOURCE_POPOVER_VIEWPORT_MARGIN * 2,
+      );
+      const rightSideLeft = rect.right + RESOURCE_POPOVER_GAP;
+      const leftSideLeft = rect.left - RESOURCE_POPOVER_GAP - popoverWidth;
+      const maxLeft = window.innerWidth - popoverWidth - RESOURCE_POPOVER_VIEWPORT_MARGIN;
+      const left = rightSideLeft <= maxLeft
+        ? rightSideLeft
+        : Math.max(RESOURCE_POPOVER_VIEWPORT_MARGIN, leftSideLeft);
+
       setResourcePopoverStyle({
         position: 'fixed',
         top: rect.bottom + 8,
-        right: Math.max(8, window.innerWidth - rect.right),
+        left: Math.min(left, maxLeft),
         zIndex: 10000,
       });
     };
@@ -367,8 +381,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
   }, [projects, activeProjectId]);
 
   // Collapsed sidebar view
-  const immersiveMode = useNavigationStore(s => s.immersiveMode);
-  if (collapsed || immersiveMode) {
+  if (collapsed) {
     return (
       <>
         <div
@@ -661,7 +674,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, isSettingsOpen, onSetti
       {showResourcePopover && createPortal(
         <div
           ref={resourcePopoverRef}
-          className="bg-surface-primary border border-border-subtle/60 rounded-lg shadow-dropdown-elevated backdrop-blur-sm animate-dropdown-enter overflow-hidden w-[320px]"
+          className="bg-surface-primary border border-border-subtle/60 rounded-lg shadow-dropdown-elevated backdrop-blur-sm animate-dropdown-enter overflow-hidden w-[320px] max-w-[calc(100vw-16px)]"
           style={resourcePopoverStyle}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-border-secondary">

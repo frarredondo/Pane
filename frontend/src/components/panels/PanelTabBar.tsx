@@ -60,6 +60,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   context = 'worktree',  // Default to worktree for backward compatibility
   onToggleDetailPanel,
   detailPanelVisible,
+  detailPanelToggleDisabled = false,
+  detailPanelToggleDisabledReason = 'Unavailable in this view',
   // Optional split tab group integration
   primaryGroupPanels,
   primaryGroupActivePanelId,
@@ -674,16 +676,20 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
           {/* Detail panel toggle */}
           {onToggleDetailPanel && (
-            <Tooltip content={hotkeyDisplay('toggle-detail-panel') ? <Kbd>{hotkeyDisplay('toggle-detail-panel')}</Kbd> : undefined} side="bottom">
+            <Tooltip content={detailPanelToggleDisabled ? detailPanelToggleDisabledReason : (hotkeyDisplay('toggle-detail-panel') ? <Kbd>{hotkeyDisplay('toggle-detail-panel')}</Kbd> : undefined)} side="bottom">
               <button
-                onClick={onToggleDetailPanel}
+                onClick={detailPanelToggleDisabled ? undefined : onToggleDetailPanel}
+                disabled={detailPanelToggleDisabled}
+                aria-disabled={detailPanelToggleDisabled}
                 className={cn(
                   "inline-flex items-center justify-center h-[var(--panel-tab-height)] px-2.5 rounded transition-colors flex-shrink-0",
-                  detailPanelVisible
+                  detailPanelToggleDisabled
+                    ? "text-text-muted cursor-not-allowed opacity-50"
+                    : detailPanelVisible
                     ? "text-text-primary bg-surface-hover"
                     : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
                 )}
-                title={detailPanelVisible ? "Hide detail panel" : "Show detail panel"}
+                title={detailPanelToggleDisabled ? detailPanelToggleDisabledReason : detailPanelVisible ? "Hide detail panel" : "Show detail panel"}
               >
                 <PanelRight className="w-4 h-4" />
               </button>
