@@ -1635,7 +1635,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
       {/* Terminal scroll buttons — compact, revealed on hover */}
       {isInitialized && (
-        <div className="absolute -top-0.5 right-2 z-30 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto transition-opacity">
+        <div className="absolute top-2 right-5 z-30 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto transition-opacity">
           <button
             onClick={handleRefreshTerminal}
             className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
@@ -1680,7 +1680,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             isNearBottomRef.current = true;
             setShowScrollDown(false);
           }}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-7 h-7 rounded-full text-text-tertiary hover:text-text-secondary transition-colors duration-150"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-7 h-7 rounded-full bg-[color-mix(in_srgb,var(--color-text-primary)_6%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-text-primary)_8%,transparent)] text-text-tertiary hover:text-text-secondary transition-colors duration-150"
           title="Jump to bottom"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

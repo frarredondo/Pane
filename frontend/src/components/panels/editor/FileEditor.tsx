@@ -1585,9 +1585,9 @@ export function FileEditor({
   }, [selectedFile?.path]); // Run cleanup when file changes
 
   return (
-    <div className="h-full flex">
+    <div className="h-full w-full min-w-0 flex overflow-hidden">
       <div 
-        className="bg-surface-secondary border-r border-border-primary relative flex-shrink-0"
+        className="bg-surface-secondary border-r border-border-primary relative flex-shrink-0 max-w-[45%]"
         style={{ width: `${fileTreeWidth}px` }}
       >
         <HeadlessFileTree
@@ -1612,13 +1612,13 @@ export function FileEditor({
           <div className="absolute -left-2 -right-2 top-0 bottom-0" />
         </div>
       </div>
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {selectedFile ? (
           <>
             <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary border-b border-border-primary">
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <File className="w-4 h-4 text-text-tertiary" />
-                <span className="text-sm text-text-primary">
+                <span className="min-w-0 truncate text-sm text-text-primary">
                   {selectedFile.path}
                   {hasUnsavedChanges && <span className="text-status-warning ml-2">●</span>}
                 </span>
@@ -1632,7 +1632,7 @@ export function FileEditor({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-shrink-0 items-center gap-2">
                 {/* Preview Toggle for Markdown/Notebook Files */}
                 {!isBinaryPreview && (isMarkdownFile || isNotebookFile) && (
                   <div className="flex items-center rounded-lg border border-border-primary bg-surface-tertiary">
@@ -1684,7 +1684,7 @@ export function FileEditor({
                 Error: {error}
               </div>
             )}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-w-0 overflow-hidden">
               {viewMode === 'preview' && isMarkdownFile ? (
                 <div className="h-full overflow-auto bg-bg-primary">
                   <MarkdownPreview
