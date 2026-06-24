@@ -14,14 +14,17 @@ import type { DatabaseService } from '../../database/database';
 // Type for accessing private members in tests
 interface GitStatusManagerPrivates {
   fetchGitStatus(sessionId: string): Promise<GitStatus | null>;
+  processInitialLoadQueue(): Promise<void>;
   fetchPrForSession(
     branchName: string,
     projectPath: string,
     commandRunner: CommandRunner
   ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }>;
   enrichWithPrData(sessionId: string): Promise<void>;
-  updateCache(sessionId: string, status: GitStatus): void;
+  updateCache(sessionId: string, status: GitStatus): GitStatus;
+  schedulePrEnrichment(sessionId: string, immediate?: boolean): void;
   cache: Record<string, { status: GitStatus; lastChecked: number }>;
+  initialLoadQueue: string[];
   prCache: Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>;
   activeSessionId: string | null;
 }
@@ -371,6 +374,44 @@ describe('GitStatusManager', () => {
         expect.any(Number),
       );
     });
+
+    it('preserves cached PR fields when local status refresh has no PR fields', () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      privates.cache['test-session'] = {
+        status: {
+          state: 'ahead',
+          ahead: 1,
+          prNumber: 12,
+          prUrl: 'https://github.com/example/repo/pull/12',
+          prTitle: 'Ready review',
+          prState: 'OPEN',
+          prBody: 'Body',
+        },
+        lastChecked: Date.now(),
+      };
+
+      const updated = privates.updateCache('test-session', {
+        state: 'ahead',
+        ahead: 2,
+        commitAdditions: 20,
+      });
+
+      expect(updated).toMatchObject({
+        state: 'ahead',
+        ahead: 2,
+        commitAdditions: 20,
+        prNumber: 12,
+        prUrl: 'https://github.com/example/repo/pull/12',
+        prTitle: 'Ready review',
+        prState: 'OPEN',
+        prBody: 'Body',
+      });
+      expect(mockDatabaseService.saveSessionGitStatusCache).toHaveBeenLastCalledWith(
+        'test-session',
+        expect.objectContaining({ prNumber: 12, ahead: 2 }),
+        expect.any(Number),
+      );
+    });
   });
 
   describe('PR enrichment', () => {
@@ -476,6 +517,85 @@ describe('GitStatusManager', () => {
       expect((mockProjectContext.commandRunner.execAsync as Mock).mock.calls[0][0]).not.toContain('not-the-branch');
       expect(status.prNumber).toBe(12);
       expect(status.prUrl).toBe('https://github.com/example/repo/pull/12');
+    });
+
+    it('clears cached PR fields on a confirmed PR miss', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      privates.cache['test-session'] = {
+        status: {
+          state: 'ahead',
+          ahead: 1,
+          prNumber: 12,
+          prUrl: 'https://github.com/example/repo/pull/12',
+          prTitle: 'Ready review',
+          prState: 'OPEN',
+          prBody: 'Body',
+        },
+        lastChecked: Date.now(),
+      };
+      (mockProjectContext.commandRunner.exec as Mock).mockReturnValue('feature-branch\n');
+      (mockProjectContext.commandRunner.execAsync as Mock).mockResolvedValue({ stdout: '[]' });
+
+      const updated = new Promise<GitStatus>((resolve) => {
+        gitStatusManager.once('git-status-updated', (_sessionId, status) => resolve(status));
+      });
+      void privates.enrichWithPrData('test-session');
+      const status = await updated;
+
+      expect(status.prNumber).toBeUndefined();
+      expect(status.prUrl).toBeUndefined();
+      expect(status.prTitle).toBeUndefined();
+      expect(status.prState).toBeUndefined();
+      expect(status.prBody).toBeUndefined();
+      expect(status.ahead).toBe(1);
+      expect(mockDatabaseService.saveSessionGitStatusCache).toHaveBeenLastCalledWith(
+        'test-session',
+        expect.not.objectContaining({ prNumber: expect.any(Number) }),
+        expect.any(Number),
+      );
+    });
+
+    it('keeps cached PR fields when PR lookup fails', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      const cachedStatus: GitStatus = {
+        state: 'ahead',
+        ahead: 1,
+        prNumber: 12,
+        prUrl: 'https://github.com/example/repo/pull/12',
+        prTitle: 'Ready review',
+        prState: 'OPEN',
+        prBody: 'Body',
+      };
+      privates.cache['test-session'] = {
+        status: cachedStatus,
+        lastChecked: Date.now(),
+      };
+      (mockProjectContext.commandRunner.exec as Mock).mockReturnValue('feature-branch\n');
+      (mockProjectContext.commandRunner.execAsync as Mock).mockRejectedValue(new Error('gh unavailable'));
+
+      await privates.enrichWithPrData('test-session');
+
+      expect(privates.cache['test-session'].status).toEqual(cachedStatus);
+      expect(mockDatabaseService.saveSessionGitStatusCache).not.toHaveBeenCalled();
+    });
+
+    it('schedules staggered PR enrichment for non-active relevant initial-load status', async () => {
+      const privates = gitStatusManager as unknown as GitStatusManagerPrivates;
+      privates.initialLoadQueue.push('test-session');
+      privates.activeSessionId = null;
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+      const fetchSpy = vi
+        .spyOn(privates, 'fetchGitStatus')
+        .mockResolvedValue({ state: 'ahead', ahead: 1, isReadyToMerge: true });
+      const scheduleSpy = vi
+        .spyOn(privates, 'schedulePrEnrichment')
+        .mockImplementation(() => {});
+
+      await privates.processInitialLoadQueue();
+
+      expect(fetchSpy).toHaveBeenCalledWith('test-session');
+      expect(scheduleSpy).toHaveBeenCalledWith('test-session', false);
+      randomSpy.mockRestore();
     });
   });
 

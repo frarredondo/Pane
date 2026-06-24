@@ -659,6 +659,7 @@ function SessionRow({
   onArchive, onTogglePinned, displayName, rowLayout,
 }: SessionRowProps) {
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
+  const initialGitStatusRequestRef = useRef<string | null>(null);
 
   const sessionActivity = usePanelStore(s => {
     const sessionPanels = s.panels[session.id] || [];
@@ -666,9 +667,11 @@ function SessionRow({
   });
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
 
-  // Fetch git status if not available
+  // Queue the initial refresh even when cached status is available, so cached
+  // PR state is corrected by the background git/PR refresh path.
   useEffect(() => {
-    if (localGitStatus || session.gitStatus || session.archived || session.status === 'error') return;
+    if (initialGitStatusRequestRef.current === session.id || session.archived || session.status === 'error') return;
+    initialGitStatusRequestRef.current = session.id;
     const fetchStatus = async () => {
       try {
         if (!window.electron?.invoke) return;
@@ -686,7 +689,7 @@ function SessionRow({
       }
     };
     fetchStatus();
-  }, [session.id, session.archived, session.status, localGitStatus, session.gitStatus]);
+  }, [session.id, session.archived, session.status]);
 
   // Sync from session prop when store updates
   useEffect(() => {

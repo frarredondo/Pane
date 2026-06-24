@@ -18,6 +18,19 @@ interface GitStatusCache {
   };
 }
 
+type PrData = {
+  prNumber?: number;
+  prUrl?: string;
+  prTitle?: string;
+  prState?: string;
+  prBody?: string;
+};
+
+type PrLookupResult =
+  | { ok: true; pr?: PrData }
+  | { ok: false };
+
+const PR_FIELDS = ['prNumber', 'prUrl', 'prTitle', 'prState', 'prBody'] as const;
 
 export class GitStatusManager extends EventEmitter {
   private cache: GitStatusCache = {};
@@ -254,7 +267,7 @@ export class GitStatusManager extends EventEmitter {
     // Fetch fresh status
     const status = await this.fetchGitStatus(sessionId);
     if (status) {
-      this.updateCache(sessionId, status);
+      return this.updateCache(sessionId, status);
     }
     return status;
   }
@@ -405,8 +418,8 @@ export class GitStatusManager extends EventEmitter {
       }
 
       // Update cache and emit
-      this.updateCache(sessionId, updatedStatus);
-      this.emitThrottled(sessionId, 'updated', updatedStatus);
+      const cachedStatus = this.updateCache(sessionId, updatedStatus);
+      this.emitThrottled(sessionId, 'updated', cachedStatus);
       
       this.logger?.info(`[GitStatus] Updated status after ${rebaseType} rebase for session ${sessionId}`);
     } catch (error) {
@@ -451,7 +464,9 @@ export class GitStatusManager extends EventEmitter {
             const cached = this.cache[sessionId]?.status || null;
             if (cached) {
               this.emitThrottled(sessionId, 'updated', cached);
-              this.schedulePrEnrichment(sessionId);
+              if (this.shouldSchedulePrEnrichment(cached)) {
+                this.schedulePrEnrichment(sessionId);
+              }
             }
             resolve(cached);
             return;
@@ -460,11 +475,13 @@ export class GitStatusManager extends EventEmitter {
         
         const status = await this.fetchGitStatus(sessionId);
         if (status) {
-          this.updateCache(sessionId, status);
-          this.emitThrottled(sessionId, 'updated', status);
-          this.schedulePrEnrichment(sessionId, isUserInitiated);
+          const cachedStatus = this.updateCache(sessionId, status);
+          this.emitThrottled(sessionId, 'updated', cachedStatus);
+          if (this.shouldSchedulePrEnrichment(cachedStatus)) {
+            this.schedulePrEnrichment(sessionId, isUserInitiated);
+          }
         }
-        resolve(status);
+        resolve(status ? this.cache[sessionId]?.status || status : status);
       }, this.DEBOUNCE_MS);
 
       this.refreshDebounceTimers.set(sessionId, timer);
@@ -528,10 +545,10 @@ export class GitStatusManager extends EventEmitter {
             }
             const status = await this.fetchGitStatus(sessionId);
             if (status) {
-              this.updateCache(sessionId, status);
-              this.emitThrottled(sessionId, 'updated', status);
-              if (sessionId === this.activeSessionId) {
-                this.schedulePrEnrichment(sessionId, true);
+              const cachedStatus = this.updateCache(sessionId, status);
+              this.emitThrottled(sessionId, 'updated', cachedStatus);
+              if (this.shouldSchedulePrEnrichment(cachedStatus)) {
+                this.schedulePrEnrichment(sessionId, sessionId === this.activeSessionId);
               }
             }
           } catch (error) {
@@ -556,11 +573,25 @@ export class GitStatusManager extends EventEmitter {
     projectPath: string,
     commandRunner: CommandRunner
   ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }> {
+    const result = await this.fetchPrForSessionResult(branchName, projectPath, commandRunner);
+    return result.ok && result.pr ? result.pr : {};
+  }
+
+  private async fetchPrForSessionResult(
+    branchName: string,
+    projectPath: string,
+    commandRunner: CommandRunner
+  ): Promise<PrLookupResult> {
     const cacheKey = `${projectPath}:${branchName}`;
     const cached = this.prCache.get(cacheKey);
     const cacheTtl = cached?.prNumber !== undefined ? this.PR_HIT_CACHE_TTL : this.PR_MISS_CACHE_TTL;
     if (cached && Date.now() - cached.fetchedAt < cacheTtl) {
-      return { prNumber: cached.prNumber, prUrl: cached.prUrl, prTitle: cached.prTitle, prState: cached.prState, prBody: cached.prBody };
+      return {
+        ok: true,
+        pr: cached.prNumber !== undefined
+          ? { prNumber: cached.prNumber, prUrl: cached.prUrl, prTitle: cached.prTitle, prState: cached.prState, prBody: cached.prBody }
+          : undefined,
+      };
     }
 
     try {
@@ -580,10 +611,14 @@ export class GitStatusManager extends EventEmitter {
         fetchedAt: Date.now()
       };
       this.prCache.set(cacheKey, entry);
-      return { prNumber: entry.prNumber, prUrl: entry.prUrl, prTitle: entry.prTitle, prState: entry.prState, prBody: entry.prBody };
+      return {
+        ok: true,
+        pr: entry.prNumber !== undefined
+          ? { prNumber: entry.prNumber, prUrl: entry.prUrl, prTitle: entry.prTitle, prState: entry.prState, prBody: entry.prBody }
+          : undefined,
+      };
     } catch {
-      this.prCache.set(cacheKey, { fetchedAt: Date.now() });
-      return {};
+      return { ok: false };
     }
   }
 
@@ -660,10 +695,14 @@ export class GitStatusManager extends EventEmitter {
     const branchName = this.getCurrentBranchName(session.worktreePath, ctx.commandRunner);
     if (!branchName) return;
 
-    const prData = await this.fetchPrForSession(branchName, project.path, ctx.commandRunner);
+    const prResult = await this.fetchPrForSessionResult(branchName, project.path, ctx.commandRunner);
+    if (!prResult.ok) return;
 
-    if (prData.prNumber !== undefined) {
-      const currentStatus = this.cache[sessionId]?.status;
+    const currentStatus = this.cache[sessionId]?.status;
+    if (!currentStatus) return;
+
+    const prData = prResult.pr;
+    if (prData?.prNumber !== undefined) {
       if (currentStatus && (
         currentStatus.prNumber !== prData.prNumber ||
         currentStatus.prState !== prData.prState ||
@@ -686,6 +725,18 @@ export class GitStatusManager extends EventEmitter {
         this.persistCachedStatus(sessionId, enrichedStatus, lastChecked);
         this.emit('git-status-updated', sessionId, enrichedStatus);
       }
+      return;
+    }
+
+    if (currentStatus.prNumber !== undefined) {
+      const clearedStatus = this.clearPrFields(currentStatus);
+      const lastChecked = this.cache[sessionId].lastChecked;
+      this.cache[sessionId] = {
+        status: clearedStatus,
+        lastChecked
+      };
+      this.persistCachedStatus(sessionId, clearedStatus, lastChecked);
+      this.emit('git-status-updated', sessionId, clearedStatus);
     }
   }
 
@@ -970,21 +1021,61 @@ export class GitStatusManager extends EventEmitter {
   /**
    * Update cache with new status
    */
-  private updateCache(sessionId: string, status: GitStatus): void {
+  private updateCache(sessionId: string, status: GitStatus): GitStatus {
+    const statusToStore = this.mergePreservedPrFields(sessionId, status);
     const previousStatus = this.cache[sessionId]?.status;
-    const hasChanged = !previousStatus || JSON.stringify(previousStatus) !== JSON.stringify(status);
+    const hasChanged = !previousStatus || JSON.stringify(previousStatus) !== JSON.stringify(statusToStore);
     const lastChecked = Date.now();
     
     this.cache[sessionId] = {
-      status,
+      status: statusToStore,
       lastChecked
     };
-    this.persistCachedStatus(sessionId, status, lastChecked);
+    this.persistCachedStatus(sessionId, statusToStore, lastChecked);
 
     // Only emit event if status actually changed
     if (hasChanged) {
-      this.emitThrottled(sessionId, 'updated', status);
+      this.emitThrottled(sessionId, 'updated', statusToStore);
     }
+    return statusToStore;
+  }
+
+  private mergePreservedPrFields(sessionId: string, nextStatus: GitStatus): GitStatus {
+    if (nextStatus.prNumber !== undefined) return nextStatus;
+
+    const previousStatus = this.cache[sessionId]?.status;
+    if (previousStatus?.prNumber === undefined) return nextStatus;
+
+    return {
+      ...nextStatus,
+      prNumber: previousStatus.prNumber,
+      prUrl: previousStatus.prUrl,
+      prTitle: previousStatus.prTitle,
+      prState: previousStatus.prState,
+      prBody: previousStatus.prBody,
+    };
+  }
+
+  private clearPrFields(status: GitStatus): GitStatus {
+    const cleared = { ...status };
+    for (const field of PR_FIELDS) {
+      delete cleared[field];
+    }
+    return cleared;
+  }
+
+  private shouldSchedulePrEnrichment(status: GitStatus): boolean {
+    return Boolean(
+      status.prNumber ||
+      status.ahead ||
+      status.isReadyToMerge ||
+      status.commitFilesChanged ||
+      status.commitAdditions ||
+      status.commitDeletions ||
+      status.filesChanged ||
+      status.additions ||
+      status.deletions
+    );
   }
 
   /**
