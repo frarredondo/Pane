@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle, Clipboard, Download, ExternalLink, Loader2, Terminal } from 'lucide-react';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -19,7 +19,7 @@ interface UpdateDialogProps {
   };
 }
 
-type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error';
 
 interface DownloadProgress {
   bytesPerSecond: number;
@@ -34,6 +34,17 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isPackaged, setIsPackaged] = useState(false);
+  const userStartedUpdateRef = useRef(false);
+  const downloadStartedRef = useRef(false);
+  const installStartedRef = useRef(false);
+  const installTimeoutRef = useRef<number | null>(null);
+
+  const clearInstallTimeout = useCallback(() => {
+    if (installTimeoutRef.current) {
+      window.clearTimeout(installTimeoutRef.current);
+      installTimeoutRef.current = null;
+    }
+  }, []);
 
   // Reset internal state whenever the dialog opens so stale error/progress state
   // from a previous attempt doesn't persist across opens
@@ -43,8 +54,14 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
       setDownloadProgress(null);
       setError(null);
       setMessage(null);
+      userStartedUpdateRef.current = false;
+      downloadStartedRef.current = false;
+      installStartedRef.current = false;
+      clearInstallTimeout();
     }
-  }, [isOpen]);
+  }, [clearInstallTimeout, isOpen]);
+
+  useEffect(() => clearInstallTimeout, [clearInstallTimeout]);
 
   useEffect(() => {
     // Check if app is packaged (auto-update only works in packaged apps)
@@ -55,6 +72,62 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
       });
     }
   }, []);
+
+  const startDownloadUpdate = useCallback(async () => {
+    if (!window.electronAPI?.updater) {
+      setError('Update functionality not available');
+      setUpdateState('error');
+      return;
+    }
+    if (downloadStartedRef.current) return;
+
+    try {
+      downloadStartedRef.current = true;
+      setError(null);
+      setMessage(null);
+      setUpdateState('downloading');
+      const response = await window.electronAPI.updater.downloadUpdate();
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to download update');
+      }
+    } catch (err: unknown) {
+      downloadStartedRef.current = false;
+      setError(err instanceof Error ? err.message : 'Failed to download update');
+      setUpdateState('error');
+    }
+  }, []);
+
+  const installDownloadedUpdate = useCallback(async () => {
+    if (!window.electronAPI?.updater) {
+      setError('Update functionality not available');
+      setUpdateState('error');
+      return;
+    }
+    if (installStartedRef.current) return;
+
+    try {
+      installStartedRef.current = true;
+      clearInstallTimeout();
+      setError(null);
+      setMessage(null);
+      setUpdateState('installing');
+      const response = await window.electronAPI.updater.installUpdate();
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to install update');
+      }
+      installTimeoutRef.current = window.setTimeout(() => {
+        userStartedUpdateRef.current = false;
+        installStartedRef.current = false;
+        setError('Pane did not restart after starting the installer. Download the latest release manually and run the installer.');
+        setUpdateState('error');
+      }, 15000);
+    } catch (err: unknown) {
+      installStartedRef.current = false;
+      clearInstallTimeout();
+      setError(err instanceof Error ? err.message : 'Failed to install update');
+      setUpdateState('error');
+    }
+  }, [clearInstallTimeout]);
 
   useEffect(() => {
     if (!isOpen || !window.electronAPI?.events) return;
@@ -73,12 +146,16 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
       window.electronAPI.events.onUpdaterUpdateAvailable((info) => {
         console.log('Update available:', info);
         setUpdateState('available');
+        if (userStartedUpdateRef.current && !isMac()) {
+          void startDownloadUpdate();
+        }
       })
     );
 
     cleanupFns.push(
       window.electronAPI.events.onUpdaterUpdateNotAvailable((info) => {
         console.log('No update available:', info);
+        userStartedUpdateRef.current = false;
         setUpdateState('idle');
       })
     );
@@ -95,12 +172,19 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
         console.log('Update downloaded:', info);
         setUpdateState('downloaded');
         setDownloadProgress(null);
+        if (userStartedUpdateRef.current && !isMac()) {
+          void installDownloadedUpdate();
+        }
       })
     );
 
     cleanupFns.push(
       window.electronAPI.events.onUpdaterError((err) => {
         console.error('Update error:', err);
+        userStartedUpdateRef.current = false;
+        downloadStartedRef.current = false;
+        installStartedRef.current = false;
+        clearInstallTimeout();
         setUpdateState('error');
         setError(err.message || 'An unknown error occurred');
       })
@@ -109,48 +193,45 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
     return () => {
       cleanupFns.forEach(fn => fn());
     };
-  }, [isOpen]);
+  }, [clearInstallTimeout, installDownloadedUpdate, isOpen, startDownloadUpdate]);
 
-  const handleCheckForUpdates = async () => {
+  const handleStartUpdate = async () => {
     if (!window.electronAPI?.updater) {
       setError('Update functionality not available');
       return;
     }
+
     try {
+      userStartedUpdateRef.current = true;
+      downloadStartedRef.current = false;
+      installStartedRef.current = false;
+      clearInstallTimeout();
       setError(null);
       setMessage(null);
-      await window.electronAPI.updater.checkAndDownload();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to check for updates');
-      setUpdateState('error');
-    }
-  };
+      setDownloadProgress(null);
 
-  const handleDownloadUpdate = async () => {
-    if (!window.electronAPI?.updater) {
-      setError('Update functionality not available');
-      return;
-    }
-    try {
-      setError(null);
-      setMessage(null);
-      await window.electronAPI.updater.downloadUpdate();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to download update');
-      setUpdateState('error');
-    }
-  };
+      if (isPackaged && isMac()) {
+        setUpdateState('checking');
+        const response = await window.electronAPI.updater.openTerminalWithCommand();
+        userStartedUpdateRef.current = false;
+        if (response.success) {
+          setUpdateState('idle');
+          setMessage('Terminal opened and the update command was copied. Paste it and press Return to open the latest installer.');
+        } else {
+          setError(response.error || 'Failed to open Terminal');
+          setUpdateState('error');
+        }
+        return;
+      }
 
-  const handleInstallUpdate = async () => {
-    if (!window.electronAPI?.updater) {
-      setError('Update functionality not available');
-      return;
-    }
-    try {
-      await window.electronAPI.updater.installUpdate();
-      // App will restart, so no need to handle response
+      setUpdateState('checking');
+      const response = await window.electronAPI.updater.checkAndDownload();
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to check for updates');
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to install update');
+      userStartedUpdateRef.current = false;
+      setError(err instanceof Error ? err.message : 'Failed to start update');
       setUpdateState('error');
     }
   };
@@ -218,6 +299,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
   const formatSpeed = (bytesPerSecond: number) => {
     return formatBytes(bytesPerSecond) + '/s';
   };
+  const isUpdateBusy = updateState === 'checking' || updateState === 'available' || updateState === 'downloading' || updateState === 'installing';
 
   const renderMacUpdateActions = () => (
     <div className="space-y-4">
@@ -281,8 +363,15 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="lg" showCloseButton={false}>
-      <ModalHeader onClose={updateState === 'downloading' ? undefined : onClose}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="lg"
+      showCloseButton={false}
+      closeOnEscape={!isUpdateBusy}
+      closeOnOverlayClick={!isUpdateBusy}
+    >
+      <ModalHeader onClose={isUpdateBusy ? undefined : onClose}>
         <div className="flex items-center gap-3">
           <Download className="w-6 h-6 text-interactive" />
           <h2 className="text-xl font-semibold text-text-primary">Software Update</h2>
@@ -311,7 +400,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                 <p className="text-text-secondary mb-4">
                   A new version of Pane is available.
                   {isPackaged && isMac()
-                    ? ' Use the terminal-assisted update path below.'
+                    ? ' Click below to open the installer helper.'
                     : isPackaged
                       ? ' Click below to download and install the update.'
                       : ' Auto-update is only available in the packaged app.'}
@@ -324,15 +413,13 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                  * skip the in-app download flow entirely on macOS and direct users to
                  * manually download and drag-install from GitHub instead.
                  */}
-                {isPackaged && isMac() ? (
-                  renderMacUpdateActions()
-                ) : isPackaged ? (
+                {isPackaged ? (
                   <Button
-                    onClick={handleCheckForUpdates}
+                    onClick={handleStartUpdate}
                     variant="primary"
                     icon={<Download className="w-4 h-4" />}
                   >
-                    Download Update
+                    Update Pane
                   </Button>
                 ) : (
                   <Button
@@ -348,50 +435,52 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
             {updateState === 'checking' && (
               <div className="flex items-center gap-3 text-text-secondary">
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Checking for updates...</span>
+                <span>{isMac() ? 'Opening installer helper...' : 'Checking for update...'}</span>
               </div>
             )}
 
             {updateState === 'available' && (
               <div className="bg-surface-secondary rounded-lg p-4">
-                <h3 className="text-lg font-medium text-text-primary mb-2">Ready to Download</h3>
-                <p className="text-text-secondary mb-4">
-                  The update is ready to download. This may take a few minutes depending on your connection.
+                <div className="flex items-center gap-3 text-text-secondary">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Preparing update download...</span>
+                </div>
+                <p className="text-text-tertiary mt-3">
+                  Pane will continue automatically.
                 </p>
-                <Button
-                  onClick={handleDownloadUpdate}
-                  variant="primary"
-                  icon={<Download className="w-4 h-4" />}
-                >
-                  Start Download
-                </Button>
               </div>
             )}
 
-            {updateState === 'downloading' && downloadProgress && (
+            {updateState === 'downloading' && (
               <div className="space-y-3">
                 <div className="flex items-center gap-3 text-text-secondary">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span>Downloading update...</span>
                 </div>
                 
-                <div className="bg-surface-secondary rounded-lg p-4 space-y-3">
-                  <div className="flex justify-between text-sm text-text-tertiary">
-                    <span>{formatBytes(downloadProgress.transferred)} / {formatBytes(downloadProgress.total)}</span>
-                    <span>{formatSpeed(downloadProgress.bytesPerSecond)}</span>
+                {downloadProgress ? (
+                  <div className="bg-surface-secondary rounded-lg p-4 space-y-3">
+                    <div className="flex justify-between text-sm text-text-tertiary">
+                      <span>{formatBytes(downloadProgress.transferred)} / {formatBytes(downloadProgress.total)}</span>
+                      <span>{formatSpeed(downloadProgress.bytesPerSecond)}</span>
+                    </div>
+
+                    <div className="w-full bg-surface-tertiary rounded-full h-2">
+                      <div
+                        className="bg-interactive h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${downloadProgress.percent}%` }}
+                      />
+                    </div>
+
+                    <div className="text-center text-sm text-text-tertiary">
+                      {Math.round(downloadProgress.percent)}%
+                    </div>
                   </div>
-                  
-                  <div className="w-full bg-surface-tertiary rounded-full h-2">
-                    <div 
-                      className="bg-interactive h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${downloadProgress.percent}%` }}
-                    />
-                  </div>
-                  
-                  <div className="text-center text-sm text-text-tertiary">
-                    {Math.round(downloadProgress.percent)}%
-                  </div>
-                </div>
+                ) : (
+                  <p className="text-text-tertiary">
+                    Pane is starting the download.
+                  </p>
+                )}
               </div>
             )}
 
@@ -412,19 +501,24 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                     ) : (
                       <>
                         <p className="text-text-secondary mb-4">
-                          The update has been downloaded successfully. Pane will restart to apply the update.
+                          The update has been downloaded. Pane is starting the installer.
                         </p>
-                        <Button
-                          onClick={handleInstallUpdate}
-                          variant="primary"
-                          className="bg-status-success hover:bg-status-success/90"
-                        >
-                          Restart and Install
-                        </Button>
                       </>
                     )}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {updateState === 'installing' && (
+              <div className="bg-surface-secondary rounded-lg p-4">
+                <div className="flex items-center gap-3 text-text-secondary">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Starting installer...</span>
+                </div>
+                <p className="text-text-tertiary mt-3">
+                  Pane may close or restart while the update is applied.
+                </p>
               </div>
             )}
 
@@ -579,7 +673,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
           <Button
             onClick={onClose}
             variant="secondary"
-            disabled={updateState === 'downloading'}
+            disabled={isUpdateBusy}
           >
             Close
           </Button>
