@@ -1,20 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { GitFork, Download, AlertCircle, Star, ExternalLink, Loader2, Terminal as TerminalIcon, RefreshCw } from 'lucide-react';
+import { GitFork, AlertCircle, Star, ExternalLink, Loader2 } from 'lucide-react';
 import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { capture } from '../services/posthog';
-import { API } from '../utils/api';
-import { panelApi } from '../services/panelApi';
-import { useNavigationStore } from '../stores/navigationStore';
-import { useSessionStore } from '../stores/sessionStore';
-import { getTerminalTheme } from '../utils/terminalTheme';
-import type { Project } from '../types/project';
-import '@xterm/xterm/css/xterm.css';
 
 type DialogStep = 'detecting' | 'ready';
+type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
 
 interface EnvironmentInfo {
   gitInstalled: boolean;
@@ -28,39 +20,26 @@ interface EnvironmentInfo {
   ghInstallUrl: string;
 }
 
-interface GitHubAuthCommandResult {
-  command: string;
-  reason: 'login' | 'refresh' | 'install-gh' | 'ready';
-}
-
-interface GitHubAuthTerminalStartResult extends GitHubAuthCommandResult {
-  terminalId: string;
-  cols: number;
-  rows: number;
-}
-
-interface GitHubAuthTerminalExit {
-  terminalId: string;
-  exitCode: number;
-  signal: number | null;
-}
-
 interface OnboardingDialogProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-interface GitHubAuthSetupTerminalProps {
-  active: boolean;
-  runKey: number;
-  onStarted: (result: GitHubAuthTerminalStartResult) => void;
-  onExit: (result: GitHubAuthTerminalExit) => void;
-  onError: (message: string) => void;
+interface SupportPaneDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 const GITHUB_CLI_URL = 'https://cli.github.com/';
-const GITHUB_AUTH_POLL_INTERVAL_MS = 3000;
-const GITHUB_AUTH_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+export const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
+export const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
+const ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE = 'onboarding_gh_status_at_first_launch';
+
+interface IPCResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
 
 function fallbackEnvironment(): EnvironmentInfo {
   return {
@@ -87,150 +66,123 @@ function normalizeEnvironment(value: Partial<EnvironmentInfo> | null | undefined
   };
 }
 
-function GitHubAuthSetupTerminal({ active, runKey, onStarted, onExit, onError }: GitHubAuthSetupTerminalProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const terminalIdRef = useRef<string | null>(null);
+function getEnvironmentStatus(env: EnvironmentInfo | null): OnboardingEnvironmentStatus {
+  if (!env) return 'detecting';
+  if (!env.gitInstalled) return 'git_missing';
+  if (env.ghReady) return 'gh_ready';
+  if (!env.ghInstalled) return 'gh_missing';
+  if (!env.ghAuthenticated) return 'gh_not_authenticated';
+  if (env.missingGhScopes.length > 0) return 'gh_missing_scopes';
+  return 'gh_not_ready';
+}
 
-  useEffect(() => {
-    if (!active || !containerRef.current) return;
+async function getPreference(key: string): Promise<string | undefined> {
+  if (!window.electron?.invoke) return undefined;
+  const result = await window.electron.invoke('preferences:get', key) as IPCResponse<string>;
+  return result.success ? result.data : undefined;
+}
 
-    let disposed = false;
-    let outputCleanup: (() => void) | null = null;
-    let exitCleanup: (() => void) | null = null;
-    let resizeObserver: ResizeObserver | null = null;
-    let resizeTimer: number | null = null;
+async function setPreference(key: string, value: string): Promise<void> {
+  if (window.electron?.invoke) {
+    await window.electron.invoke('preferences:set', key, value);
+  }
+}
 
-    const terminal = new XTerm({
-      cursorBlink: true,
-      convertEol: true,
-      disableStdin: false,
-      fontFamily: '"Geist Mono", "Symbols Nerd Font Mono", monospace',
-      fontSize: 12,
-      lineHeight: 1.2,
-      scrollback: 1000,
-      theme: getTerminalTheme(),
-    });
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(containerRef.current);
+async function markSupportPromptShown(): Promise<void> {
+  await setPreference(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
+}
 
-    const fitTerminal = () => {
-      try {
-        fitAddon.fit();
-        const dimensions = fitAddon.proposeDimensions();
-        const terminalId = terminalIdRef.current;
-        if (terminalId && dimensions) {
-          void window.electronAPI.onboarding.resizeGitHubAuthTerminal(terminalId, dimensions.cols, dimensions.rows);
-        }
-      } catch {
-        // Ignore transient zero-size layout states while the modal is animating.
+async function recordFirstLaunchEnvironmentStatus(status: OnboardingEnvironmentStatus): Promise<void> {
+  const existing = await getPreference(ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE);
+  if (existing) return;
+  await setPreference(ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE, status);
+}
+
+function SupportExplainer({ showTitle = true }: { showTitle?: boolean }) {
+  return (
+    <div className="space-y-1">
+      {showTitle && (
+        <p className="text-sm font-semibold text-text-primary">Support Pane with a star and follow</p>
+      )}
+      <p className="text-xs leading-relaxed text-text-secondary">
+        Pane is built by Parsa, a self-funded developer. A GitHub star for Pane and a follow are the easiest free way to support the project so it can keep growing.
+      </p>
+    </div>
+  );
+}
+
+export function SupportPaneDialog({ isOpen, onClose }: SupportPaneDialogProps) {
+  const paneLogo = usePaneLogo();
+  const [isSupporting, setIsSupporting] = useState(false);
+
+  const handleSupport = async () => {
+    setIsSupporting(true);
+    try {
+      const supportResult = await window.electronAPI.onboarding.supportProject();
+      if (supportResult?.success) {
+        capture('onboarding_project_supported_after_setup');
       }
-    };
+    } catch {
+      // Support failure is non-fatal and should not keep nagging.
+    } finally {
+      setIsSupporting(false);
+      onClose();
+    }
+  };
 
-    const scheduleFit = () => {
-      if (resizeTimer) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(fitTerminal, 50);
-    };
-
-    outputCleanup = window.electronAPI.onboarding.onGitHubAuthTerminalOutput((payload) => {
-      if (payload.terminalId === terminalIdRef.current) {
-        terminal.write(payload.data);
-      }
-    });
-
-    exitCleanup = window.electronAPI.onboarding.onGitHubAuthTerminalExit((payload) => {
-      if (payload.terminalId === terminalIdRef.current) {
-        onExit(payload);
-      }
-    });
-
-    const inputDisposable = terminal.onData((data) => {
-      const terminalId = terminalIdRef.current;
-      if (terminalId) {
-        void window.electronAPI.onboarding.writeGitHubAuthTerminal(terminalId, data);
-      }
-    });
-
-    resizeObserver = new ResizeObserver(scheduleFit);
-    resizeObserver.observe(containerRef.current);
-
-    const startTerminal = async () => {
-      try {
-        fitAddon.fit();
-        const dimensions = fitAddon.proposeDimensions();
-        const response = await window.electronAPI.onboarding.startGitHubAuthTerminal(
-          dimensions?.cols ?? 80,
-          dimensions?.rows ?? 18,
-        );
-
-        if (disposed) return;
-
-        if (!response.success || !response.data) {
-          throw new Error(response.error || 'Failed to start GitHub CLI setup terminal');
-        }
-
-        const data = response.data as GitHubAuthTerminalStartResult;
-        terminalIdRef.current = data.terminalId;
-        terminal.write(`\x1b[90m$ ${data.command}\x1b[0m\r\n`);
-        terminal.focus();
-        onStarted(data);
-        fitTerminal();
-      } catch (error) {
-        if (!disposed) {
-          onError(error instanceof Error ? error.message : 'Failed to start GitHub CLI setup terminal');
-        }
-      }
-    };
-
-    void startTerminal();
-
-    return () => {
-      disposed = true;
-      if (resizeTimer) window.clearTimeout(resizeTimer);
-      outputCleanup?.();
-      exitCleanup?.();
-      resizeObserver?.disconnect();
-      inputDisposable.dispose();
-      const terminalId = terminalIdRef.current;
-      terminalIdRef.current = null;
-      if (terminalId) {
-        void window.electronAPI.onboarding.killGitHubAuthTerminal(terminalId);
-      }
-      terminal.dispose();
-    };
-  }, [active, runKey, onStarted, onExit, onError]);
+  if (!isOpen) return null;
 
   return (
-    <div className="pane-onboarding-auth-terminal rounded-md border border-border-primary bg-[var(--color-terminal-bg)] overflow-hidden">
-      <div ref={containerRef} className="h-64 w-full" />
-    </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="sm"
+      closeOnOverlayClick
+      closeOnEscape
+      showCloseButton
+    >
+      <div className="p-6 border-b border-border-primary">
+        <div className="flex items-center">
+          <img src={paneLogo} alt="Pane" className="h-10 w-10 mr-3" />
+          <h1 className="text-lg font-semibold text-text-primary">Support Pane</h1>
+        </div>
+      </div>
+      <ModalBody>
+        <div className="flex items-start gap-3">
+          <Star className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
+          <SupportExplainer />
+        </div>
+      </ModalBody>
+      <ModalFooter className="flex justify-end gap-2">
+        <Button onClick={onClose} variant="ghost">
+          Not now
+        </Button>
+        <Button
+          onClick={handleSupport}
+          variant="primary"
+          icon={<Star className="h-4 w-4" />}
+          loading={isSupporting}
+          loadingText="Supporting"
+        >
+          Star and follow
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 
 export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogProps) {
   const paneLogo = usePaneLogo();
-  const activeProjectId = useNavigationStore(s => s.activeProjectId);
-  const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
-  const setActiveSession = useSessionStore(s => s.setActiveSession);
   const [step, setStep] = useState<DialogStep>('detecting');
   const [env, setEnv] = useState<EnvironmentInfo | null>(null);
   const [shouldSupportOnSetup, setShouldSupportOnSetup] = useState(true);
   const [showSupportPopover, setShowSupportPopover] = useState(false);
   const [showOptOutConfirm, setShowOptOutConfirm] = useState(false);
-  const [githubSetupStarted, setGithubSetupStarted] = useState(false);
-  const [githubSetupBusy, setGithubSetupBusy] = useState(false);
-  const [githubSetupMessage, setGithubSetupMessage] = useState<string | null>(null);
-  const [githubSetupError, setGithubSetupError] = useState<string | null>(null);
-  const [manualCommand, setManualCommand] = useState<string | null>(null);
-  const [githubSetupTimedOut, setGithubSetupTimedOut] = useState(false);
-  const [showGitHubAuthTerminal, setShowGitHubAuthTerminal] = useState(false);
-  const [githubAuthTerminalRunKey, setGitHubAuthTerminalRunKey] = useState(0);
+  const supportPromptRecordedRef = useRef(false);
 
   const markOnboardingComplete = async () => {
     try {
-      if (window.electron?.invoke) {
-        await window.electron.invoke('preferences:set', 'onboarding_repo_setup', 'true');
-      }
+      await setPreference(ONBOARDING_REPO_SETUP_PREFERENCE, 'true');
     } catch {
       // Ensure dialog closes even if preference write fails
     }
@@ -264,189 +216,28 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   useEffect(() => {
     if (isOpen) {
-      setGithubSetupStarted(false);
-      setGithubSetupBusy(false);
-      setGithubSetupMessage(null);
-      setGithubSetupError(null);
-      setManualCommand(null);
-      setGithubSetupTimedOut(false);
-      setShowGitHubAuthTerminal(false);
-      void detectEnvironment();
-      capture('onboarding_started');
+      supportPromptRecordedRef.current = false;
+      void detectEnvironment().then((nextEnv) => {
+        const status = getEnvironmentStatus(nextEnv);
+        capture('onboarding_started', {
+          gh_status_at_first_launch: status,
+        });
+        void recordFirstLaunchEnvironmentStatus(status);
+      });
     }
   }, [isOpen, detectEnvironment]);
 
   useEffect(() => {
-    if (!isOpen || !githubSetupStarted || env?.ghReady) return;
-
-    let cancelled = false;
-    const startedAt = Date.now();
-
-    const poll = async () => {
-      const nextEnv = await detectEnvironment({ showLoading: false });
-      if (cancelled) return;
-
-      if (nextEnv.ghReady) {
-        setGithubSetupStarted(false);
-        setGithubSetupBusy(false);
-        setGithubSetupTimedOut(false);
-        setGithubSetupError(null);
-        setGithubSetupMessage('GitHub CLI is ready.');
-        setShowGitHubAuthTerminal(false);
-        capture('onboarding_github_cli_ready');
-        return;
-      }
-
-      if (Date.now() - startedAt > GITHUB_AUTH_POLL_TIMEOUT_MS) {
-        setGithubSetupStarted(false);
-        setGithubSetupBusy(false);
-        setGithubSetupTimedOut(true);
-        setGithubSetupMessage('Pane is no longer checking automatically. You can check again after finishing GitHub CLI setup.');
-      }
-    };
-
-    const interval = window.setInterval(() => {
-      void poll();
-    }, GITHUB_AUTH_POLL_INTERVAL_MS);
-
-    void poll();
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [isOpen, githubSetupStarted, env?.ghReady, detectEnvironment]);
-
-  const getProjectIdForTerminal = useCallback(async (): Promise<number | null> => {
-    if (activeProjectId) return activeProjectId;
-
-    try {
-      const activeResponse = await API.projects.getActive();
-      const activeProject = activeResponse.data as Project | undefined;
-      if (activeResponse.success && activeProject?.id) {
-        return activeProject.id;
-      }
-    } catch {
-      // Fall through to all-project lookup.
-    }
-
-    try {
-      const projectsResponse = await API.projects.getAll();
-      const projects = Array.isArray(projectsResponse.data) ? projectsResponse.data as Project[] : [];
-      return projects.find(project => project.active)?.id ?? projects[0]?.id ?? null;
-    } catch {
-      return null;
-    }
-  }, [activeProjectId]);
-
-  const openPaneTerminalWithCommand = useCallback(async (projectId: number, command: string) => {
-    const sessionResponse = await API.sessions.getOrCreateMainRepoSession(projectId);
-    if (!sessionResponse.success || !sessionResponse.data?.id) {
-      throw new Error(sessionResponse.error || 'Failed to open a project terminal');
-    }
-
-    const sessionId = sessionResponse.data.id as string;
-    const panel = await panelApi.createPanel({
-      sessionId,
-      type: 'terminal',
-      title: 'GitHub Setup',
-      initialState: {
-        customState: {
-          initialCommand: command,
-        },
-      },
+    if (!isOpen || !env?.ghReady || supportPromptRecordedRef.current) return;
+    supportPromptRecordedRef.current = true;
+    capture('onboarding_support_prompt_shown', {
+      source: 'first_launch',
+      gh_status: getEnvironmentStatus(env),
     });
+    void markSupportPromptShown();
+  }, [isOpen, env]);
 
-    await panelApi.setActivePanel(sessionId, panel.id);
-    await setActiveSession(sessionId);
-    navigateToSessions();
-  }, [navigateToSessions, setActiveSession]);
-
-  const getGitHubAuthCommand = useCallback(async (): Promise<GitHubAuthCommandResult> => {
-    if (env?.ghAuthCommand) {
-      return {
-        command: env.ghAuthCommand,
-        reason: env.ghAuthenticated ? 'refresh' : 'login',
-      };
-    }
-
-    const response = await window.electronAPI.onboarding.getGitHubAuthCommand();
-    if (!response.success || !response.data) {
-      throw new Error(response.error || 'Failed to prepare GitHub CLI setup');
-    }
-
-    return response.data as GitHubAuthCommandResult;
-  }, [env?.ghAuthCommand, env?.ghAuthenticated]);
-
-  const handleGitHubSetup = async () => {
-    setGithubSetupBusy(true);
-    setGithubSetupStarted(true);
-    setGithubSetupTimedOut(false);
-    setGithubSetupError(null);
-    setGithubSetupMessage('Waiting for GitHub CLI setup to finish...');
-
-    try {
-      const commandResult = await getGitHubAuthCommand();
-      if (!commandResult.command) {
-        if (commandResult.reason === 'ready') {
-          await detectEnvironment({ showLoading: false });
-          setGithubSetupStarted(false);
-          setShowGitHubAuthTerminal(false);
-          setGithubSetupMessage('GitHub CLI is ready.');
-        } else {
-          setGithubSetupStarted(false);
-          setGithubSetupError('Install GitHub CLI, then check again.');
-        }
-        return;
-      }
-
-      setManualCommand(commandResult.command);
-      const projectId = await getProjectIdForTerminal();
-
-      if (projectId) {
-        await openPaneTerminalWithCommand(projectId, commandResult.command);
-        setGithubSetupMessage('GitHub CLI setup opened in Pane Terminal. Finish it there; Pane will keep checking.');
-      } else {
-        setShowGitHubAuthTerminal(true);
-        setGitHubAuthTerminalRunKey(key => key + 1);
-        setGithubSetupMessage('GitHub CLI setup is running below. Finish it here; Pane will keep checking.');
-      }
-
-      capture('onboarding_github_cli_setup_started', {
-        reason: commandResult.reason,
-        opened_pane_terminal: Boolean(projectId),
-        opened_embedded_terminal: !projectId,
-      });
-    } catch (error) {
-      setGithubSetupStarted(false);
-      setShowGitHubAuthTerminal(false);
-      setGithubSetupError(error instanceof Error ? error.message : 'Failed to start GitHub CLI setup');
-    } finally {
-      setGithubSetupBusy(false);
-    }
-  };
-
-  const handleSetup = async () => {
-    if (!env?.ghReady) {
-      await handleGitHubSetup();
-      return;
-    }
-
-    await markOnboardingComplete();
-    onClose();
-
-    if (shouldSupportOnSetup && env?.ghReady) {
-      void window.electronAPI.onboarding.supportProject()
-        .then((supportResult) => {
-          if (supportResult?.success) {
-            capture('onboarding_project_supported_during_setup');
-          }
-        })
-        .catch(() => {
-          // swallow: support failure is non-fatal
-        });
-    }
-
+  const setupDefaultRepoInBackground = () => {
     void window.electronAPI.onboarding.setupDefaultRepo()
       .then((result) => {
         if (result.success) {
@@ -460,8 +251,37 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
       });
   };
 
+  const supportProjectInBackground = () => {
+    void window.electronAPI.onboarding.supportProject()
+      .then((supportResult) => {
+        if (supportResult?.success) {
+          capture('onboarding_project_supported_during_setup');
+        }
+      })
+      .catch(() => {
+        // Support failure is non-fatal.
+      });
+  };
+
+  const handleSetup = async () => {
+    if (!env?.gitInstalled) {
+      return;
+    }
+
+    await markOnboardingComplete();
+    onClose();
+
+    if (shouldSupportOnSetup && env?.ghReady) {
+      supportProjectInBackground();
+    }
+
+    setupDefaultRepoInBackground();
+  };
+
   const handleSkip = async () => {
-    capture('onboarding_skipped');
+    capture('onboarding_skipped', {
+      step: step === 'detecting' ? 'detecting' : getEnvironmentStatus(env),
+    });
     await markOnboardingComplete();
     onClose();
   };
@@ -490,45 +310,13 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     window.electronAPI.openExternal('https://git-scm.com/downloads');
   };
 
-  const handleOpenGhGuide = () => {
-    window.electronAPI.openExternal(env?.ghInstallUrl || GITHUB_CLI_URL);
-  };
-
-  const handleGitHubAuthTerminalStarted = useCallback((result: GitHubAuthTerminalStartResult) => {
-    setManualCommand(result.command);
-    setGithubSetupStarted(true);
-    setGithubSetupBusy(false);
-    setGithubSetupError(null);
-    setGithubSetupMessage('GitHub CLI setup is running below. Finish it here; Pane will keep checking.');
-  }, []);
-
-  const handleGitHubAuthTerminalExit = useCallback((result: GitHubAuthTerminalExit) => {
-    if (result.exitCode === 0) {
-      setGithubSetupMessage('GitHub CLI setup finished. Checking readiness...');
-      void detectEnvironment({ showLoading: false });
-      return;
-    }
-
-    setGithubSetupStarted(false);
-    setGithubSetupBusy(false);
-    setGithubSetupError(`GitHub CLI setup exited with code ${result.exitCode}. You can run it again.`);
-    setGithubSetupMessage(null);
-  }, [detectEnvironment]);
-
-  const handleGitHubAuthTerminalError = useCallback((message: string) => {
-    setGithubSetupStarted(false);
-    setGithubSetupBusy(false);
-    setShowGitHubAuthTerminal(false);
-    setGithubSetupError(message);
-  }, []);
-
   if (!isOpen) return null;
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={() => {}}
-      size={showGitHubAuthTerminal ? 'xl' : 'md'}
+      size="md"
       closeOnOverlayClick={false}
       closeOnEscape={false}
       showCloseButton={false}
@@ -585,9 +373,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
                         <div className="space-y-3">
                           <div className="space-y-1">
                             <p className="text-sm font-semibold text-text-primary">Keep supporting independent development?</p>
-                            <p className="text-xs leading-relaxed text-text-secondary">
-                              Pane is built by Parsa, a self-funded developer, not a large corporation. A GitHub star for Pane and a follow are the easiest free way to support the project so it can keep growing.
-                            </p>
+                            <SupportExplainer showTitle={false} />
                           </div>
                           <div className="flex items-center justify-end gap-2">
                             <Button variant="ghost" size="sm" onClick={handleConfirmOptOut}>
@@ -599,12 +385,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-1">
-                          <p className="text-sm font-semibold text-text-primary">Support Pane with a star and follow</p>
-                          <p className="text-xs leading-relaxed text-text-secondary">
-                            Pane is built by Parsa, a self-funded developer. A GitHub star for Pane and a follow are the easiest free way to support the project so it can keep growing.
-                          </p>
-                        </div>
+                        <SupportExplainer />
                       )}
                     </div>
                   )}
@@ -634,73 +415,22 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
                   </p>
                 </div>
               </div>
-            ) : !env.ghInstalled ? (
+            ) : (
               <div className="flex items-start gap-3">
-                <Download className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
+                <GitFork className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
                 <div className="space-y-2">
                   <p className="text-text-primary font-medium">
-                    GitHub CLI Required
+                    Start with a local clone
                   </p>
                   <p className="text-text-secondary text-sm">
-                    Configure GitHub CLI with the scopes required for Pane and your agents to work in Pane.
+                    We&apos;ll clone Pane with Git so you can get into the app now. If GitHub CLI is ready on a future launch, we&apos;ll ask once about starring and following then.
                   </p>
-                  <Button onClick={() => void detectEnvironment()} variant="ghost" size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />}>
-                    Check again
-                  </Button>
                 </div>
               </div>
-            ) : env.gitInstalled ? (
-              <div className="flex items-start gap-3">
-                <TerminalIcon className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
-                <div className="space-y-3 min-w-0 w-full">
-                  <p className="text-text-primary font-medium">
-                    Connect GitHub for Pane
-                  </p>
-                  <p className="text-text-secondary text-sm">
-                    Configure GitHub CLI with the scopes required for Pane and your agents to work in Pane.
-                  </p>
-                  {(githubSetupMessage || githubSetupStarted) && (
-                    <div className="flex items-start gap-2 rounded border border-border-primary bg-surface-secondary px-3 py-2">
-                      <Loader2 className={`h-4 w-4 mt-0.5 flex-shrink-0 text-interactive ${githubSetupStarted ? 'animate-spin' : ''}`} />
-                      <p className="text-xs text-text-secondary">
-                        {githubSetupMessage || 'Waiting for GitHub CLI setup to finish...'}
-                      </p>
-                    </div>
-                  )}
-                  {githubSetupTimedOut && (
-                    <Button onClick={() => void detectEnvironment()} variant="secondary" size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />}>
-                      Check again
-                    </Button>
-                  )}
-                  {githubSetupError && (
-                    <p className="text-xs text-status-error">
-                      {githubSetupError}
-                    </p>
-                  )}
-                  {showGitHubAuthTerminal && (
-                    <GitHubAuthSetupTerminal
-                      active={showGitHubAuthTerminal}
-                      runKey={githubAuthTerminalRunKey}
-                      onStarted={handleGitHubAuthTerminalStarted}
-                      onExit={handleGitHubAuthTerminalExit}
-                      onError={handleGitHubAuthTerminalError}
-                    />
-                  )}
-                  {(manualCommand || env.ghAuthCommand) && !showGitHubAuthTerminal && (
-                    <div className="rounded border border-border-primary bg-bg-secondary px-3 py-2 overflow-x-auto">
-                      <code className="text-xs text-text-secondary whitespace-nowrap">
-                        {manualCommand || env.ghAuthCommand}
-                      </code>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              null
             )}
-            {!env.ghReady && (
+            {!env.ghReady && env.gitInstalled && (
               <p className="text-xs text-text-secondary">
-                You can skip for now, but {env.gitInstalled ? 'GitHub-powered' : 'Git and GitHub-powered'} functionality may not work until setup is complete.
+                GitHub CLI is optional. Plain Git can clone the repository, but starring, following, and fork creation require GitHub authentication.
               </p>
             )}
           </div>
@@ -727,19 +457,13 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
               <Button onClick={handleOpenGitGuide} variant="primary" icon={<ExternalLink className="h-4 w-4" />}>
                 Install Git
               </Button>
-            ) : !env.ghInstalled ? (
-              <Button onClick={handleOpenGhGuide} variant="primary" icon={<ExternalLink className="h-4 w-4" />}>
-                Install GitHub CLI
-              </Button>
             ) : (
               <Button
                 onClick={handleSetup}
                 variant="primary"
-                icon={<TerminalIcon className="h-4 w-4" />}
-                loading={githubSetupBusy}
-                loadingText="Opening"
+                icon={<GitFork className="h-4 w-4" />}
               >
-                Configure GitHub CLI
+                Start with local clone
               </Button>
             )}
           </>

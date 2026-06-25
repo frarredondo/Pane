@@ -12,7 +12,11 @@ import { SessionView } from './components/SessionView';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
 import AnalyticsConsentDialog from './components/AnalyticsConsentDialog';
-import OnboardingDialog from './components/OnboardingDialog';
+import OnboardingDialog, {
+  ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE,
+  ONBOARDING_REPO_SETUP_PREFERENCE,
+  SupportPaneDialog,
+} from './components/OnboardingDialog';
 import { AboutDialog } from './components/AboutDialog';
 import { DocsDialog } from './components/DocsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
@@ -67,6 +71,10 @@ interface IPCResponse<T = unknown> {
   error?: string;
 }
 
+interface OnboardingEnvironmentResult {
+  ghReady?: boolean;
+}
+
 function App() {
   const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);
   const [isAnalyticsConsentOpen, setIsAnalyticsConsentOpen] = useState(false);
@@ -77,7 +85,9 @@ function App() {
   const [currentPermissionRequest, setCurrentPermissionRequest] = useState<PanePermissionRequest | null>(null);
   const [isDiscordOpen, setIsDiscordOpen] = useState(false);
   const [hasCheckedWelcome, setHasCheckedWelcome] = useState(false);
+  const [hasResolvedStartupDialogs, setHasResolvedStartupDialogs] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isSupportPaneOpen, setIsSupportPaneOpen] = useState(false);
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
   const [completedOnboardingThisSession, setCompletedOnboardingThisSession] = useState(false);
   const [analyticsIdentity, setAnalyticsIdentity] = useState<AnalyticsIdentity | undefined>();
@@ -86,6 +96,7 @@ function App() {
   const analyticsConsentOpenRef = useRef(false);
   const appFirstOpenedCaptured = useRef(false);
   const onboardingCheckStarted = useRef(false);
+  const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -113,7 +124,7 @@ function App() {
   const { fetchConfig, config: appConfig } = useConfigStore();
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
-  
+
   const { width: sidebarWidth, startResize } = useResizable({
     defaultWidth: 352,
     minWidth: 200,
@@ -121,7 +132,7 @@ function App() {
     storageKey: 'pane-sidebar-width'
   });
 
-  
+
   useIPCEvents();
   const { showNotification } = useNotifications();
 
@@ -446,7 +457,7 @@ function App() {
         return;
       }
       try {
-        const result = await window.electron.invoke('preferences:get', 'onboarding_repo_setup') as IPCResponse<string>;
+        const result = await window.electron.invoke('preferences:get', ONBOARDING_REPO_SETUP_PREFERENCE) as IPCResponse<string>;
         if (result?.data !== 'true') {
           // Only show onboarding for truly new users (no existing projects).
           // Existing users who upgrade won't have this preference but already have projects.
@@ -476,100 +487,162 @@ function App() {
 
     const checkInitialState = async () => {
       if (!window.electron?.invoke) {
+        setHasResolvedStartupDialogs(true);
         return;
       }
 
-      // Get preferences from database
-      const hideWelcomeResult = await window.electron.invoke('preferences:get', 'hide_welcome') as IPCResponse<string>;
-      const welcomeShownResult = await window.electron.invoke('preferences:get', 'welcome_shown') as IPCResponse<string>;
-      const hideDiscordResult = await window.electron.invoke('preferences:get', 'hide_discord') as IPCResponse<string>;
-      
-      const hideWelcome = hideWelcomeResult?.data === 'true';
-      const hasSeenWelcome = welcomeShownResult?.data === 'true';
-      const hideDiscord = hideDiscordResult?.data === 'true';
-      
-      
-      // Track whether we're showing the welcome screen
-      let welcomeScreenShown = false;
-      
-      // If user explicitly said "don't show again", respect that preference
-      if (hideWelcome || completedOnboardingThisSession) {
-        welcomeScreenShown = false;
-      } else {
-        try {
-          const projectsResponse = await API.projects.getAll();
-          const hasProjects = projectsResponse.success && projectsResponse.data && projectsResponse.data.length > 0;
-          // Get sessions from the API to avoid stale closure
-          const sessionsResponse = await API.sessions.getAll();
-          const hasSessions = sessionsResponse.success && sessionsResponse.data && sessionsResponse.data.length > 0;
-          
-          // Show welcome if:
-          // 1. First time user (no projects and never seen welcome)
-          // 2. Returning user with no active data (no projects and no sessions)
-          const isFirstTimeUser = !hasProjects && !hasSeenWelcome;
-          const isReturningUserWithNoData = !hasProjects && !hasSessions && hasSeenWelcome;
-          
-          
-          if (isFirstTimeUser || isReturningUserWithNoData) {
-            setIsWelcomeOpen(true);
-            welcomeScreenShown = true;
-            // Mark that welcome has been shown at least once
-            await window.electron.invoke('preferences:set', 'welcome_shown', 'true');
-          } else {
+      try {
+        // Get preferences from database
+        const hideWelcomeResult = await window.electron.invoke('preferences:get', 'hide_welcome') as IPCResponse<string>;
+        const welcomeShownResult = await window.electron.invoke('preferences:get', 'welcome_shown') as IPCResponse<string>;
+        const hideDiscordResult = await window.electron.invoke('preferences:get', 'hide_discord') as IPCResponse<string>;
+
+        const hideWelcome = hideWelcomeResult?.data === 'true';
+        const hasSeenWelcome = welcomeShownResult?.data === 'true';
+        const hideDiscord = hideDiscordResult?.data === 'true';
+
+
+        // Track whether we're showing the welcome screen
+        let welcomeScreenShown = false;
+
+        // If user explicitly said "don't show again", respect that preference
+        if (hideWelcome || completedOnboardingThisSession) {
+          welcomeScreenShown = false;
+        } else {
+          try {
+            const projectsResponse = await API.projects.getAll();
+            const hasProjects = projectsResponse.success && projectsResponse.data && projectsResponse.data.length > 0;
+            // Get sessions from the API to avoid stale closure
+            const sessionsResponse = await API.sessions.getAll();
+            const hasSessions = sessionsResponse.success && sessionsResponse.data && sessionsResponse.data.length > 0;
+
+            // Show welcome if:
+            // 1. First time user (no projects and never seen welcome)
+            // 2. Returning user with no active data (no projects and no sessions)
+            const isFirstTimeUser = !hasProjects && !hasSeenWelcome;
+            const isReturningUserWithNoData = !hasProjects && !hasSessions && hasSeenWelcome;
+
+
+            if (isFirstTimeUser || isReturningUserWithNoData) {
+              setIsWelcomeOpen(true);
+              welcomeScreenShown = true;
+              // Mark that welcome has been shown at least once
+              await window.electron.invoke('preferences:set', 'welcome_shown', 'true');
+            } else {
+              welcomeScreenShown = false;
+            }
+          } catch (error) {
+            console.error('Error checking initial state:', error);
             welcomeScreenShown = false;
           }
-        } catch (error) {
-          console.error('Error checking initial state:', error);
-          welcomeScreenShown = false;
         }
-      }
-      
-      // If welcome screen is not shown and Discord hasn't been hidden, check if we should show Discord popup
-      if (!welcomeScreenShown && !hideDiscord) {
-        
-        try {
-          // Get the last app open to see if Discord was already shown
-          const result = await window.electron.invoke('app:get-last-open') as IPCResponse<{ discord_shown?: boolean }>;
-          
-          if (result?.success && result.data) {
-            const lastOpen = result.data;
-            
-            // Show Discord popup if it hasn't been shown yet
-            if (!lastOpen.discord_shown) {
-              setIsDiscordOpen(true);
-              // Mark that we're showing the Discord popup
-              if (window.electron?.invoke) {
-                await window.electron.invoke('app:update-discord-shown');
+
+        // If welcome screen is not shown and Discord hasn't been hidden, check if we should show Discord popup
+        if (!welcomeScreenShown && !hideDiscord) {
+
+          try {
+            // Get the last app open to see if Discord was already shown
+            const result = await window.electron.invoke('app:get-last-open') as IPCResponse<{ discord_shown?: boolean }>;
+
+            if (result?.success && result.data) {
+              const lastOpen = result.data;
+
+              // Show Discord popup if it hasn't been shown yet
+              if (!lastOpen.discord_shown) {
+                setIsDiscordOpen(true);
+                // Mark that we're showing the Discord popup
+                if (window.electron?.invoke) {
+                  await window.electron.invoke('app:update-discord-shown');
+                }
+              } else {
+                // Discord already shown
               }
             } else {
-              // Discord already shown
+              // No previous app open - show Discord popup
+              setIsDiscordOpen(true);
+              // Will update discord shown status after recording app open
             }
-          } else {
-            // No previous app open - show Discord popup
-            setIsDiscordOpen(true);
-            // Will update discord shown status after recording app open
+          } catch {
+            // Error checking Discord popup
           }
-        } catch (error) {
-          // Error checking Discord popup
-        }
-        
-        // Record this app open
-        if (window.electron?.invoke) {
-          await window.electron.invoke('app:record-open', hideWelcome, false);
-          
-          // If we showed Discord popup and there was no previous app open, update the status
-          const result = await window.electron.invoke('app:get-last-open') as IPCResponse<{ discord_shown?: boolean }>;
-          if (!result?.data?.discord_shown && isDiscordOpen) {
-            await window.electron.invoke('app:update-discord-shown');
+
+          // Record this app open
+          if (window.electron?.invoke) {
+            await window.electron.invoke('app:record-open', hideWelcome, false);
+
+            // If we showed Discord popup and there was no previous app open, update the status
+            const result = await window.electron.invoke('app:get-last-open') as IPCResponse<{ discord_shown?: boolean }>;
+            if (!result?.data?.discord_shown && isDiscordOpen) {
+              await window.electron.invoke('app:update-discord-shown');
+            }
           }
         }
+      } finally {
+        setHasResolvedStartupDialogs(true);
       }
     };
-    
+
     // Set the flag first to prevent re-runs
     setHasCheckedWelcome(true);
     checkInitialState();
-  }, [isLoaded, isAnalyticsConsentOpen, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession]);
+  }, [isLoaded, hasCheckedWelcome, isAnalyticsConsentOpen, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, isDiscordOpen]);
+
+  useEffect(() => {
+    if (
+      supportPromptCheckStarted.current ||
+      !isLoaded ||
+      !hasCheckedAnalyticsConsent ||
+      isAnalyticsConsentOpen ||
+      !hasCheckedOnboarding ||
+      isOnboardingOpen ||
+      completedOnboardingThisSession ||
+      !hasResolvedStartupDialogs ||
+      isWelcomeOpen ||
+      isDiscordOpen
+    ) {
+      return;
+    }
+
+    supportPromptCheckStarted.current = true;
+
+    const checkDeferredSupportPrompt = async () => {
+      if (!window.electron?.invoke || !window.electronAPI?.onboarding?.detectEnvironment) {
+        return;
+      }
+
+      try {
+        const onboardingResult = await window.electron.invoke('preferences:get', ONBOARDING_REPO_SETUP_PREFERENCE) as IPCResponse<string>;
+        if (onboardingResult?.data !== 'true') return;
+
+        const promptResult = await window.electron.invoke('preferences:get', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE) as IPCResponse<string>;
+        if (promptResult?.data === 'true') return;
+
+        const envResult = await window.electronAPI.onboarding.detectEnvironment() as IPCResponse<OnboardingEnvironmentResult>;
+        if (!envResult.success || envResult.data?.ghReady !== true) return;
+
+        await window.electron.invoke('preferences:set', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
+        capture('onboarding_support_prompt_shown', {
+          source: 'future_launch',
+          gh_status: 'gh_ready',
+        });
+        setIsSupportPaneOpen(true);
+      } catch (error) {
+        console.error('[App] Failed to check deferred onboarding support prompt:', error);
+      }
+    };
+
+    void checkDeferredSupportPrompt();
+  }, [
+    isLoaded,
+    hasCheckedAnalyticsConsent,
+    isAnalyticsConsentOpen,
+    hasCheckedOnboarding,
+    isOnboardingOpen,
+    completedOnboardingThisSession,
+    hasResolvedStartupDialogs,
+    isWelcomeOpen,
+    isDiscordOpen,
+  ]);
 
   // Discord popup logic is now combined with welcome screen logic above
 
@@ -631,7 +704,7 @@ function App() {
   useEffect(() => {
     // Set up version update listener
     if (!window.electronAPI?.events) return;
-    
+
     const handleVersionUpdate = (versionInfo: VersionUpdateInfo) => {
       console.log('[App] Version update available:', versionInfo);
       setUpdateVersionInfo(versionInfo);
@@ -644,10 +717,10 @@ function App() {
         `update:${versionInfo.latest}` // Deduplicate by version - only track once per version
       );
     };
-    
+
     // Set up the listener using the events API
     const removeListener = window.electronAPI.events.onVersionUpdateAvailable(handleVersionUpdate);
-    
+
     return () => {
       if (removeListener) {
         removeListener();
@@ -732,14 +805,18 @@ function App() {
             window.dispatchEvent(new Event('project-changed'));
           }}
         />
+        <SupportPaneDialog
+          isOpen={isSupportPaneOpen}
+          onClose={() => setIsSupportPaneOpen(false)}
+        />
         <Welcome isOpen={isWelcomeOpen} onClose={() => setIsWelcomeOpen(false)} />
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleAboutUpdate} />
-        <UpdateDialog 
-          isOpen={isUpdateDialogOpen} 
+        <UpdateDialog
+          isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}
           versionInfo={updateVersionInfo || undefined}
         />
-        <ErrorDialog 
+        <ErrorDialog
           isOpen={!!currentError}
           onClose={clearError}
           title={currentError?.title}
@@ -780,7 +857,6 @@ function App() {
         <Help isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
         <DocsDialog isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
         <ShortcutHintsOverlay isVisible={shortcutHintsVisible} shortcuts={terminalShortcuts} />
-
         </div>
       </div>
     </ContextMenuProvider>
