@@ -58,6 +58,7 @@ export function SessionDetailTooltip({ session, gitStatus, showName = true, show
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
   const hasDiff = adds > 0 || dels > 0;
   const filesChanged = (gs?.commitFilesChanged ?? 0) + (gs?.filesChanged ?? 0);
+  const shouldShowDiffStats = hasDiff && (showDiffStats || Boolean(gs?.prNumber));
 
   return (
     <div className="max-w-xs space-y-1.5">
@@ -94,7 +95,7 @@ export function SessionDetailTooltip({ session, gitStatus, showName = true, show
         </div>
       </div>
 
-      {showDiffStats && hasDiff && (
+      {shouldShowDiffStats && (
         <>
           <div className="border-t border-border-primary" />
           <div className="flex items-center gap-3 text-[10px]">

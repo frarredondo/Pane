@@ -10,7 +10,7 @@ import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
-import type { CreateSessionRequest } from '../types/session';
+import type { CreateSessionRequest, Session } from '../types/session';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { convertDbFolderToRendererFolder } from '../services/folderEvents';
 import { sessionImageCounters } from './panels';
@@ -106,10 +106,15 @@ export function registerSessionHandlers(
   // NOTE: Current IPC handlers use claudeCodeManager directly for backward compatibility
   // Future versions will use getCliManager() to support multiple CLI tools dynamically
 
+  const attachCachedGitStatus = (session: Session): Session => {
+    const cached = gitStatusManager.getCachedStatus(session.id)?.status;
+    return cached ? { ...session, gitStatus: cached } : session;
+  };
+
   // Session management handlers
   commandRegistry.register('sessions:get-all', async () => {
     try {
-      const sessions = await sessionManager.getAllSessions();
+      const sessions = (await sessionManager.getAllSessions()).map(attachCachedGitStatus);
       return { success: true, data: sessions };
     } catch (error) {
       console.error('Failed to get sessions:', error);
@@ -124,7 +129,7 @@ export function registerSessionHandlers(
       if (!session) {
         return { success: false, error: 'Session not found' };
       }
-      return { success: true, data: session };
+      return { success: true, data: attachCachedGitStatus(session) };
     } catch (error) {
       console.error('Failed to get session:', error);
       return { success: false, error: 'Failed to get session' };
@@ -135,7 +140,7 @@ export function registerSessionHandlers(
     try {
       const allProjects = databaseService.getAllProjects();
       const projectsWithSessions = allProjects.map(project => {
-        const sessions = sessionManager.getSessionsForProject(project.id);
+        const sessions = sessionManager.getSessionsForProject(project.id).map(attachCachedGitStatus);
         const folders = databaseService.getFoldersForProject(project.id);
         const convertedFolders = folders.map(convertDbFolderToRendererFolder);
         return {
