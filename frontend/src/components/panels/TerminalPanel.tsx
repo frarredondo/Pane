@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { WebglAddon } from '@xterm/addon-webgl';
@@ -58,6 +58,7 @@ const DEFAULT_TERMINAL_FONT_FAMILY = 'Geist Mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 14;
 const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
+const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
 const TERMINAL_VISIBILITY_REFRESH_MS = 60_000;
 const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-layout (Allotment minSize is 120)
 const MIN_PTY_COLS = 20;        // mirrors main-process floor
@@ -1443,7 +1444,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
   // Handle Battery Saver visibility changes (resize and full refresh when becoming visible)
   // Include isInitialized so this effect re-runs after terminal initialization completes
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!useBatterySaverTerminalVisibility) return;
     if (!effectiveVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
 
@@ -1499,7 +1500,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
       hideOverlayTimer = setTimeout(() => {
         if (!cancelled) setIsRefreshing(false);
-      }, 0);
+      }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
     };
 
     const animationFrame = requestAnimationFrame(fitAndRefresh);
@@ -1517,7 +1518,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   // Performance mode keeps mounted terminals live, but xterm/WebGL can still
   // paint stale rows after display:none→block. Use the same canonical refresh
   // path as the manual Refresh button when a terminal tab becomes visible.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (useBatterySaverTerminalVisibility) return;
     if (!panelVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
 
@@ -1569,7 +1570,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
         hideOverlayTimer = setTimeout(() => {
           if (!cancelled) setIsRefreshing(false);
-        }, 0);
+        }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
       });
     };
 
