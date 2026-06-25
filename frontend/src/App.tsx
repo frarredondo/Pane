@@ -12,7 +12,11 @@ import { SessionView } from './components/SessionView';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
 import AnalyticsConsentDialog from './components/AnalyticsConsentDialog';
-import OnboardingDialog, { SupportPaneDialog } from './components/OnboardingDialog';
+import OnboardingDialog, {
+  ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE,
+  ONBOARDING_REPO_SETUP_PREFERENCE,
+  SupportPaneDialog,
+} from './components/OnboardingDialog';
 import { AboutDialog } from './components/AboutDialog';
 import { DocsDialog } from './components/DocsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
@@ -70,9 +74,6 @@ interface IPCResponse<T = unknown> {
 interface OnboardingEnvironmentResult {
   ghReady?: boolean;
 }
-
-const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
-const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
 
 function App() {
   const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);

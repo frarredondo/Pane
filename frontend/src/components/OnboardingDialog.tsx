@@ -31,8 +31,8 @@ interface SupportPaneDialogProps {
 }
 
 const GITHUB_CLI_URL = 'https://cli.github.com/';
-const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
-const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
+export const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
+export const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
 const ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE = 'onboarding_gh_status_at_first_launch';
 
 interface IPCResponse<T = unknown> {
