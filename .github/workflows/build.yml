@@ -84,7 +84,7 @@ jobs:
 
   publish-release:
     if: github.ref_type == 'tag'
-    needs: [build, build-windows]
+    needs: [publish-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -216,7 +216,7 @@ jobs:
         arch: [x64, arm64]
     runs-on: windows-2022
     permissions:
-      contents: write
+      contents: read
     steps:
     - uses: actions/checkout@v7
     - uses: pnpm/action-setup@v6
@@ -233,17 +233,10 @@ jobs:
         restore-keys: windows-${{ matrix.arch }}-electron-
     - run: pnpm install
 
-    - name: Build and optionally publish
+    - name: Build Windows artifact
       run: |
-        if ("${{ github.ref_type }}" -eq "tag" -or "${{ inputs.publish }}" -eq "true") {
-          Write-Host "Release build — publishing to GitHub Releases"
-          pnpm run release:win:${{ matrix.arch }}
-        } else {
-          Write-Host "CI build — artifacts only"
-          node scripts/build-win.js ${{ matrix.arch }}
-        }
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        Write-Host "Building Windows ${{ matrix.arch }} artifact without publishing"
+        node scripts/build-win.js ${{ matrix.arch }}
 
     - run: dir dist-electron
 
@@ -252,6 +245,57 @@ jobs:
         name: pane-windows-${{ matrix.arch }}-${{ github.ref_name }}
         path: |
           dist-electron/*-Windows-${{ matrix.arch }}.exe
+          dist-electron/*-Windows-${{ matrix.arch }}.exe.blockmap
           dist-electron/latest.yml
         if-no-files-found: error
         retention-days: 30
+
+  publish-windows:
+    if: github.ref_type == 'tag' || inputs.publish == true
+    needs: [build, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v7
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22.15.1'
+        cache: 'pnpm'
+    - run: pnpm install --ignore-scripts
+
+    - uses: actions/download-artifact@v7
+      with:
+        name: pane-windows-x64-${{ github.ref_name }}
+        path: windows-artifacts/x64
+
+    - uses: actions/download-artifact@v7
+      with:
+        name: pane-windows-arm64-${{ github.ref_name }}
+        path: windows-artifacts/arm64
+
+    - name: Merge Windows updater metadata
+      run: |
+        mkdir -p windows-release
+        cp windows-artifacts/x64/*-Windows-x64.exe windows-release/
+        cp windows-artifacts/x64/*-Windows-x64.exe.blockmap windows-release/
+        cp windows-artifacts/arm64/*-Windows-arm64.exe windows-release/
+        cp windows-artifacts/arm64/*-Windows-arm64.exe.blockmap windows-release/
+        node scripts/merge-windows-latest.js \
+          windows-artifacts/x64/latest.yml \
+          windows-artifacts/arm64/latest.yml \
+          windows-release/latest.yml
+        ls -la windows-release
+
+    - name: Upload Windows release assets
+      run: |
+        VERSION="$(node -p "require('./package.json').version")"
+        TAG="v${VERSION}"
+        if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          TAG="${GITHUB_REF_NAME}"
+        fi
+        gh release upload "${TAG}" windows-release/* \
+          --repo "${{ github.repository }}" --clobber
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
