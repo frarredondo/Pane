@@ -5,12 +5,14 @@ export interface PaneNameBranchInfo {
   isRemote: boolean;
 }
 
-export function sanitizePaneName(name: string): string {
-  return name
+export function sanitizePaneName(name: string, options: { trim?: boolean } = {}): string {
+  const { trim = true } = options;
+  const sanitized = name
     .replace(/[~^:?*[\]\\/]/g, '')
     .replace(/\.{2,}/g, '.')
-    .replace(/^\.+|\.+$/g, '')
-    .trim();
+    .replace(/^\.+|\.+$/g, '');
+
+  return trim ? sanitized.trim() : sanitized;
 }
 
 export function generatePaneName(

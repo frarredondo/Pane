@@ -42,4 +42,8 @@ describe('paneName', () => {
   it('sanitizes names consistently', () => {
     expect(sanitizePaneName('../main?')).toBe('main');
   });
+
+  it('can preserve spaces while editing a pane name', () => {
+    expect(sanitizePaneName('bug fix ', { trim: false })).toBe('bug fix ');
+  });
 });

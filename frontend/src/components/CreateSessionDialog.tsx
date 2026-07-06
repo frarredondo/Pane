@@ -581,7 +581,7 @@ export function CreateSessionDialog({
                 type="text"
                 value={sessionName}
                 onChange={(e) => {
-                  const value = sanitizePaneName(e.target.value);
+                  const value = sanitizePaneName(e.target.value, { trim: false });
                   setSessionName(value);
                   setFormData({ ...formData, worktreeTemplate: value });
                   setUserEditedName(true);

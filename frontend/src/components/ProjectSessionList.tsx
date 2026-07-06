@@ -460,7 +460,11 @@ export function ProjectSessionList({
                 onDragEnd={handleProjectDragEnd}
                 onDragLeave={() => setDragOverProjectId(null)}
               >
-                <Tooltip content={<span className="text-[10px] text-text-tertiary font-mono break-all">{project.path}</span>} side="right">
+                <Tooltip
+                  content={<span className="text-[10px] text-text-tertiary font-mono break-all">{project.path}</span>}
+                  side="right"
+                  className="min-w-0 flex-1"
+                >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="min-w-0 truncate text-xs font-semibold text-text-primary">{project.name}</span>
