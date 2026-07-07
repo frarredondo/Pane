@@ -60,6 +60,7 @@ const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
 const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
 const TERMINAL_VISIBILITY_REFRESH_MS = 60_000;
+const SNAPSHOT_MIN_INTERVAL_MS = 10_000;
 const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-layout (Allotment minSize is 120)
 const MIN_PTY_COLS = 20;        // mirrors main-process floor
 const MIN_PTY_ROWS = 5;
@@ -97,6 +98,51 @@ function waitForNextPaint(): Promise<void> {
   });
 }
 
+/**
+ * Terminal panel lifecycle — the invariants below keep hidden terminals cheap
+ * and correct; break one and you get mangled buffers or replay storms.
+ *
+ * MOUNT (possibly hidden): keep-alive terminal tabs mount even when inactive
+ * (PanelGroupView renders them behind display:none). The PTY spawns at the
+ * backend default (80×30) when the container has no measurable size, and the
+ * mount-time fit() is SKIPPED for containers below MIN_VIABLE_RECT_PX —
+ * FitAddon has no cols floor, so fitting a 0×0 container would shrink the
+ * grid to a few columns and background PTY output would parse into a
+ * garbage-width buffer that xterm reflow cannot repair. A skipped mount fit
+ * arms `needsFullActivationRefreshRef` so the first activation rebuilds the
+ * buffer at the settled width. The same width guard applies to every other
+ * grid-resizing path (resizePtyToFit, post-restore fit, font-change fit).
+ *
+ * HIDDEN (performance mode): the panel keeps reporting visible to main
+ * (`effectiveVisible` is hard-coded true), so PTY output keeps streaming and
+ * the xterm buffer stays live while display:none. Battery saver instead
+ * reports hidden — main stops renderer delivery — so its buffer genuinely
+ * goes stale while inactive.
+ *
+ * ACTIVATION (tab shown and window focused — `activationVisible`): depth is
+ * chosen by cause. Full reset+replay from `terminal:getState` only when the
+ * buffer may be stale (battery saver, or the armed one-time flag); otherwise
+ * a light fit+repaint (`repaintTerminal`). Panel activations show the
+ * refresh overlay and take focus; a pure window refocus repaints silently.
+ * A delayed backstop re-runs the chosen depth once (REFOCUS_DELAYED_REFRESH_MS)
+ * to cover the async WebGL re-attach race. The manual Refresh button always
+ * runs the full path (`handleRefreshTerminal`).
+ *
+ * WEBGL: one context per VISIBLE terminal. Detached immediately on panel
+ * hide, kept through short app blurs, detached after a sustained blur
+ * (WEBGL_APP_BLUR_DETACH_DELAY_MS). Re-attach paints via a refresh deferred
+ * past the next frame — same-task refreshes can hit an uncomposited canvas.
+ * While detached, xterm falls back to the DOM renderer.
+ *
+ * PERSISTENCE: main owns the raw scrollback (authoritative, ANSI-safe
+ * trimmed); the renderer serializes a formatting-preserving snapshot on
+ * hide (throttled to SNAPSHOT_MIN_INTERVAL_MS) and on unmount, used only for
+ * app-restart restore. Live restores always prefer main's raw scrollback.
+ *
+ * UNMOUNT (session switch / panel close): serialize a final snapshot, then
+ * dispose WebGL, addons, and the xterm instance. Remounts restore from
+ * `terminal:getState` (capped payload) and replay once into a fresh xterm.
+ */
 export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActive, autoFocus = true }) => {
   renderLog('[TerminalPanel] Component rendering, panel:', panel.id, 'isActive:', isActive);
   
@@ -128,11 +174,17 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   // refocus in both power modes (effectiveVisible is hard-coded true in
   // performance mode, so it cannot serve this role).
   const activationVisible = panelVisible && windowFocused;
-  // True when the next activation needs the full reset+replay path: the panel
-  // was hidden (stale rows after display:none→block) or battery saver gated PTY
-  // output while inactive. A pure window refocus in performance mode leaves the
-  // buffer live, so a light repaint is enough.
-  const needsFullActivationRefreshRef = useRef(true);
+  // True when the next activation needs the full reset+replay path: battery
+  // saver gated PTY output while inactive, so the buffer may be stale. In
+  // performance mode hidden panels keep receiving output (effectiveVisible is
+  // hard-coded true), so the buffer is always live and a light repaint is
+  // enough — stale display:none→block pixels are a paint problem, not a
+  // buffer problem.
+  const needsFullActivationRefreshRef = useRef(false);
+  // True when the next activation is a panel activation (tab became visible)
+  // rather than a pure window refocus: the fit can visibly reflow the grid, so
+  // mask it with the refresh overlay and move focus. Pure refocus stays silent.
+  const panelActivationRef = useRef(true);
   const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -281,8 +333,13 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       terminal.loadAddon(addon);
       webglAddonRef.current = addon;
       // xterm's activate() only swaps the renderer via setRenderer with no full
-      // row refresh, so force a redraw on the freshly attached WebGL renderer.
-      if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+      // row refresh, so force a redraw on the freshly attached WebGL renderer —
+      // deferred past the next paint: refreshing in the same task can hit an
+      // uncomposited canvas on blur→refocus reattach.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (webglAddonRef.current !== addon) return;
+        if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+      }));
       console.log('[TerminalPanel] WebGL renderer loaded for panel', panel.id);
       forwardToMainLog('info', `[TerminalPanel] WebGL renderer loaded for panel ${panel.id} reason=${reason}`);
     } catch (e) {
@@ -300,16 +357,20 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   }, [forwardToMainLog, panel.id]);
 
   // Replaces the old 30 s snapshot interval: fire once on active-to-inactive
-  // transitions (tab switches / panel hides). The dispose-time snapshot in the
-  // terminal init effect stays as a backstop for full unmount.
+  // transitions (tab switches / panel hides), throttled so rapid tab flips
+  // don't do a full buffer walk + IPC each time. The dispose-time snapshot in
+  // the terminal init effect stays as a backstop for full unmount.
   const wasActiveRef = useRef(panelVisible);
+  const lastSnapshotAtRef = useRef(0);
   useEffect(() => {
     const wasActive = wasActiveRef.current;
     wasActiveRef.current = panelVisible;
     if (wasActive && !panelVisible && serializeAddonRef.current) {
+      if (Date.now() - lastSnapshotAtRef.current < SNAPSHOT_MIN_INTERVAL_MS) return;
       try {
         const serialized = serializeAddonRef.current.serialize();
         window.electronAPI.invoke('terminal:saveSnapshot', panel.id, serialized);
+        lastSnapshotAtRef.current = Date.now();
       } catch {
         // xterm buffer in a bad state — not worth surfacing
       }
@@ -428,7 +489,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     }
   }, [panel.id]);
 
-  // Refresh terminal: normal shells replay raw scrollback; live TUIs repaint via resize.
+  // Full-depth refresh: normal shells reset+replay main's raw scrollback at the
+  // settled width; live TUIs (alt-screen) repaint via resize instead. Reached
+  // from exactly three places: the manual Refresh button, battery-saver
+  // activations, and the one-time first activation of a hidden-mounted panel
+  // (armed via needsFullActivationRefreshRef). Routine tab switches use
+  // repaintTerminal instead — see the component lifecycle doc.
   const handleRefreshTerminal = useCallback(async () => {
     const terminal = xtermRef.current;
     if (!terminal) return;
@@ -645,7 +711,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           altClickMovesCursor: true,
           drawBoldTextInBrightColors: true,
           rescaleOverlappingGlyphs: true,
-          minimumContrastRatio: 1,
+          minimumContrastRatio: document.documentElement.classList.contains('light') ? 4.5 : 1,
           macOptionIsMeta: false,
           linkHandler: {
             activate: (_event, uri) => {
@@ -797,8 +863,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             document.fonts.load(`${terminalFontSize}px "${terminalFontFamily}"`).catch(() => {}),
             document.fonts.load(`${terminalFontSize}px "Symbols Nerd Font Mono"`).catch(() => {}),
           ]);
-          fitAddon.fit();
-          console.log('[TerminalPanel] FitAddon fitted');
+          // Never fit against a hidden/mid-layout container (display:none keep-alive
+          // tabs measure 0×0): FitAddon resizes the grid with no floor, and background
+          // PTY output then parses into a garbage-width buffer that reflow can't fix.
+          // Keeping xterm's default grid matches the PTY's default cols; the one-time
+          // full activation refresh rebuilds anything that still parsed mismatched.
+          if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+            fitAddon.fit();
+            console.log('[TerminalPanel] FitAddon fitted');
+          } else {
+            needsFullActivationRefreshRef.current = true;
+            console.log('[TerminalPanel] Skipped mount fit (hidden container); armed full activation refresh');
+          }
           terminal.options.theme = getTerminalTheme();
 
           // Load WebLinksAddon for clickable URLs
@@ -952,7 +1028,11 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             // Force WebGL renderer to redraw after buffer content changes.
             // Without this, macOS WebGL canvas shows stale/stuttered content until
             // a resize event (minimize/fullscreen) forces invalidation.
-            fitAddon.fit();
+            // Same hidden-container guard as the mount fit: WebGL isn't attached
+            // while hidden, and a 0-width fit would mangle the grid.
+            if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+              fitAddon.fit();
+            }
           }
 
           // Handle paste events (Ctrl+V, voice transcription, external text injection)
@@ -1255,7 +1335,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
                 if (!terminal || disposed) return;
                 terminal.options.fontFamily = newFontFamily;
                 terminal.options.fontSize = newFontSize;
-                if (fitAddon) fitAddon.fit();
+                // Hidden-container guard (see mount fit): defer to the activation fit
+                if (fitAddon && (terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+                  fitAddon.fit();
+                }
               });
             }
           });
@@ -1482,16 +1565,22 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
   // Shared activation refresh for both power modes: fires on tab activation and
   // window refocus (activationVisible = panelVisible && windowFocused). Depth is
-  // chosen by cause — a full reset+replay (overlay + autoFocus) when the buffer
-  // may be stale, a light repaint (silent, no focus move) on a pure performance-
-  // mode refocus. Declared after the WebGL policy effects so the delayed backstop
+  // chosen by cause — a full reset+replay only when the buffer may be stale
+  // (battery saver cadence-gating), a light fit+repaint otherwise. Panel
+  // activations get the overlay + autoFocus; a pure window refocus stays
+  // silent. Declared after the WebGL policy effects so the delayed backstop
   // covers the WebGL re-attach ordering race.
   useLayoutEffect(() => {
     if (!isInitialized || !fitAddonRef.current || !xtermRef.current) return;
     if (!activationVisible) {
-      // Re-arm full depth when the panel itself hides, or whenever battery saver
-      // is active (its PTY output is cadence-gated while not effectively visible).
-      if (!panelVisible || useBatterySaverTerminalVisibility) {
+      if (!panelVisible) {
+        // The next activation is a tab activation — mask the refit.
+        panelActivationRef.current = true;
+      }
+      // Battery saver gates PTY output while not effectively visible, so the
+      // buffer may be stale on the next activation. Performance mode keeps
+      // hidden buffers live — no full replay needed there.
+      if (useBatterySaverTerminalVisibility) {
         needsFullActivationRefreshRef.current = true;
       }
       return;
@@ -1499,12 +1588,15 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
     // Battery saver is ALWAYS full: its PTY output is cadence-gated while not
     // effectively visible, so the buffer may be stale on any activation (this
-    // also covers a performance→batterySaver toggle mid-session, which re-runs
-    // this effect without an intervening !activationVisible pass).
+    // also covers a batterySaver→performance toggle mid-session via the armed
+    // ref, which re-runs this effect without an intervening hide).
     const fullRefresh = useBatterySaverTerminalVisibility || needsFullActivationRefreshRef.current;
+    const isPanelActivation = panelActivationRef.current;
 
-    // Overlay masks the reset+replay flicker; the light path needs no mask.
-    if (fullRefresh) setIsRefreshing(true);
+    // Overlay masks the reset+replay flicker and the activation refit; a pure
+    // refocus repaint needs no mask.
+    const showMask = fullRefresh || isPanelActivation;
+    if (showMask) setIsRefreshing(true);
 
     let lastWidth = 0;
     let retries = 0;
@@ -1528,20 +1620,21 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       }
 
       // Never settled at a viable size — bail; the ResizeObserver finishes the job
-      // once layout settles. Leave the ref armed so the next activation retries full.
+      // once layout settles. Leave the refs armed so the next activation retries.
       if (containerWidth < MIN_VIABLE_RECT_PX) {
         forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
         setIsRefreshing(false);
-        if (autoFocus && fullRefresh) xtermRef.current?.focus();
+        if (autoFocus && showMask) xtermRef.current?.focus();
         return;
       }
 
       void document.fonts.ready.then(async () => {
         if (cancelled || !fitAddonRef.current || !xtermRef.current) return;
 
+        // Consume the flags only when the refresh actually executes, so a
+        // bail or an activate-then-blur cancellation leaves them armed.
+        panelActivationRef.current = false;
         if (fullRefresh) {
-          // Consume the flag only when the full refresh actually executes, so a
-          // bail or an activate-then-blur cancellation leaves it armed.
           needsFullActivationRefreshRef.current = false;
           await handleRefreshTerminal();
         } else {
@@ -1550,7 +1643,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         await waitForNextPaint();
         if (cancelled) return;
 
-        if (autoFocus && fullRefresh) {
+        if (autoFocus && showMask) {
           xtermRef.current?.focus();
         }
 
@@ -1561,7 +1654,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           else repaintTerminal();
         }, REFOCUS_DELAYED_REFRESH_MS);
 
-        if (fullRefresh) {
+        if (showMask) {
           hideOverlayTimer = setTimeout(() => {
             if (!cancelled) setIsRefreshing(false);
           }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
@@ -1587,6 +1680,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     }
     const newTheme = getTerminalTheme();
     xtermRef.current.options.theme = newTheme;
+    xtermRef.current.options.minimumContrastRatio =
+      document.documentElement.classList.contains('light') ? 4.5 : 1;
     const rows = xtermRef.current.rows;
     if (rows > 0) {
       xtermRef.current.refresh(0, rows - 1);

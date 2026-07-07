@@ -456,9 +456,31 @@
   --tab-indicator-height: 0px;
 
   /* Terminal Colors - Light Theme
-     No overrides needed: dark terminal colors are used as-is,
-     and CSS filter: invert(1) hue-rotate(180deg) on .xterm
-     handles the visual light mode transformation. */
+     BAKED INVERTED PALETTE (user decision 2026-07-06): each value is the exact result of
+     applying `invert(1) hue-rotate(180deg)` (CSS filter color matrix, sRGB, clamped) to the
+     corresponding dark token at colors.css:304-322 — so ANSI/shell output renders
+     pixel-identical to today's filtered light mode, with zero per-frame GPU filter cost.
+     Regenerate with the one-liner in the plan's Task 1 gotchas if the dark tokens change. */
+  --color-terminal-bg: rgb(249 252 255);
+  --color-terminal-fg: rgb(13 20 26);
+  --color-terminal-cursor: rgb(31 109 198);
+  --color-terminal-black: rgb(249 252 255);
+  --color-terminal-red: rgb(255 104 96);
+  --color-terminal-green: rgb(15 137 32);
+  --color-terminal-yellow: rgb(152 95 0);
+  --color-terminal-blue: rgb(31 109 198);
+  --color-terminal-magenta: rgb(126 78 193);
+  --color-terminal-cyan: rgb(0 108 119);
+  --color-terminal-white: rgb(13 20 26);
+  --color-terminal-bright-black: rgb(131 139 150);
+  --color-terminal-bright-red: rgb(209 77 68);
+  --color-terminal-bright-green: rgb(0 113 2);
+  --color-terminal-bright-yellow: rgb(124 75 0);
+  --color-terminal-bright-blue: rgb(25 88 159);
+  --color-terminal-bright-magenta: rgb(99 57 144);
+  --color-terminal-bright-cyan: rgb(0 86 95);
+  --color-terminal-bright-white: rgb(0 0 0);
+  --color-terminal-selection-bg: #1f6dc640;
 }
 
 /* OLED Black Theme - True black for OLED displays */
