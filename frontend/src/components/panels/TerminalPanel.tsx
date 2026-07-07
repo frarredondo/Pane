@@ -98,6 +98,51 @@ function waitForNextPaint(): Promise<void> {
   });
 }
 
+/**
+ * Terminal panel lifecycle — the invariants below keep hidden terminals cheap
+ * and correct; break one and you get mangled buffers or replay storms.
+ *
+ * MOUNT (possibly hidden): keep-alive terminal tabs mount even when inactive
+ * (PanelGroupView renders them behind display:none). The PTY spawns at the
+ * backend default (80×30) when the container has no measurable size, and the
+ * mount-time fit() is SKIPPED for containers below MIN_VIABLE_RECT_PX —
+ * FitAddon has no cols floor, so fitting a 0×0 container would shrink the
+ * grid to a few columns and background PTY output would parse into a
+ * garbage-width buffer that xterm reflow cannot repair. A skipped mount fit
+ * arms `needsFullActivationRefreshRef` so the first activation rebuilds the
+ * buffer at the settled width. The same width guard applies to every other
+ * grid-resizing path (resizePtyToFit, post-restore fit, font-change fit).
+ *
+ * HIDDEN (performance mode): the panel keeps reporting visible to main
+ * (`effectiveVisible` is hard-coded true), so PTY output keeps streaming and
+ * the xterm buffer stays live while display:none. Battery saver instead
+ * reports hidden — main stops renderer delivery — so its buffer genuinely
+ * goes stale while inactive.
+ *
+ * ACTIVATION (tab shown and window focused — `activationVisible`): depth is
+ * chosen by cause. Full reset+replay from `terminal:getState` only when the
+ * buffer may be stale (battery saver, or the armed one-time flag); otherwise
+ * a light fit+repaint (`repaintTerminal`). Panel activations show the
+ * refresh overlay and take focus; a pure window refocus repaints silently.
+ * A delayed backstop re-runs the chosen depth once (REFOCUS_DELAYED_REFRESH_MS)
+ * to cover the async WebGL re-attach race. The manual Refresh button always
+ * runs the full path (`handleRefreshTerminal`).
+ *
+ * WEBGL: one context per VISIBLE terminal. Detached immediately on panel
+ * hide, kept through short app blurs, detached after a sustained blur
+ * (WEBGL_APP_BLUR_DETACH_DELAY_MS). Re-attach paints via a refresh deferred
+ * past the next frame — same-task refreshes can hit an uncomposited canvas.
+ * While detached, xterm falls back to the DOM renderer.
+ *
+ * PERSISTENCE: main owns the raw scrollback (authoritative, ANSI-safe
+ * trimmed); the renderer serializes a formatting-preserving snapshot on
+ * hide (throttled to SNAPSHOT_MIN_INTERVAL_MS) and on unmount, used only for
+ * app-restart restore. Live restores always prefer main's raw scrollback.
+ *
+ * UNMOUNT (session switch / panel close): serialize a final snapshot, then
+ * dispose WebGL, addons, and the xterm instance. Remounts restore from
+ * `terminal:getState` (capped payload) and replay once into a fresh xterm.
+ */
 export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActive, autoFocus = true }) => {
   renderLog('[TerminalPanel] Component rendering, panel:', panel.id, 'isActive:', isActive);
   
@@ -444,7 +489,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     }
   }, [panel.id]);
 
-  // Refresh terminal: normal shells replay raw scrollback; live TUIs repaint via resize.
+  // Full-depth refresh: normal shells reset+replay main's raw scrollback at the
+  // settled width; live TUIs (alt-screen) repaint via resize instead. Reached
+  // from exactly three places: the manual Refresh button, battery-saver
+  // activations, and the one-time first activation of a hidden-mounted panel
+  // (armed via needsFullActivationRefreshRef). Routine tab switches use
+  // repaintTerminal instead — see the component lifecycle doc.
   const handleRefreshTerminal = useCallback(async () => {
     const terminal = xtermRef.current;
     if (!terminal) return;
@@ -813,8 +863,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             document.fonts.load(`${terminalFontSize}px "${terminalFontFamily}"`).catch(() => {}),
             document.fonts.load(`${terminalFontSize}px "Symbols Nerd Font Mono"`).catch(() => {}),
           ]);
-          fitAddon.fit();
-          console.log('[TerminalPanel] FitAddon fitted');
+          // Never fit against a hidden/mid-layout container (display:none keep-alive
+          // tabs measure 0×0): FitAddon resizes the grid with no floor, and background
+          // PTY output then parses into a garbage-width buffer that reflow can't fix.
+          // Keeping xterm's default grid matches the PTY's default cols; the one-time
+          // full activation refresh rebuilds anything that still parsed mismatched.
+          if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+            fitAddon.fit();
+            console.log('[TerminalPanel] FitAddon fitted');
+          } else {
+            needsFullActivationRefreshRef.current = true;
+            console.log('[TerminalPanel] Skipped mount fit (hidden container); armed full activation refresh');
+          }
           terminal.options.theme = getTerminalTheme();
 
           // Load WebLinksAddon for clickable URLs
@@ -968,7 +1028,11 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             // Force WebGL renderer to redraw after buffer content changes.
             // Without this, macOS WebGL canvas shows stale/stuttered content until
             // a resize event (minimize/fullscreen) forces invalidation.
-            fitAddon.fit();
+            // Same hidden-container guard as the mount fit: WebGL isn't attached
+            // while hidden, and a 0-width fit would mangle the grid.
+            if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+              fitAddon.fit();
+            }
           }
 
           // Handle paste events (Ctrl+V, voice transcription, external text injection)
@@ -1271,7 +1335,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
                 if (!terminal || disposed) return;
                 terminal.options.fontFamily = newFontFamily;
                 terminal.options.fontSize = newFontSize;
-                if (fitAddon) fitAddon.fit();
+                // Hidden-container guard (see mount fit): defer to the activation fit
+                if (fitAddon && (terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+                  fitAddon.fit();
+                }
               });
             }
           });
