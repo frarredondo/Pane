@@ -119,25 +119,28 @@ function waitForNextPaint(): Promise<void> {
  * reports hidden — main stops renderer delivery — so its buffer genuinely
  * goes stale while inactive.
  *
- * ACTIVATION (tab shown and window focused — `activationVisible`): depth is
- * chosen by cause. Full reset+replay from `terminal:getState` only when the
- * buffer may be stale (battery saver, or the armed one-time flag); otherwise
- * a light fit+repaint (`repaintTerminal`). Panel activations show the
- * refresh overlay and take focus; a pure window refocus repaints silently.
- * A delayed backstop re-runs the chosen depth once (REFOCUS_DELAYED_REFRESH_MS)
- * to cover the async WebGL re-attach race. The manual Refresh button always
- * runs the full path (`handleRefreshTerminal`).
+ * ACTIVATION (tab shown and window focused — `activationVisible`): every
+ * panel activation runs the full masked reset+replay from `terminal:getState`
+ * (`handleRefreshTerminal`), and battery saver always does. This is
+ * LOAD-BEARING for paint correctness, not just a buffer re-sync: the
+ * hide→show renderer swap (WebGL disposed on hide, recreated on show) can
+ * carry stale frames or shared-texture-atlas state across, and only a full
+ * rebuild reliably clears it. Two shipped attempts to lighten this — a
+ * fit+repaint activation (v2.4.11) and keep-alive WebGL contexts with an
+ * atlas clear (v2.4.14) — produced ghosted rows and garbage-glyph atlas
+ * corruption (xterm terminals with the same font/theme SHARE a texture
+ * atlas; clearing it from one terminal poisons the others). Only a pure
+ * performance-mode window refocus takes the light silent `repaintTerminal`
+ * path (the renderer did not swap, the buffer is live). A delayed backstop
+ * re-runs the chosen depth once (REFOCUS_DELAYED_REFRESH_MS). The manual
+ * Refresh button always runs the full path.
  *
- * WEBGL: attached lazily on a panel's first show, then KEPT while the panel
- * is mounted — hides do NOT detach it. Renderer swaps (WebGL→DOM→WebGL) are
- * the root of a whole family of paint bugs (blank canvas on refocus #306,
- * missed repaint after blur, ghosted/overdrawn rows after tab switches):
- * a stale frame or atlas from one renderer survives into the next and only
- * a full reset+replay clears it. Contexts detach only after a sustained app
- * blur (WEBGL_APP_BLUR_DETACH_DELAY_MS) and on unmount. Re-attach clears the
- * texture atlas and repaints via a refresh deferred past the next frame —
- * same-task refreshes can hit an uncomposited canvas. While detached, xterm
- * falls back to the DOM renderer.
+ * WEBGL: one context per VISIBLE terminal. Detached immediately on panel
+ * hide, kept through short app blurs, detached after a sustained blur
+ * (WEBGL_APP_BLUR_DETACH_DELAY_MS). Re-attach paints via a refresh deferred
+ * past the next frame — same-task refreshes can hit an uncomposited canvas.
+ * While detached, xterm falls back to the DOM renderer. Never call
+ * `clearTextureAtlas()` here: the atlas is shared across terminals.
  *
  * PERSISTENCE: main owns the raw scrollback (authoritative, ANSI-safe
  * trimmed); the renderer serializes a formatting-preserving snapshot on
@@ -179,18 +182,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   // refocus in both power modes (effectiveVisible is hard-coded true in
   // performance mode, so it cannot serve this role).
   const activationVisible = panelVisible && windowFocused;
-  // True when the next activation needs the full reset+replay path: battery
-  // saver gated PTY output while inactive, so the buffer may be stale. In
-  // performance mode hidden panels keep receiving output (effectiveVisible is
-  // hard-coded true), so the buffer is always live and a light repaint is
-  // enough — stale display:none→block pixels are a paint problem, not a
-  // buffer problem.
-  const needsFullActivationRefreshRef = useRef(false);
-  // True when the next activation is a panel activation (tab became visible)
-  // rather than a pure window refocus: the fit can visibly reflow the grid, so
-  // mask it with the refresh overlay and move focus. Pure refocus stays silent.
-  const panelActivationRef = useRef(true);
-  const [webglAllowed, setWebglAllowed] = useState(true);
+  // True when the next activation needs the full reset+replay path: the panel
+  // was hidden (renderer swap on show can leave stale frames/atlas state that
+  // no light repaint can clear — see the WEBGL lifecycle note) or battery
+  // saver gated PTY output while inactive. This full refresh on activation is
+  // LOAD-BEARING for paint correctness: two attempts to replace it with a
+  // light repaint (v2.4.11) and with keep-alive WebGL contexts (v2.4.14)
+  // shipped ghosted rows and texture-atlas corruption. Do not remove it again
+  // without an offline repro of the renderer-swap artifacts. A pure window
+  // refocus in performance mode leaves the buffer live, so a light repaint is
+  // enough there.
+  const needsFullActivationRefreshRef = useRef(true);
+  const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Read CLI state from persisted panel state (handles remount case)
@@ -343,9 +346,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       // uncomposited canvas on blur→refocus reattach.
       requestAnimationFrame(() => requestAnimationFrame(() => {
         if (webglAddonRef.current !== addon) return;
-        // Nuke any glyph state carried across the renderer swap before the
-        // full repaint — stale atlas entries are how ghost rows survive.
-        try { terminal.clearTextureAtlas(); } catch { /* renderer not ready */ }
         if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
       }));
       console.log('[TerminalPanel] WebGL renderer loaded for panel', panel.id);
@@ -403,19 +403,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     return () => clearInterval(refreshTimer);
   }, [effectiveVisible, panel.id, isInitialized]);
 
-  // WebGL policy: attach lazily on first show, then KEEP the context while the
-  // panel stays mounted — including behind display:none. Every renderer swap
-  // (WebGL→DOM→WebGL) risks a stale frame surviving the transition: the
-  // blank-canvas-on-refocus bug (#306), the missed-repaint-after-blur bug, and
-  // ghosted/overdrawn rows after tab switches were all children of the old
-  // dispose-on-hide churn. Contexts are bounded by mounted terminals of the
-  // active session (well under the browser's ~16-context ceiling), idle
-  // contexts cost no GPU time, and onContextLoss falls back to the DOM
-  // renderer. Detach only after a sustained app blur and on unmount.
+  // WebGL policy: detach immediately when the panel hides, keep it attached
+  // through short app blurs, and detach only after a sustained app blur.
   useEffect(() => {
     if (blurDetachTimerRef.current) {
       clearTimeout(blurDetachTimerRef.current);
       blurDetachTimerRef.current = null;
+    }
+
+    if (!panelVisible) {
+      setWebglAllowed(false);
+      disposeWebglRenderer('panel-hidden');
+      return;
     }
 
     if (windowFocused) {
@@ -423,6 +422,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       return;
     }
 
+    setWebglAllowed(true);
     blurDetachTimerRef.current = setTimeout(() => {
       blurDetachTimerRef.current = null;
       setWebglAllowed(false);
@@ -435,17 +435,14 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         blurDetachTimerRef.current = null;
       }
     };
-  }, [windowFocused, disposeWebglRenderer]);
+  }, [panelVisible, windowFocused, disposeWebglRenderer]);
 
   useEffect(() => {
     if (!isInitialized || !xtermRef.current) return;
-    if (!webglAllowed) {
-      disposeWebglRenderer('webgl-not-allowed');
+    if (!webglAllowed || !panelVisible) {
+      disposeWebglRenderer(panelVisible ? 'webgl-not-allowed' : 'panel-hidden');
       return;
     }
-    // Lazy first attach: never-shown background panels stay on the DOM
-    // renderer; once attached, the context survives hides (see policy above).
-    if (!panelVisible && !webglAddonRef.current) return;
 
     let disposed = false;
     void loadWebglRenderer(xtermRef.current, () => disposed, windowFocused ? 'visible' : 'short-app-blur');
@@ -501,11 +498,11 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   }, [panel.id]);
 
   // Full-depth refresh: normal shells reset+replay main's raw scrollback at the
-  // settled width; live TUIs (alt-screen) repaint via resize instead. Reached
-  // from exactly three places: the manual Refresh button, battery-saver
-  // activations, and the one-time first activation of a hidden-mounted panel
-  // (armed via needsFullActivationRefreshRef). Routine tab switches use
-  // repaintTerminal instead — see the component lifecycle doc.
+  // settled width; live TUIs (alt-screen) repaint via resize instead. Runs on
+  // every panel activation (load-bearing for paint correctness across the
+  // hide→show renderer swap — see the component lifecycle doc), on battery-
+  // saver activations, and from the manual Refresh button. Only a pure window
+  // refocus uses the lighter repaintTerminal path.
   const handleRefreshTerminal = useCallback(async () => {
     const terminal = xtermRef.current;
     if (!terminal) return;
@@ -1576,22 +1573,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
   // Shared activation refresh for both power modes: fires on tab activation and
   // window refocus (activationVisible = panelVisible && windowFocused). Depth is
-  // chosen by cause — a full reset+replay only when the buffer may be stale
-  // (battery saver cadence-gating), a light fit+repaint otherwise. Panel
-  // activations get the overlay + autoFocus; a pure window refocus stays
-  // silent. Declared after the WebGL policy effects so the delayed backstop
+  // chosen by cause — a full reset+replay (overlay + autoFocus) on every panel
+  // activation (the hide→show renderer swap can leave stale frames/atlas state
+  // only a full rebuild reliably clears) and always in battery saver; a light
+  // repaint (silent, no focus move) only on a pure performance-mode window
+  // refocus. Declared after the WebGL policy effects so the delayed backstop
   // covers the WebGL re-attach ordering race.
   useLayoutEffect(() => {
     if (!isInitialized || !fitAddonRef.current || !xtermRef.current) return;
     if (!activationVisible) {
-      if (!panelVisible) {
-        // The next activation is a tab activation — mask the refit.
-        panelActivationRef.current = true;
-      }
-      // Battery saver gates PTY output while not effectively visible, so the
-      // buffer may be stale on the next activation. Performance mode keeps
-      // hidden buffers live — no full replay needed there.
-      if (useBatterySaverTerminalVisibility) {
+      // Re-arm full depth when the panel itself hides, or whenever battery saver
+      // is active (its PTY output is cadence-gated while not effectively visible).
+      if (!panelVisible || useBatterySaverTerminalVisibility) {
         needsFullActivationRefreshRef.current = true;
       }
       return;
@@ -1599,15 +1592,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
 
     // Battery saver is ALWAYS full: its PTY output is cadence-gated while not
     // effectively visible, so the buffer may be stale on any activation (this
-    // also covers a batterySaver→performance toggle mid-session via the armed
-    // ref, which re-runs this effect without an intervening hide).
+    // also covers a performance→batterySaver toggle mid-session, which re-runs
+    // this effect without an intervening hide).
     const fullRefresh = useBatterySaverTerminalVisibility || needsFullActivationRefreshRef.current;
-    const isPanelActivation = panelActivationRef.current;
 
-    // Overlay masks the reset+replay flicker and the activation refit; a pure
-    // refocus repaint needs no mask.
-    const showMask = fullRefresh || isPanelActivation;
-    if (showMask) setIsRefreshing(true);
+    // Overlay masks the reset+replay flicker; the light refocus path needs no mask.
+    if (fullRefresh) setIsRefreshing(true);
 
     let lastWidth = 0;
     let retries = 0;
@@ -1631,21 +1621,20 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       }
 
       // Never settled at a viable size — bail; the ResizeObserver finishes the job
-      // once layout settles. Leave the refs armed so the next activation retries.
+      // once layout settles. Leave the ref armed so the next activation retries full.
       if (containerWidth < MIN_VIABLE_RECT_PX) {
         forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
         setIsRefreshing(false);
-        if (autoFocus && showMask) xtermRef.current?.focus();
+        if (autoFocus && fullRefresh) xtermRef.current?.focus();
         return;
       }
 
       void document.fonts.ready.then(async () => {
         if (cancelled || !fitAddonRef.current || !xtermRef.current) return;
 
-        // Consume the flags only when the refresh actually executes, so a
-        // bail or an activate-then-blur cancellation leaves them armed.
-        panelActivationRef.current = false;
         if (fullRefresh) {
+          // Consume the flag only when the full refresh actually executes, so a
+          // bail or an activate-then-blur cancellation leaves it armed.
           needsFullActivationRefreshRef.current = false;
           await handleRefreshTerminal();
         } else {
@@ -1654,7 +1643,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         await waitForNextPaint();
         if (cancelled) return;
 
-        if (autoFocus && showMask) {
+        if (autoFocus && fullRefresh) {
           xtermRef.current?.focus();
         }
 
@@ -1665,7 +1654,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
           else repaintTerminal();
         }, REFOCUS_DELAYED_REFRESH_MS);
 
-        if (showMask) {
+        if (fullRefresh) {
           hideOverlayTimer = setTimeout(() => {
             if (!cancelled) setIsRefreshing(false);
           }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
