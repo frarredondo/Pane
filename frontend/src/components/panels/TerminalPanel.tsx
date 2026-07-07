@@ -124,6 +124,15 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   const useBatterySaverTerminalVisibility = terminalPowerMode === 'batterySaver';
   const panelVisible = isActive;
   const effectiveVisible = useBatterySaverTerminalVisibility ? panelVisible && windowFocused : true;
+  // Drives the shared activation refresh: fires on tab activation and window
+  // refocus in both power modes (effectiveVisible is hard-coded true in
+  // performance mode, so it cannot serve this role).
+  const activationVisible = panelVisible && windowFocused;
+  // True when the next activation needs the full reset+replay path: the panel
+  // was hidden (stale rows after display:none→block) or battery saver gated PTY
+  // output while inactive. A pure window refocus in performance mode leaves the
+  // buffer live, so a light repaint is enough.
+  const needsFullActivationRefreshRef = useRef(true);
   const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -263,9 +272,17 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         forwardToMainLog('warn', `[TerminalPanel] WebGL context lost for panel ${panel.id}, falling back to DOM renderer`);
         try { addon.dispose(); } catch { /* already disposed */ }
         webglAddonRef.current = null;
+        // Defense-in-depth: force a redraw on the restored DOM renderer.
+        const fallbackTerminal = xtermRef.current;
+        if (fallbackTerminal && fallbackTerminal.rows > 0) {
+          fallbackTerminal.refresh(0, fallbackTerminal.rows - 1);
+        }
       });
       terminal.loadAddon(addon);
       webglAddonRef.current = addon;
+      // xterm's activate() only swaps the renderer via setRenderer with no full
+      // row refresh, so force a redraw on the freshly attached WebGL renderer.
+      if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
       console.log('[TerminalPanel] WebGL renderer loaded for panel', panel.id);
       forwardToMainLog('info', `[TerminalPanel] WebGL renderer loaded for panel ${panel.id} reason=${reason}`);
     } catch (e) {
@@ -483,6 +500,27 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       console.warn('[TerminalPanel] Failed to refresh terminal:', e);
     }
   }, [panel.id, resizePtyToFit]);
+
+  // Light repaint for pure-refocus activations (buffer is live, only pixels are
+  // stale). Pattern: the theme effect's guarded refresh minus its unconditional
+  // scrollToBottom. Snapshot/restore scroll around the fit, mirroring
+  // handleRefreshTerminal's alt-screen path: fit() is a no-op when dims are
+  // unchanged, but a refocus coinciding with a window resize reflows the buffer
+  // and would otherwise shift a scrolled-up shell.
+  const repaintTerminal = useCallback(() => {
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    const buffer = terminal.buffer.active;
+    const distanceFromBottom = Math.max(0, buffer.baseY - buffer.viewportY);
+    const wasNearBottom = isNearBottomRef.current || distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_ROWS;
+    resizePtyToFit();
+    if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+    if (wasNearBottom) {
+      terminal.scrollToBottom();
+    } else {
+      terminal.scrollToLine(Math.max(0, terminal.buffer.active.baseY - distanceFromBottom));
+    }
+  }, [resizePtyToFit]);
 
   // Open search on Ctrl/Cmd+F from the container div
   const handleTerminalKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -1442,87 +1480,31 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     };
   }, [panel.id]); // Only depend on panel.id to prevent re-initialization on session switch
 
-  // Handle Battery Saver visibility changes (resize and full refresh when becoming visible)
-  // Include isInitialized so this effect re-runs after terminal initialization completes
+  // Shared activation refresh for both power modes: fires on tab activation and
+  // window refocus (activationVisible = panelVisible && windowFocused). Depth is
+  // chosen by cause — a full reset+replay (overlay + autoFocus) when the buffer
+  // may be stale, a light repaint (silent, no focus move) on a pure performance-
+  // mode refocus. Declared after the WebGL policy effects so the delayed backstop
+  // covers the WebGL re-attach ordering race.
   useLayoutEffect(() => {
-    if (!useBatterySaverTerminalVisibility) return;
-    if (!effectiveVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
-
-    // Show overlay immediately to mask the terminal.reset()+rewrite flicker
-    setIsRefreshing(true);
-
-    let lastWidth = 0;
-    let retries = 0;
-    const MAX_RETRIES = 10;
-
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let delayedRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-    let hideOverlayTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const fitAndRefresh = async () => {
-      if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
-
-      const containerWidth = terminalRef.current.clientWidth;
-
-      // If width is still changing or below viable threshold, the reflow isn't done — retry
-      if ((containerWidth < MIN_VIABLE_RECT_PX || containerWidth !== lastWidth) && retries < MAX_RETRIES) {
-        lastWidth = containerWidth;
-        retries++;
-        retryTimer = setTimeout(fitAndRefresh, 50);
-        return;
+    if (!isInitialized || !fitAddonRef.current || !xtermRef.current) return;
+    if (!activationVisible) {
+      // Re-arm full depth when the panel itself hides, or whenever battery saver
+      // is active (its PTY output is cadence-gated while not effectively visible).
+      if (!panelVisible || useBatterySaverTerminalVisibility) {
+        needsFullActivationRefreshRef.current = true;
       }
+      return;
+    }
 
-      // Never settled at a viable size — bail; the ResizeObserver finishes the job once layout settles
-      if (containerWidth < MIN_VIABLE_RECT_PX) {
-        forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
-        setIsRefreshing(false);
-        if (autoFocus) xtermRef.current?.focus();
-        return;
-      }
+    // Battery saver is ALWAYS full: its PTY output is cadence-gated while not
+    // effectively visible, so the buffer may be stale on any activation (this
+    // also covers a performance→batterySaver toggle mid-session, which re-runs
+    // this effect without an intervening !activationVisible pass).
+    const fullRefresh = useBatterySaverTerminalVisibility || needsFullActivationRefreshRef.current;
 
-      // Container stable — full refresh (reset + rewrite scrollback + fit)
-      // This is what the manual "Refresh terminal" button does and makes TUI apps repaint correctly
-      await handleRefreshTerminal();
-      await waitForNextPaint();
-
-      if (cancelled) return;
-
-      if (autoFocus) {
-        xtermRef.current?.focus();
-      }
-
-      delayedRefreshTimer = setTimeout(() => {
-        if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
-        forwardToMainLog('info', `[TerminalPanel] Delayed refocus refresh for panel ${panel.id}`);
-        void handleRefreshTerminal();
-      }, REFOCUS_DELAYED_REFRESH_MS);
-
-      hideOverlayTimer = setTimeout(() => {
-        if (!cancelled) setIsRefreshing(false);
-      }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
-    };
-
-    const animationFrame = requestAnimationFrame(fitAndRefresh);
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(animationFrame);
-      if (retryTimer) clearTimeout(retryTimer);
-      if (delayedRefreshTimer) clearTimeout(delayedRefreshTimer);
-      if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
-      setIsRefreshing(false);
-    };
-  }, [useBatterySaverTerminalVisibility, effectiveVisible, panel.id, isInitialized, autoFocus, handleRefreshTerminal, forwardToMainLog]);
-
-  // Performance mode keeps mounted terminals live, but xterm/WebGL can still
-  // paint stale rows after display:none→block. Use the same canonical refresh
-  // path as the manual Refresh button when a terminal tab becomes visible.
-  useLayoutEffect(() => {
-    if (useBatterySaverTerminalVisibility) return;
-    if (!panelVisible || !isInitialized || !fitAddonRef.current || !xtermRef.current) return;
-
-    setIsRefreshing(true);
+    // Overlay masks the reset+replay flicker; the light path needs no mask.
+    if (fullRefresh) setIsRefreshing(true);
 
     let lastWidth = 0;
     let retries = 0;
@@ -1537,6 +1519,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
 
       const containerWidth = terminalRef.current.clientWidth;
+      // If width is still changing or below viable threshold, the reflow isn't done — retry
       if ((containerWidth < MIN_VIABLE_RECT_PX || containerWidth !== lastWidth) && retries < MAX_RETRIES) {
         lastWidth = containerWidth;
         retries++;
@@ -1544,33 +1527,45 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         return;
       }
 
+      // Never settled at a viable size — bail; the ResizeObserver finishes the job
+      // once layout settles. Leave the ref armed so the next activation retries full.
       if (containerWidth < MIN_VIABLE_RECT_PX) {
-        console.warn(`[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
+        forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
         setIsRefreshing(false);
-        if (autoFocus) xtermRef.current?.focus();
+        if (autoFocus && fullRefresh) xtermRef.current?.focus();
         return;
       }
 
       void document.fonts.ready.then(async () => {
         if (cancelled || !fitAddonRef.current || !xtermRef.current) return;
 
-        await handleRefreshTerminal();
+        if (fullRefresh) {
+          // Consume the flag only when the full refresh actually executes, so a
+          // bail or an activate-then-blur cancellation leaves it armed.
+          needsFullActivationRefreshRef.current = false;
+          await handleRefreshTerminal();
+        } else {
+          repaintTerminal();
+        }
         await waitForNextPaint();
         if (cancelled) return;
 
-        if (autoFocus) {
+        if (autoFocus && fullRefresh) {
           xtermRef.current?.focus();
         }
 
         delayedRefreshTimer = setTimeout(() => {
           if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
-          forwardToMainLog('info', `[TerminalPanel] Delayed performance-mode activation refresh for panel ${panel.id}`);
-          void handleRefreshTerminal();
+          forwardToMainLog('info', `[TerminalPanel] Delayed activation refresh for panel ${panel.id}`);
+          if (fullRefresh) void handleRefreshTerminal();
+          else repaintTerminal();
         }, REFOCUS_DELAYED_REFRESH_MS);
 
-        hideOverlayTimer = setTimeout(() => {
-          if (!cancelled) setIsRefreshing(false);
-        }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
+        if (fullRefresh) {
+          hideOverlayTimer = setTimeout(() => {
+            if (!cancelled) setIsRefreshing(false);
+          }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
+        }
       });
     };
 
@@ -1584,7 +1579,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
       setIsRefreshing(false);
     };
-  }, [useBatterySaverTerminalVisibility, panelVisible, panel.id, isInitialized, autoFocus, handleRefreshTerminal, forwardToMainLog]);
+  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, isInitialized, autoFocus, handleRefreshTerminal, repaintTerminal, forwardToMainLog]);
 
   useEffect(() => {
     if (!xtermRef.current) {
