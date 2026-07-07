@@ -58,6 +58,7 @@ interface WatchedSession {
   selfHealTimer?: NodeJS.Timeout; // 60s snapshot-diff (native/chokidar modes)
   lastStatusSnapshot?: string; // last `git status --porcelain` output
   watcherErrorLogged: boolean; // rate-limits the fallback warn
+  nonFatalErrorLogged?: boolean; // rate-limits log-only watcher errors (separate from the degrade warn)
   lastModified: number;
   pendingRefresh: boolean;
 }
@@ -145,8 +146,17 @@ export class GitFileWatcher extends EventEmitter {
             },
           );
         } catch (err) {
-          // creation failure (e.g. EMFILE/ENOSPC on the handle) → degrade to
-          // polling before any record exists
+          // ENOENT means the worktree was deleted out from under the session —
+          // polling it would be a silent no-op loop, so log and give up (the
+          // pre-native behavior). Everything else (EMFILE/ENOSPC-style handle
+          // exhaustion) degrades to polling before any record exists.
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            this.logger?.error(
+              `[GitFileWatcher] Failed to start watching session ${sessionId} (worktree missing):`,
+              err as Error,
+            );
+            return;
+          }
           this.transitionToPolling(sessionId, worktreePath, err as Error);
           return;
         }
@@ -164,6 +174,13 @@ export class GitFileWatcher extends EventEmitter {
           pendingRefresh: false,
         });
 
+        // Seed the self-heal snapshot baseline off the activation critical path.
+        // Without a baseline, the first 60s tick after a MISSED event would only
+        // record the already-dirty snapshot without emitting, leaving status
+        // stale until the next real change. (pollStatusSnapshot no-ops if the
+        // session was torn down before this runs.)
+        setImmediate(() => this.pollStatusSnapshot(sessionId));
+
         // Validation signal — keep in production: confirms watcher count is bounded
         this.logger?.info(
           `[GitFileWatcher] startWatching(${sessionId}) watchedSessions.size=${this.watchedSessions.size}`
@@ -176,17 +193,16 @@ export class GitFileWatcher extends EventEmitter {
       // so it both prunes descent (handle budget) AND matches the native
       // event-time filter, keeping behavior uniform across platforms.
       const gitignoredDirs = this.getGitignoredDirs(watchPath);
-      // Function-form ignored: short-circuits descent into heavy directories
-      // stats may be undefined on initial calls — return false (don't ignore) if unknown
+      // Function-form ignored: short-circuits descent into heavy directories.
+      // stats may be undefined on initial calls — return false (don't ignore)
+      // if unknown. Unlike event-time callers, stats IS available here, so
+      // dir-vs-file is passed through and IGNORED_FILE_PATTERNS never prunes
+      // a directory whose name merely looks like a temp file (e.g. `backup~`).
       const ignored = (targetPath: string, stats?: Stats): boolean => {
         if (!stats) return false;
         const rel = path.relative(watchPath, targetPath);
-        if (rel && this.isIgnoredEventPath(rel, gitignoredDirs)) return true;
-        const base = path.basename(targetPath);
-        if (stats.isDirectory()) {
-          return IGNORED_DIRS.has(base);
-        }
-        return IGNORED_FILE_PATTERNS.some((p) => p.test(base));
+        if (!rel) return false; // never ignore the watch root itself
+        return this.isIgnoredEventPath(rel, gitignoredDirs, stats.isDirectory());
       };
 
       const worktreeWatcher = chokidarWatch(watchPath, {
@@ -204,14 +220,27 @@ export class GitFileWatcher extends EventEmitter {
         this.handleFileChange(sessionId, rel, 'change');
       });
       worktreeWatcher.on('error', (err) => {
+        // Storm guard FIRST: during handle exhaustion chokidar emits one error
+        // per failed directory registration and keeps emitting until the
+        // fire-and-forget close() lands — once degraded (or torn down), drop
+        // the remaining events silently instead of re-amplifying #309's log storm.
+        const session = this.watchedSessions.get(sessionId);
+        if (!session || session.mode === 'polling') return;
         // chokidar 5 types the error handler arg as `unknown`; extract the code
         // via ErrnoException cast (the no-any-compliant route). Only the
         // handle-exhaustion errors degrade to polling — other chokidar errors
         // stay log-only to avoid over-eager fallback on transient stat blips.
         const code = (err as NodeJS.ErrnoException).code;
-        this.logger?.error(`[GitFileWatcher] worktree watcher error`, err as Error);
         if (code === 'EMFILE' || code === 'ENOSPC') {
+          this.logger?.error(`[GitFileWatcher] worktree watcher error`, err as Error);
           this.handleWatcherFailure(sessionId, err);
+          return;
+        }
+        // log-only errors are rate-limited to the first per session — repeated
+        // transient blips must not turn into a sustained logger/IPC storm
+        if (!session.nonFatalErrorLogged) {
+          session.nonFatalErrorLogged = true;
+          this.logger?.error(`[GitFileWatcher] worktree watcher error`, err as Error);
         }
       });
 
@@ -228,6 +257,10 @@ export class GitFileWatcher extends EventEmitter {
         lastModified: Date.now(),
         pendingRefresh: false,
       });
+
+      // Seed the self-heal snapshot baseline off the activation critical path
+      // (same rationale as the native branch above).
+      setImmediate(() => this.pollStatusSnapshot(sessionId));
 
       // Validation signal — keep in production: confirms watcher count is bounded
       this.logger?.info(
@@ -487,8 +520,18 @@ export class GitFileWatcher extends EventEmitter {
    * resetting the debounce. EVERY segment (incl. the leaf) is checked against
    * IGNORED_DIRS — a file literally named `node_modules` isn't worth a refresh
    * and this avoids dir-vs-file guessing on event-time paths.
+   *
+   * `isLeafDirectory` is for callers that DO know (chokidar's registration-time
+   * `ignored` fn gets stats): when true, IGNORED_FILE_PATTERNS is skipped so a
+   * directory named like a temp file (e.g. `backup~`) is not silently pruned
+   * from watching. Event-time callers leave it false (unknowable) and accept
+   * the pattern check on the leaf.
    */
-  private isIgnoredEventPath(relPath: string, gitignoredDirs: Set<string>): boolean {
+  private isIgnoredEventPath(
+    relPath: string,
+    gitignoredDirs: Set<string>,
+    isLeafDirectory = false,
+  ): boolean {
     const segments = relPath.split(/[\\/]/).filter(Boolean);
     if (segments.length === 0) return false;
     if (segments[0] === '.git') return true; // narrow watcher owns .git signals
@@ -498,6 +541,7 @@ export class GitFileWatcher extends EventEmitter {
       prefix = prefix ? `${prefix}/${seg}` : seg;
       if (gitignoredDirs.has(prefix)) return true; // relative prefixes, e.g. "worktrees", "main/dist"
     }
+    if (isLeafDirectory) return false;
     return IGNORED_FILE_PATTERNS.some((p) => p.test(segments[segments.length - 1]));
   }
 
@@ -507,6 +551,11 @@ export class GitFileWatcher extends EventEmitter {
    * `needs-refresh` only when the snapshot DIFFERS from the previous poll. The
    * first poll seeds the baseline without emitting (lastStatusSnapshot
    * undefined), so a legitimately-dirty tree does not spam a refresh every tick.
+   *
+   * Known, intentional redundancy in watch modes: the baseline only updates on
+   * these ticks, so the tick after a real (already watcher-emitted) change
+   * emits one extra needs-refresh. That single bounded refresh doubles as the
+   * safety net for coalesced/dropped events, and refresh is idempotent.
    */
   private pollStatusSnapshot(sessionId: string): void {
     const session = this.watchedSessions.get(sessionId);
@@ -557,9 +606,11 @@ export class GitFileWatcher extends EventEmitter {
    * session record exists (the native creation-throw path throws before
    * watchedSessions.set), so it builds a COMPLETE WatchedSession record from
    * its own parameters instead of assuming a prior one. Emits exactly one warn
-   * per session lifetime (guarded by watcherErrorLogged) and one immediate
-   * needs-refresh so consumers reconcile promptly; the first poll tick then
-   * seeds the snapshot baseline.
+   * per session lifetime (guarded by watcherErrorLogged), seeds the snapshot
+   * baseline SYNCHRONOUSLY (a change landing in the 0-5s window before the
+   * first tick must not be absorbed into a late-seeded baseline and go
+   * un-emitted), then emits one immediate needs-refresh so consumers reconcile
+   * promptly with the exact state the baseline captured.
    */
   private transitionToPolling(sessionId: string, worktreePath: string, err: Error): void {
     const session = this.watchedSessions.get(sessionId);
@@ -589,8 +640,11 @@ export class GitFileWatcher extends EventEmitter {
       lastModified: session?.lastModified ?? Date.now(),
       pendingRefresh: false,
     });
-    // one immediate refresh so consumers reconcile promptly after a degrade;
-    // the first poll tick then seeds the snapshot baseline
+    // Seed the baseline NOW (pollStatusSnapshot only records, never emits, when
+    // the baseline is undefined) — deferring it to the first 5s tick would
+    // silently absorb any change made in that window. Then emit one immediate
+    // refresh so consumers reconcile with the state the baseline captured.
+    this.pollStatusSnapshot(sessionId);
     this.emit('needs-refresh', sessionId);
   }
 
