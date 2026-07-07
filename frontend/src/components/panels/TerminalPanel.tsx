@@ -128,16 +128,11 @@ function waitForNextPaint(): Promise<void> {
  * to cover the async WebGL re-attach race. The manual Refresh button always
  * runs the full path (`handleRefreshTerminal`).
  *
- * WEBGL: attached lazily on a panel's first show, then KEPT while the panel
- * is mounted — hides do NOT detach it. Renderer swaps (WebGL→DOM→WebGL) are
- * the root of a whole family of paint bugs (blank canvas on refocus #306,
- * missed repaint after blur, ghosted/overdrawn rows after tab switches):
- * a stale frame or atlas from one renderer survives into the next and only
- * a full reset+replay clears it. Contexts detach only after a sustained app
- * blur (WEBGL_APP_BLUR_DETACH_DELAY_MS) and on unmount. Re-attach clears the
- * texture atlas and repaints via a refresh deferred past the next frame —
- * same-task refreshes can hit an uncomposited canvas. While detached, xterm
- * falls back to the DOM renderer.
+ * WEBGL: one context per VISIBLE terminal. Detached immediately on panel
+ * hide, kept through short app blurs, detached after a sustained blur
+ * (WEBGL_APP_BLUR_DETACH_DELAY_MS). Re-attach paints via a refresh deferred
+ * past the next frame — same-task refreshes can hit an uncomposited canvas.
+ * While detached, xterm falls back to the DOM renderer.
  *
  * PERSISTENCE: main owns the raw scrollback (authoritative, ANSI-safe
  * trimmed); the renderer serializes a formatting-preserving snapshot on
@@ -190,7 +185,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
   // rather than a pure window refocus: the fit can visibly reflow the grid, so
   // mask it with the refresh overlay and move focus. Pure refocus stays silent.
   const panelActivationRef = useRef(true);
-  const [webglAllowed, setWebglAllowed] = useState(true);
+  const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Read CLI state from persisted panel state (handles remount case)
@@ -343,9 +338,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       // uncomposited canvas on blur→refocus reattach.
       requestAnimationFrame(() => requestAnimationFrame(() => {
         if (webglAddonRef.current !== addon) return;
-        // Nuke any glyph state carried across the renderer swap before the
-        // full repaint — stale atlas entries are how ghost rows survive.
-        try { terminal.clearTextureAtlas(); } catch { /* renderer not ready */ }
         if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
       }));
       console.log('[TerminalPanel] WebGL renderer loaded for panel', panel.id);
@@ -403,19 +395,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
     return () => clearInterval(refreshTimer);
   }, [effectiveVisible, panel.id, isInitialized]);
 
-  // WebGL policy: attach lazily on first show, then KEEP the context while the
-  // panel stays mounted — including behind display:none. Every renderer swap
-  // (WebGL→DOM→WebGL) risks a stale frame surviving the transition: the
-  // blank-canvas-on-refocus bug (#306), the missed-repaint-after-blur bug, and
-  // ghosted/overdrawn rows after tab switches were all children of the old
-  // dispose-on-hide churn. Contexts are bounded by mounted terminals of the
-  // active session (well under the browser's ~16-context ceiling), idle
-  // contexts cost no GPU time, and onContextLoss falls back to the DOM
-  // renderer. Detach only after a sustained app blur and on unmount.
+  // WebGL policy: detach immediately when the panel hides, keep it attached
+  // through short app blurs, and detach only after a sustained app blur.
   useEffect(() => {
     if (blurDetachTimerRef.current) {
       clearTimeout(blurDetachTimerRef.current);
       blurDetachTimerRef.current = null;
+    }
+
+    if (!panelVisible) {
+      setWebglAllowed(false);
+      disposeWebglRenderer('panel-hidden');
+      return;
     }
 
     if (windowFocused) {
@@ -423,6 +414,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
       return;
     }
 
+    setWebglAllowed(true);
     blurDetachTimerRef.current = setTimeout(() => {
       blurDetachTimerRef.current = null;
       setWebglAllowed(false);
@@ -435,17 +427,14 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
         blurDetachTimerRef.current = null;
       }
     };
-  }, [windowFocused, disposeWebglRenderer]);
+  }, [panelVisible, windowFocused, disposeWebglRenderer]);
 
   useEffect(() => {
     if (!isInitialized || !xtermRef.current) return;
-    if (!webglAllowed) {
-      disposeWebglRenderer('webgl-not-allowed');
+    if (!webglAllowed || !panelVisible) {
+      disposeWebglRenderer(panelVisible ? 'webgl-not-allowed' : 'panel-hidden');
       return;
     }
-    // Lazy first attach: never-shown background panels stay on the DOM
-    // renderer; once attached, the context survives hides (see policy above).
-    if (!panelVisible && !webglAddonRef.current) return;
 
     let disposed = false;
     void loadWebglRenderer(xtermRef.current, () => disposed, windowFocused ? 'visible' : 'short-app-blur');
