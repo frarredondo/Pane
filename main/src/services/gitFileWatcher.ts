@@ -2,6 +2,9 @@ import { EventEmitter } from 'events';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import path from 'path';
 import type { Stats } from 'fs';
+// node:fs recursive watcher — aliased so it doesn't collide with chokidar's
+// imported `watch`/`FSWatcher`. Used for the darwin/win32 native path.
+import { watch as fsWatch, type FSWatcher as NodeFsWatcher, type WatchEventType } from 'node:fs';
 import { spawn, type ChildProcess } from 'child_process';
 import { execSync } from '../utils/commandExecutor';
 import type { CommandRunner } from '../utils/commandRunner';
@@ -37,12 +40,24 @@ const IGNORED_FILE_PATTERNS: RegExp[] = [
   /^#.+#$/,
 ];
 
+// The four ways a session's worktree can be watched. `native` is the
+// zero-dependency recursive fs.watch (darwin/win32-non-WSL); `chokidar`
+// is the Linux per-directory path; `wsl` is the in-distro inotifywait
+// process; `polling` is the degraded 5s snapshot-diff fallback.
+type WatchMode = 'native' | 'chokidar' | 'wsl' | 'polling';
+
 interface WatchedSession {
   sessionId: string;
   worktreePath: string;
-  worktreeWatcher?: FSWatcher;
-  gitWatcher?: FSWatcher;
+  mode: WatchMode;
+  worktreeWatcher?: FSWatcher; // chokidar (linux)
+  gitWatcher?: FSWatcher; // chokidar narrow metadata watcher (all non-WSL modes)
+  nativeWatcher?: NodeFsWatcher; // node:fs recursive FSWatcher (darwin/win32)
   wslWatcher?: ChildProcess;
+  pollTimer?: NodeJS.Timeout; // 5s snapshot-diff loop (polling mode)
+  selfHealTimer?: NodeJS.Timeout; // 60s snapshot-diff (native/chokidar modes)
+  lastStatusSnapshot?: string; // last `git status --porcelain` output
+  watcherErrorLogged: boolean; // rate-limits the fallback warn
   lastModified: number;
   pendingRefresh: boolean;
 }
@@ -60,6 +75,14 @@ export class GitFileWatcher extends EventEmitter {
   private watchedSessions: Map<string, WatchedSession> = new Map();
   private refreshDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private readonly DEBOUNCE_MS = 1500; // 1.5 second debounce for file changes
+
+  // Gitignore-derived ignored-dir set, cached per watchPath on the INSTANCE
+  // (not per WatchedSession) so it survives blur/focus teardown-rebuild churn
+  // and pane switches without re-running a full `git ls-files` working-tree scan.
+  private gitignoreDirCache: Map<string, { dirs: Set<string>; fetchedAt: number }> = new Map();
+  private static readonly GITIGNORE_CACHE_TTL_MS = 5 * 60_000;
+  private static readonly POLL_INTERVAL_MS = 5_000;
+  private static readonly SELF_HEAL_INTERVAL_MS = 60_000;
 
   constructor(
     private logger?: Logger,
@@ -92,10 +115,73 @@ export class GitFileWatcher extends EventEmitter {
       // Convert path for the watcher (needs platform-appropriate path)
       const watchPath = this.pathResolver ? this.pathResolver.toFileSystem(worktreePath) : worktreePath;
 
+      // Native recursive fs.watch on darwin/win32 (non-WSL). One O(1) recursive
+      // handle instead of chokidar's one-handle-per-directory registration walk,
+      // so a huge repo root no longer EMFILEs. win32+WSL already took the WSL
+      // branch above; recursive fs.watch is fully supported on darwin (FSEvents)
+      // and win32 (ReadDirectoryChangesW) in this Node runtime.
+      const useNative =
+        (process.platform === 'darwin' || process.platform === 'win32') &&
+        !this.commandRunner?.wslContext;
+      if (useNative) {
+        this.getGitignoredDirs(watchPath); // warm the cache before events flow
+        let nativeWatcher: NodeFsWatcher;
+        try {
+          // default (utf8) encoding → Node types filename as string | null (never Buffer)
+          nativeWatcher = fsWatch(
+            watchPath,
+            { recursive: true, persistent: true },
+            (_eventType: WatchEventType, filename: string | null) => {
+              // null filename → conservative: cannot filter, treat as a change.
+              // Re-read the (cache-hit) gitignore set each event so the TTL
+              // refresh takes effect on long-lived spotlight watchers.
+              if (
+                filename !== null &&
+                this.isIgnoredEventPath(filename, this.getGitignoredDirs(watchPath))
+              ) {
+                return;
+              }
+              this.handleFileChange(sessionId, filename ?? '', 'change');
+            },
+          );
+        } catch (err) {
+          // creation failure (e.g. EMFILE/ENOSPC on the handle) → degrade to
+          // polling before any record exists
+          this.transitionToPolling(sessionId, worktreePath, err as Error);
+          return;
+        }
+        nativeWatcher.on('error', (err) => this.handleWatcherFailure(sessionId, err));
+        const gitWatcher = this.createGitMetadataWatcher(sessionId, watchPath);
+        this.watchedSessions.set(sessionId, {
+          sessionId,
+          worktreePath,
+          mode: 'native',
+          nativeWatcher,
+          gitWatcher,
+          selfHealTimer: this.startSelfHeal(sessionId),
+          watcherErrorLogged: false,
+          lastModified: Date.now(),
+          pendingRefresh: false,
+        });
+
+        // Validation signal — keep in production: confirms watcher count is bounded
+        this.logger?.info(
+          `[GitFileWatcher] startWatching(${sessionId}) watchedSessions.size=${this.watchedSessions.size}`
+        );
+        return;
+      }
+
+      // Linux: chokidar per-directory watcher. Union ignore (hardcoded ∪
+      // gitignore-derived) is threaded into the registration-time `ignored` fn
+      // so it both prunes descent (handle budget) AND matches the native
+      // event-time filter, keeping behavior uniform across platforms.
+      const gitignoredDirs = this.getGitignoredDirs(watchPath);
       // Function-form ignored: short-circuits descent into heavy directories
       // stats may be undefined on initial calls — return false (don't ignore) if unknown
       const ignored = (targetPath: string, stats?: Stats): boolean => {
         if (!stats) return false;
+        const rel = path.relative(watchPath, targetPath);
+        if (rel && this.isIgnoredEventPath(rel, gitignoredDirs)) return true;
         const base = path.basename(targetPath);
         if (stats.isDirectory()) {
           return IGNORED_DIRS.has(base);
@@ -118,63 +204,27 @@ export class GitFileWatcher extends EventEmitter {
         this.handleFileChange(sessionId, rel, 'change');
       });
       worktreeWatcher.on('error', (err) => {
+        // chokidar 5 types the error handler arg as `unknown`; extract the code
+        // via ErrnoException cast (the no-any-compliant route). Only the
+        // handle-exhaustion errors degrade to polling — other chokidar errors
+        // stay log-only to avoid over-eager fallback on transient stat blips.
+        const code = (err as NodeJS.ErrnoException).code;
         this.logger?.error(`[GitFileWatcher] worktree watcher error`, err as Error);
+        if (code === 'EMFILE' || code === 'ENOSPC') {
+          this.handleWatcherFailure(sessionId, err);
+        }
       });
 
-      // Resolve the real gitdir. Pane sessions usually run in git
-      // worktrees, where `.git` inside the worktree is a FILE
-      // containing `gitdir: /path/to/main/.git/worktrees/<name>` — the
-      // real `index` and `HEAD` live under that resolved path, not
-      // under `<worktreePath>/.git`. Use `git rev-parse
-      // --absolute-git-dir` so we get the correct location for both
-      // worktrees and normal repos. If resolution fails (e.g., the
-      // path is not yet a valid repo) we skip the narrow .git watcher
-      // and rely on the worktree watcher alone.
-      let gitWatcher: FSWatcher | undefined;
-      try {
-        const resolvedGitDir = this.execGit(
-          'git rev-parse --absolute-git-dir',
-          watchPath,
-        ).trim();
-        if (resolvedGitDir) {
-          gitWatcher = chokidarWatch(
-            [
-              path.join(resolvedGitDir, 'index'),
-              path.join(resolvedGitDir, 'HEAD'),
-            ],
-            {
-              ignoreInitial: true,
-              persistent: true,
-              followSymlinks: false,
-              usePolling: false,
-            },
-          );
-          gitWatcher.on('all', () => {
-            // intentional: bypass any ignore checks, always trigger on
-            // git index/HEAD changes
-            this.handleFileChange(sessionId, '.git/index', 'change');
-          });
-          gitWatcher.on('error', (err) => {
-            this.logger?.error(
-              `[GitFileWatcher] .git watcher error`,
-              err as Error,
-            );
-          });
-        }
-      } catch (gitDirErr) {
-        this.logger?.error(
-          `[GitFileWatcher] Failed to resolve gitdir for ${sessionId}, ` +
-            `narrow .git watcher disabled (metadata-only operations will ` +
-            `not trigger refresh until worktree watcher fires):`,
-          gitDirErr as Error,
-        );
-      }
+      const gitWatcher = this.createGitMetadataWatcher(sessionId, watchPath);
 
       this.watchedSessions.set(sessionId, {
         sessionId,
         worktreePath,
+        mode: 'chokidar',
         worktreeWatcher,
         gitWatcher,
+        selfHealTimer: this.startSelfHeal(sessionId),
+        watcherErrorLogged: false,
         lastModified: Date.now(),
         pendingRefresh: false,
       });
@@ -274,7 +324,9 @@ export class GitFileWatcher extends EventEmitter {
     this.watchedSessions.set(sessionId, {
       sessionId,
       worktreePath,
+      mode: 'wsl',
       wslWatcher: child,
+      watcherErrorLogged: false,
       lastModified: Date.now(),
       pendingRefresh: false,
     });
@@ -296,7 +348,10 @@ export class GitFileWatcher extends EventEmitter {
     // fire-and-forget async close — keeps stopWatching synchronous from callers' perspective
     session.worktreeWatcher?.close().catch(() => {});
     session.gitWatcher?.close().catch(() => {});
+    session.nativeWatcher?.close(); // node:fs FSWatcher.close() is synchronous
     session.wslWatcher?.kill();
+    if (session.pollTimer) clearInterval(session.pollTimer);
+    if (session.selfHealTimer) clearInterval(session.selfHealTimer);
     this.watchedSessions.delete(sessionId);
 
     // Clear any pending refresh timer
@@ -316,6 +371,10 @@ export class GitFileWatcher extends EventEmitter {
     for (const sessionId of this.watchedSessions.keys()) {
       this.stopWatching(sessionId);
     }
+    // Clear the instance-level gitignore cache only here — per-session
+    // stopWatching must NOT clear it (the cache exists to survive
+    // pane-switch/focus teardown-rebuild churn).
+    this.gitignoreDirCache.clear();
   }
 
   /**
@@ -387,6 +446,220 @@ export class GitFileWatcher extends EventEmitter {
       return this.commandRunner.exec(command, cwd, { silent: true });
     }
     return execSync(command, { cwd, encoding: 'utf8', silent: true }) as string;
+  }
+
+  /**
+   * Repo-truth ignored directories, derived from git and cached per watchPath
+   * on the instance with a TTL. This is the gitignore half of the union ignore
+   * set (the other half is the hardcoded IGNORED_DIRS). `git ls-files -o -i
+   * --directory --exclude-standard` emits RELATIVE dir paths (slash-normalized
+   * by git) with a TRAILING SLASH for on-disk ignored directories — we keep
+   * only those lines, stripped of the slash. If the path is not yet a repo the
+   * scan fails and we cache an empty set (the hardcoded list still applies).
+   */
+  private getGitignoredDirs(watchPath: string): Set<string> {
+    const cached = this.gitignoreDirCache.get(watchPath);
+    if (cached && Date.now() - cached.fetchedAt < GitFileWatcher.GITIGNORE_CACHE_TTL_MS) {
+      return cached.dirs;
+    }
+    const dirs = new Set<string>();
+    try {
+      const out = this.execGit('git ls-files -o -i --directory --exclude-standard', watchPath);
+      for (const line of out.split('\n')) {
+        const trimmed = line.trim();
+        // dirs only — git marks ignored directories with a trailing slash
+        if (trimmed.endsWith('/')) {
+          dirs.add(trimmed.slice(0, -1));
+        }
+      }
+    } catch {
+      /* not a repo yet → hardcoded list only */
+    }
+    this.gitignoreDirCache.set(watchPath, { dirs, fetchedAt: Date.now() });
+    return dirs;
+  }
+
+  /**
+   * Event-time ignore check for a root-relative path (native path uses this
+   * instead of chokidar's registration-time descent pruning). O(path depth)
+   * set lookups. `.git` internals are owned by the narrow metadata watcher, so
+   * anything under `.git` is dropped here to keep index.lock churn from
+   * resetting the debounce. EVERY segment (incl. the leaf) is checked against
+   * IGNORED_DIRS — a file literally named `node_modules` isn't worth a refresh
+   * and this avoids dir-vs-file guessing on event-time paths.
+   */
+  private isIgnoredEventPath(relPath: string, gitignoredDirs: Set<string>): boolean {
+    const segments = relPath.split(/[\\/]/).filter(Boolean);
+    if (segments.length === 0) return false;
+    if (segments[0] === '.git') return true; // narrow watcher owns .git signals
+    let prefix = '';
+    for (const seg of segments) {
+      if (IGNORED_DIRS.has(seg)) return true;
+      prefix = prefix ? `${prefix}/${seg}` : seg;
+      if (gitignoredDirs.has(prefix)) return true; // relative prefixes, e.g. "worktrees", "main/dist"
+    }
+    return IGNORED_FILE_PATTERNS.some((p) => p.test(segments[segments.length - 1]));
+  }
+
+  /**
+   * Snapshot-diff poll shared by polling mode (5s) and self-heal (60s). Mirrors
+   * the WSL bash fallback: snapshot `git status --porcelain` and emit
+   * `needs-refresh` only when the snapshot DIFFERS from the previous poll. The
+   * first poll seeds the baseline without emitting (lastStatusSnapshot
+   * undefined), so a legitimately-dirty tree does not spam a refresh every tick.
+   */
+  private pollStatusSnapshot(sessionId: string): void {
+    const session = this.watchedSessions.get(sessionId);
+    if (!session) return;
+    try {
+      // session.worktreePath (unconverted), matching performRefreshCheck →
+      // checkIfRefreshNeeded(session.worktreePath) — execGit/commandRunner
+      // expect the runner-domain path, not the toFileSystem-converted one.
+      const snapshot = this.execGit(
+        'git status --porcelain=v1 --branch --untracked-files=normal',
+        session.worktreePath,
+      );
+      if (session.lastStatusSnapshot !== undefined && snapshot !== session.lastStatusSnapshot) {
+        this.emit('needs-refresh', sessionId);
+      }
+      session.lastStatusSnapshot = snapshot;
+    } catch {
+      /* transient git failure — try again next tick */
+    }
+  }
+
+  /** 60s self-heal tick covering FSEvents coalescing / trailing-debounce starvation */
+  private startSelfHeal(sessionId: string): NodeJS.Timeout {
+    return setInterval(
+      () => this.pollStatusSnapshot(sessionId),
+      GitFileWatcher.SELF_HEAL_INTERVAL_MS,
+    );
+  }
+
+  /**
+   * Watcher-failure entrypoint. No-ops when the session is missing or already
+   * in polling mode — this is the storm-swallower: thousands of per-directory
+   * EMFILE error events collapse to a single degrade. Reads worktreePath from
+   * the session record and normalizes non-Error values.
+   */
+  private handleWatcherFailure(sessionId: string, err: unknown): void {
+    const session = this.watchedSessions.get(sessionId);
+    if (!session || session.mode === 'polling') return; // already degraded (or torn down); swallow the storm
+    this.transitionToPolling(
+      sessionId,
+      session.worktreePath,
+      err instanceof Error ? err : new Error(String(err)),
+    );
+  }
+
+  /**
+   * Degrade a session to the 5s snapshot-diff polling loop. May run BEFORE any
+   * session record exists (the native creation-throw path throws before
+   * watchedSessions.set), so it builds a COMPLETE WatchedSession record from
+   * its own parameters instead of assuming a prior one. Emits exactly one warn
+   * per session lifetime (guarded by watcherErrorLogged) and one immediate
+   * needs-refresh so consumers reconcile promptly; the first poll tick then
+   * seeds the snapshot baseline.
+   */
+  private transitionToPolling(sessionId: string, worktreePath: string, err: Error): void {
+    const session = this.watchedSessions.get(sessionId);
+    // close everything watcher-shaped; keep the debounce map intact
+    session?.nativeWatcher?.close(); // sync
+    session?.worktreeWatcher?.close().catch(() => {});
+    session?.gitWatcher?.close().catch(() => {});
+    if (session?.selfHealTimer) clearInterval(session.selfHealTimer);
+    if (session?.pollTimer) clearInterval(session.pollTimer);
+    if (!session?.watcherErrorLogged) {
+      this.logger?.warn(
+        `[GitFileWatcher] Watcher failed for ${sessionId} (${err.message}); ` +
+          `falling back to 5s git status polling.`,
+      );
+    }
+    const pollTimer = setInterval(
+      () => this.pollStatusSnapshot(sessionId),
+      GitFileWatcher.POLL_INTERVAL_MS,
+    );
+    this.watchedSessions.set(sessionId, {
+      sessionId,
+      worktreePath,
+      mode: 'polling',
+      pollTimer,
+      watcherErrorLogged: true,
+      lastStatusSnapshot: undefined,
+      lastModified: session?.lastModified ?? Date.now(),
+      pendingRefresh: false,
+    });
+    // one immediate refresh so consumers reconcile promptly after a degrade;
+    // the first poll tick then seeds the snapshot baseline
+    this.emit('needs-refresh', sessionId);
+  }
+
+  /**
+   * Narrow `.git`-metadata chokidar watcher, used by BOTH the native and
+   * chokidar branches. Covers the status-relevant metadata that the worktree
+   * watcher would otherwise miss or (on native) is deliberately filtered out:
+   * `index` (staging/commits), `HEAD` (branch switch), and — via the git COMMON
+   * dir — `packed-refs` and `refs/heads` (branch create/delete).
+   *
+   * Pane sessions usually run in git worktrees, where `.git` inside the
+   * worktree is a FILE pointing at `.git/worktrees/<name>`; the real `index`
+   * and `HEAD` live under the resolved `--absolute-git-dir`, while `refs/heads`
+   * and `packed-refs` live under the `--git-common-dir` (the MAIN repo's `.git`
+   * for a linked worktree). `--git-common-dir` may be relative (e.g. `.git`),
+   * unlike `--absolute-git-dir`, so it is resolved against `watchPath`. If
+   * resolution fails (not yet a valid repo) we skip the narrow watcher and rely
+   * on the worktree/native watcher alone, exactly as before.
+   */
+  private createGitMetadataWatcher(sessionId: string, watchPath: string): FSWatcher | undefined {
+    try {
+      // rev-parse emits one line per flag, in flag order — but guard the shape
+      const lines = this.execGit('git rev-parse --absolute-git-dir --git-common-dir', watchPath)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const gitDir = lines[0];
+      if (!gitDir) return undefined;
+      const commonDirRaw = lines[1]; // may be missing or relative, e.g. ".git"
+      const commonDir = commonDirRaw
+        ? path.isAbsolute(commonDirRaw)
+          ? commonDirRaw
+          : path.resolve(watchPath, commonDirRaw)
+        : undefined;
+      const targets = new Set<string>([
+        path.join(gitDir, 'index'),
+        path.join(gitDir, 'HEAD'),
+        // small dir + single file; chokidar handle cost is trivial here
+        ...(commonDir
+          ? [path.join(commonDir, 'packed-refs'), path.join(commonDir, 'refs', 'heads')]
+          : []), // degrade to index/HEAD-only, as today
+      ]);
+      const gitWatcher = chokidarWatch([...targets], {
+        ignoreInitial: true,
+        persistent: true,
+        followSymlinks: false,
+        usePolling: false,
+      });
+      gitWatcher.on('all', () => {
+        // intentional: bypass any ignore checks, always trigger on
+        // git index/HEAD/refs changes
+        this.handleFileChange(sessionId, '.git/index', 'change');
+      });
+      // narrow watcher (~4 paths) cannot EMFILE — keep errors log-only, as
+      // today; do NOT route to handleWatcherFailure or a stat blip on
+      // refs/heads would needlessly degrade a healthy session to polling
+      gitWatcher.on('error', (err) => {
+        this.logger?.error(`[GitFileWatcher] .git watcher error`, err as Error);
+      });
+      return gitWatcher;
+    } catch (gitDirErr) {
+      this.logger?.error(
+        `[GitFileWatcher] Failed to resolve gitdir for ${sessionId}, ` +
+          `narrow .git watcher disabled (metadata-only operations will ` +
+          `not trigger refresh until worktree watcher fires):`,
+        gitDirErr as Error,
+      );
+      return undefined;
+    }
   }
 
   /**
