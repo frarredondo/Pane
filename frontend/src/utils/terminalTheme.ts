@@ -59,6 +59,10 @@ const getCSSVariable = (name: string): string => {
 
 // Terminal theme generator that reads from CSS variables
 export const getTerminalTheme = () => {
+  // Only set when the theme defines it (no fallback — dark themes keep xterm's default selection)
+  const selectionBg = getComputedStyle(document.documentElement)
+    .getPropertyValue('--color-terminal-selection-bg')
+    .trim();
   return {
     background: getCSSVariable('--color-terminal-bg'),
     foreground: getCSSVariable('--color-terminal-fg'),
@@ -79,6 +83,7 @@ export const getTerminalTheme = () => {
     brightMagenta: getCSSVariable('--color-terminal-bright-magenta'),
     brightCyan: getCSSVariable('--color-terminal-bright-cyan'),
     brightWhite: getCSSVariable('--color-terminal-bright-white'),
+    ...(selectionBg ? { selectionBackground: selectionBg } : {}),
   };
 };
 

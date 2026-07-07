@@ -26,6 +26,11 @@ const MAX_CONCURRENT_SPAWNS = 3;
 const IDLE_THRESHOLD_MS = 30_000; // 30s — mark panel idle after no PTY output
 const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
 const MAX_ALTERNATE_SCREEN_BUFFER_SIZE = 100_000; // 100KB of recent TUI redraw state
+// Formal ceiling for the raw-ANSI scrollback shipped on restore/getState replay. Peer consensus:
+// Orca (TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT) and Superset (MAX_HISTORY_SCROLLBACK_BYTES) both use
+// 512 * 1024. Above the 500KB live trim, so it does not reduce today's payload — the measurable win
+// is omitting the up-to-8MB serialized snapshot from getState when raw scrollback exists.
+const MAX_RESTORE_PAYLOAD_SIZE = 512 * 1024;
 
 type CliAgentType = NonNullable<TerminalPanelState['agentType']>;
 
@@ -1405,9 +1410,11 @@ export class TerminalPanelManager {
     // Send scrollback to frontend. Dual-path mirrors `flushOutputBuffer`:
     // `terminal:output` IPC for legacy subscribers, ptyHost port for flag-on.
     if (state.scrollbackBuffer) {
-      const output = typeof state.scrollbackBuffer === 'string'
-        ? state.scrollbackBuffer + restorationMsg
-        : state.scrollbackBuffer.join('\n') + restorationMsg;
+      // Cap the renderer replay at the formal ceiling; main's own buffer (set above) keeps full content.
+      const rawScrollback = typeof state.scrollbackBuffer === 'string'
+        ? state.scrollbackBuffer
+        : state.scrollbackBuffer.join('\n');
+      const output = this.trimAnsiSafe(rawScrollback, MAX_RESTORE_PAYLOAD_SIZE) + restorationMsg;
       this.sendRendererEvent('terminal:output', {
         sessionId: panel.sessionId,
         panelId: panel.id,
@@ -1423,18 +1430,21 @@ export class TerminalPanelManager {
   getTerminalState(panelId: string): TerminalPanelState | null {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return null;
-    
+
+    const cappedScrollback = this.trimAnsiSafe(terminal.scrollbackBuffer, MAX_RESTORE_PAYLOAD_SIZE);
     return {
       isInitialized: true,
       cwd: process.cwd(), // Simplified - would need platform-specific implementation
       shellType: process.env.SHELL || 'bash',
-      scrollbackBuffer: terminal.scrollbackBuffer,
+      scrollbackBuffer: cappedScrollback,
       alternateScreenBuffer: terminal.alternateScreenBuffer,
       isAlternateScreen: terminal.isAlternateScreen,
       commandHistory: terminal.commandHistory,
       lastActivityTime: terminal.lastActivity.toISOString(),
       lastActiveCommand: terminal.currentCommand,
-      serializedBuffer: this.serializedBuffers.get(panelId)
+      // Omit the serialized snapshot when raw scrollback exists — the frontend prefers raw whenever
+      // the PTY is alive; the snapshot is only consulted on app-restart (empty raw scrollback).
+      serializedBuffer: cappedScrollback.length > 0 ? undefined : this.serializedBuffers.get(panelId)
     };
   }
 

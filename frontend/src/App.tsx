@@ -438,10 +438,24 @@ function App() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Also pause animations on window blur — document.hidden rarely fires for a
+    // visible-but-unfocused window (notably on macOS), so gate on the focus event too.
+    window.electronAPI.window?.isFocused?.()
+      .then((focused) => {
+        document.documentElement.classList.toggle('window-blurred', !focused);
+      })
+      .catch(() => {
+        // Default to focused if the focus query is unavailable.
+      });
+    const cleanupFocusChanged = window.electronAPI.events.onWindowFocusChanged((focused) => {
+      document.documentElement.classList.toggle('window-blurred', !focused);
+    });
+
     return () => {
       cleanupDispose();
       window.removeEventListener('session-switched', handleSessionSwitch);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      cleanupFocusChanged();
     };
   }, []);
 

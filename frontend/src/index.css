@@ -8,10 +8,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Pause all animations when window is hidden to save battery */
+/* Pause all animations when window is hidden or blurred to save battery */
 html.window-hidden *,
 html.window-hidden *::before,
-html.window-hidden *::after {
+html.window-hidden *::after,
+html.window-blurred *,
+html.window-blurred *::before,
+html.window-blurred *::after {
   animation-play-state: paused !important;
   transition: none !important;
 }
@@ -493,13 +496,7 @@ body.light-rounded {
   margin: var(--pane-terminal-screen-offset-y) 0 0 var(--pane-terminal-padding-x);
 }
 
-/* Light mode: invert the dark terminal instead of fighting ANSI color issues */
-.light .xterm {
-  filter: invert(1) hue-rotate(180deg);
-}
-
 .pane-onboarding-auth-terminal .xterm {
-  filter: none !important;
   background-color: var(--color-terminal-bg) !important;
 }
 
