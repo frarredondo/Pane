@@ -62,7 +62,13 @@ const OPTIONAL_FALLBACK_RAW_FILES = [
   'parsa/.codex/skills/plan/plan_base.md',
   'parsa/.codex/skills/pr-test-automation/agents/openai.yaml',
   'parsa/.codex/skills/teach-back/agents/openai.yaml',
+  'parsa/.codex/skills/pane-work-recap/SKILL.md',
+  'parsa/.codex/skills/pane-work-recap/agents/openai.yaml',
+  'parsa/.codex/skills/pane-work-prioritizer/SKILL.md',
+  'parsa/.codex/skills/pane-work-prioritizer/agents/openai.yaml',
   'parsa/.claude/skills/create-plan/plan_base.md',
+  'parsa/.claude/skills/pane-work-recap/SKILL.md',
+  'parsa/.claude/skills/pane-work-prioritizer/SKILL.md',
 ] as const;
 
 const FALLBACK_RAW_FILES = [
@@ -342,6 +348,11 @@ Use the cached RunPane orchestrator skill as the primary workflow reference. The
 cached files may be refreshed by Pane in the background; do not fetch GitHub just
 to initialize yourself.
 
+For read-only work questions, use \`pane-work-recap\` when the user asks what
+they worked on and \`pane-work-prioritizer\` when they ask what to work on next.
+Ground both answers in RunPane, git, GitHub, and agent-log evidence before
+starting new implementation panes.
+
 ## Orchestrator Contract
 
 For any request that asks you to inspect, change, plan, test, review, or
@@ -413,6 +424,10 @@ with generic cached RunPane documentation, follow the runtime context.
 
 Do not claim initialization is complete until you have loaded these workflow
 references and can name the intended lifecycle for the user's task.
+
+For read-only work questions, use \`pane-work-recap\` when the user asks what
+they worked on and \`pane-work-prioritizer\` when they ask what to work on next.
+Do not start implementation panes for those answers unless the user asks you to.
 
 ## Role Boundary
 

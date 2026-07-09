@@ -41,6 +41,9 @@ describe('SkillCacheManager Pane Chat guide', () => {
     expect(guide).toContain('RunPane orchestrator skill for Codex');
     expect(normalizedGuide).toContain('/skills/dcouple/parsa/.codex/skills/runpane-orchestrator/SKILL.md');
     expect(normalizedGuide).toContain('/skills/dcouple/docs/readme-workflow-map.png');
+    expect(guide).toContain('pane-work-recap');
+    expect(guide).toContain('pane-work-prioritizer');
+    expect(guide).toContain('when they ask what to work on next');
     expect(guide).toContain('Do not replace orchestration with a normal chat answer for Pane work.');
     expect(guide).toContain('verify its state with');
   });
@@ -92,6 +95,9 @@ describe('SkillCacheManager Pane Chat guide', () => {
     expect(canonicalSkill).toContain('After a PR is merged, the user can archive the Pane');
     expect(canonicalSkill).toContain('Workflow map source:');
     expect(canonicalSkill).toContain('Skill legend source:');
+    expect(canonicalSkill).toContain('pane-work-recap');
+    expect(canonicalSkill).toContain('pane-work-prioritizer');
+    expect(canonicalSkill).toContain('Do not start implementation panes for those answers');
   });
 
   it('mirrors cached repository skills into project-scoped Codex and Claude skill roots', async () => {
