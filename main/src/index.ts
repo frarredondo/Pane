@@ -13,6 +13,12 @@ const launchRemoteSetup = hasRemoteSetupLaunchArg();
 // This MUST be done before importing electron
 import { app } from 'electron';
 
+if (process.platform === 'darwin') {
+  // Work around unrecoverable Skia Graphite rendering glitches on macOS.
+  // https://github.com/electron/electron/pull/49608
+  app.commandLine.appendSwitch('disable-skia-graphite');
+}
+
 function getStartupTerminalPowerMode(): 'performance' | 'batterySaver' {
   try {
     const rawConfig = JSON.parse(
