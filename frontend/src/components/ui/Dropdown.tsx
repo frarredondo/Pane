@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Kbd } from './Kbd';
+import { initialActiveIndex } from './dropdownNavigation';
 
 export interface DropdownItem {
   id: string;
@@ -67,6 +68,14 @@ const selectedVariantStyles = {
   danger: 'bg-interactive/15 text-status-error shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-error/30',
 };
 
+function getMenuControls(content: HTMLElement | null): HTMLElement[] {
+  if (!content) return [];
+
+  return Array.from(content.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  ));
+}
+
 export function Dropdown({
   trigger,
   triggerClassName,
@@ -84,8 +93,10 @@ export function Dropdown({
 }: DropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [actualPosition, setActualPosition] = useState<'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'>('bottom-right');
+  const [activeIndex, setActiveIndex] = useState(-1);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   const handleToggle = () => {
     const newState = !isOpen;
@@ -94,17 +105,88 @@ export function Dropdown({
   };
 
   const handleClose = () => {
+    // Focus inside the menu would land on <body> when it unmounts, so hand it back to
+    // the trigger. Focus already moved elsewhere (a click on another control) is left alone.
+    const focusWasInMenu = !!contentRef.current?.contains(document.activeElement);
+
     setIsOpen(false);
     onOpenChange?.(false);
+
+    if (focusWasInMenu) {
+      triggerRef.current?.focus();
+    }
   };
 
   const handleItemClick = (item: DropdownItem) => {
     if (item.disabled) return;
-    
+
     item.onClick?.();
-    
+
     if (closeOnSelect) {
       handleClose();
+    }
+  };
+
+  // Seeded from the current selection, so e.g. the theme menu opens on the active theme.
+  // Re-runs on item count: a shrinking list would otherwise strand activeIndex out of
+  // range, leaving every item at tabIndex={-1} with no reachable highlight.
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveIndex(-1);
+      return;
+    }
+    setActiveIndex((current) =>
+      current >= 0 && current < items.length && !items[current].disabled
+        ? current
+        : initialActiveIndex(items, selectedId),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, items.length]);
+
+  // Roving tabindex: DOM focus follows the active item. If there are no regular
+  // items, focus the first footer control so footer-only menus remain usable.
+  useEffect(() => {
+    if (!isOpen) return;
+    const controls = getMenuControls(contentRef.current);
+    const target = controls[activeIndex] ?? controls[0];
+    target?.focus();
+  }, [isOpen, activeIndex]);
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent) => {
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp': {
+        event.preventDefault();
+        const controls = getMenuControls(contentRef.current);
+        if (controls.length === 0) break;
+
+        const current = controls.indexOf(document.activeElement as HTMLElement);
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        const next = current === -1
+          ? (step === 1 ? 0 : controls.length - 1)
+          : (current + step + controls.length) % controls.length;
+        setActiveIndex(next);
+        break;
+      }
+      case 'Enter':
+      case ' ': {
+        const itemIndex = Number((document.activeElement as HTMLElement)?.dataset.dropdownItemIndex);
+        if (Number.isInteger(itemIndex) && items[itemIndex]) {
+          event.preventDefault();
+          handleItemClick(items[itemIndex]);
+        }
+        // Footer controls keep their native Enter/Space behavior.
+        break;
+      }
+      case 'Tab':
+        // Deliberately not preventDefault: close, and let Tab continue from the trigger
+        // that handleClose refocuses. Otherwise focus escapes the portal (which sits at
+        // the end of <body>) while the menu stays open.
+        handleClose();
+        break;
+      // Escape is handled by the document listener below.
+      default:
+        break;
     }
   };
 
@@ -200,13 +282,19 @@ export function Dropdown({
   return (
     <div ref={dropdownRef} className={cn('relative', className)} style={style}>
       {/* Trigger */}
-      <div 
-        onClick={handleToggle} 
+      <div
+        ref={triggerRef}
+        onClick={handleToggle}
         className={triggerClassName}
         // Make trigger focusable for keyboard navigation
         tabIndex={0}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleToggle();
+          } else if (e.key === 'ArrowDown' && !isOpen) {
             e.preventDefault();
             handleToggle();
           }
@@ -219,6 +307,9 @@ export function Dropdown({
       {isOpen && createPortal(
         <div
           ref={contentRef}
+          role="menu"
+          aria-orientation="vertical"
+          onKeyDown={handleMenuKeyDown}
           className={cn(
             'z-[10000]',
             'bg-surface-primary rounded-md shadow-dropdown-elevated',
@@ -238,6 +329,7 @@ export function Dropdown({
             <div className="p-1.5 max-h-[70vh] overflow-y-auto">
               {items.map((item, index) => {
                 const Icon = item.icon;
+                const isSelectable = selectedId !== undefined;
                 const isSelected = item.id === selectedId;
                 const variant = item.variant || 'default';
 
@@ -249,7 +341,16 @@ export function Dropdown({
 
                     <button
                       type="button"
+                      data-dropdown-item-index={index}
+                      // A `selectedId` menu is a single-select group: plain menuitem can't
+                      // tell a screen reader which option is currently active.
+                      role={isSelectable ? 'menuitemradio' : 'menuitem'}
+                      aria-checked={isSelectable ? isSelected : undefined}
+                      tabIndex={index === activeIndex ? 0 : -1}
                       onClick={() => handleItemClick(item)}
+                      // Keeps pointer and keyboard on one item; otherwise the hovered and
+                      // the focused row are both highlighted.
+                      onMouseEnter={() => !item.disabled && setActiveIndex(index)}
                       disabled={item.disabled}
                       className={cn(
                         'w-full text-left px-3 py-2.5 rounded-sm',
