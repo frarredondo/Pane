@@ -5,8 +5,8 @@ const devServerPort = getPlaywrightPort();
 
 export default defineConfig({
   testDir: './tests',
-  // Only run smoke tests and health check in CI
-  testMatch: ['smoke.spec.ts', 'health-check.spec.ts'],
+  // Keep the fast startup checks and the maintained accessibility journeys in CI.
+  testMatch: ['smoke.spec.ts', 'health-check.spec.ts', 'accessibility.spec.ts'],
   // Reduce timeout for CI
   timeout: 20 * 1000,
   expect: {

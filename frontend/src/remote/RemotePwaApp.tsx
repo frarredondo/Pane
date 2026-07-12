@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import type { ToolPanel } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
 import { RemoteConnectionScreen } from './components/RemoteConnectionScreen';
 import { RemoteCreateSessionDialog } from './components/RemoteCreateSessionDialog';
-import { RemotePanelTabs, type RemoteTerminalCreateOptions } from './components/RemotePanelTabs';
+import {
+  getRemotePanelTabId,
+  getRemotePanelTabPanelId,
+  RemotePanelTabs,
+  type RemoteTerminalCreateOptions,
+} from './components/RemotePanelTabs';
 import { RemoteSessionList } from './components/RemoteSessionList';
 import { RemoteSidebar } from './components/RemoteSidebar';
 import { RemoteStatusBar } from './components/RemoteStatusBar';
@@ -59,6 +65,19 @@ export function RemotePwaApp() {
   const [affordancesLoading, setAffordancesLoading] = useState(false);
   const [sidebarActionSessionId, setSidebarActionSessionId] = useState<string | null>(null);
   const [createSessionProject, setCreateSessionProject] = useState<RemoteProjectWithSessions | null>(null);
+  const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
+  const sidebarOpenerRef = useRef<HTMLElement | null>(null);
+  const createSessionOpenerRef = useRef<HTMLElement | null>(null);
+
+  const openSidebar = useCallback(() => {
+    sidebarOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSidebarOpen(true);
+  }, []);
+
+  const openCreateSession = useCallback((project: RemoteProjectWithSessions) => {
+    createSessionOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setCreateSessionProject(project);
+  }, []);
 
   const projects = useRemoteSessionStore(state => state.projects);
   const selectedSessionId = useRemoteSessionStore(state => state.selectedSessionId);
@@ -85,7 +104,19 @@ export function RemotePwaApp() {
     () => selectedPanels.filter(panel => panel.type === 'terminal'),
     [selectedPanels],
   );
-  const selectedPanel = terminalPanels.find(panel => panel.id === selectedPanelId) ?? terminalPanels[0] ?? null;
+  const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? selectedPanels[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedPanel || selectedPanel.type !== 'terminal') return;
+    setMountedTerminalPanelIds(previous => previous.includes(selectedPanel.id)
+      ? previous
+      : [...previous, selectedPanel.id]);
+  }, [selectedPanel]);
+
+  useEffect(() => {
+    const currentPanelIds = new Set(terminalPanels.map(panel => panel.id));
+    setMountedTerminalPanelIds(previous => previous.filter(panelId => currentPanelIds.has(panelId)));
+  }, [terminalPanels]);
 
   const refreshProjects = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return null;
@@ -117,9 +148,7 @@ export function RemotePwaApp() {
         runtime.getActivePanel(sessionId).catch(() => null),
       ]);
       setPanels(sessionId, panels);
-      const activeTerminalPanel = activePanel?.type === 'terminal' ? activePanel : null;
-      const firstTerminalPanel = panels.find(panel => panel.type === 'terminal') ?? null;
-      setSelectedPanel(activeTerminalPanel?.id ?? firstTerminalPanel?.id ?? null);
+      setSelectedPanel(activePanel?.id ?? panels[0]?.id ?? null);
       setLastError(null);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : 'Failed to load remote panels');
@@ -329,29 +358,40 @@ export function RemotePwaApp() {
 
   return (
     <div className="flex h-dvh min-h-dvh w-full overflow-hidden bg-bg-primary text-text-primary">
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Remote panes">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/60"
-            aria-label="Close remote panes"
-            onClick={() => setSidebarOpen(false)}
-          />
-          <RemoteSidebar
-            projects={projects}
-            selectedSessionId={selectedSessionId}
-            loading={loading}
-            actionSessionId={sidebarActionSessionId}
-            onSelectSession={selectRemoteSession}
-            onTogglePinned={toggleRemotePinnedSession}
-            onArchiveSession={archiveRemoteSession}
-            onCreateSession={setCreateSessionProject}
-            onRefresh={() => { void refreshProjects(adapter); }}
-            onClose={() => setSidebarOpen(false)}
-            className="absolute inset-y-0 left-0 flex w-[min(22rem,calc(100vw-2rem))] max-w-full shadow-2xl"
-          />
-        </div>
-      )}
+      <Dialog.Root open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 md:hidden" />
+          <Dialog.Content
+            aria-describedby={undefined}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              requestAnimationFrame(() => {
+                if (document.activeElement?.closest('[aria-modal="true"]')) return;
+                if (sidebarOpenerRef.current?.isConnected) sidebarOpenerRef.current.focus();
+              });
+            }}
+            className="fixed inset-y-0 left-0 z-50 w-[min(22rem,calc(100vw-2rem))] max-w-full shadow-2xl outline-none md:hidden"
+          >
+            <Dialog.Title className="sr-only">Remote panes</Dialog.Title>
+            <RemoteSidebar
+              projects={projects}
+              selectedSessionId={selectedSessionId}
+              loading={loading}
+              actionSessionId={sidebarActionSessionId}
+              onSelectSession={selectRemoteSession}
+              onTogglePinned={toggleRemotePinnedSession}
+              onArchiveSession={archiveRemoteSession}
+              onCreateSession={(project) => {
+                setSidebarOpen(false);
+                openCreateSession(project);
+              }}
+              onRefresh={() => { void refreshProjects(adapter); }}
+              onClose={() => setSidebarOpen(false)}
+              className="flex h-full w-full shadow-2xl"
+            />
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       <RemoteSidebar
         projects={projects}
@@ -361,7 +401,7 @@ export function RemotePwaApp() {
         onSelectSession={selectRemoteSession}
         onTogglePinned={toggleRemotePinnedSession}
         onArchiveSession={archiveRemoteSession}
-        onCreateSession={setCreateSessionProject}
+        onCreateSession={openCreateSession}
         onRefresh={() => { void refreshProjects(adapter); }}
         className="hidden w-80 shrink-0 md:flex"
       />
@@ -372,11 +412,11 @@ export function RemotePwaApp() {
           lastError={lastError}
           lastSeenAt={lastSeenAt}
           onDisconnect={disconnect}
-          onOpenSidebar={() => setSidebarOpen(true)}
+          onOpenSidebar={openSidebar}
         />
 
         <RemotePanelTabs
-          panels={terminalPanels}
+          panels={selectedPanels}
           selectedPanelId={selectedPanel?.id ?? null}
           creating={creatingTerminal}
           customCommands={affordances.customCommands}
@@ -386,25 +426,48 @@ export function RemotePwaApp() {
 
         <RemoteSessionList
           session={selectedSession}
-          panels={terminalPanels}
+          panels={selectedPanels}
           onCreateTerminal={createTerminal}
         />
 
-        {selectedSession && selectedPanel?.type === 'terminal' && (
-          <RemoteTerminalPanel
-            adapter={adapter}
-            panel={selectedPanel}
-            sessionId={selectedSession.id}
-            connectionStatus={connectionStatus}
-            shortcuts={affordances.terminalShortcuts}
-            shortcutsLoading={affordancesLoading}
-            voiceTranscription={affordances.voiceTranscription}
-            onRefreshShortcuts={() => { void loadAffordances(adapter); }}
-          />
-        )}
+        {selectedSession && terminalPanels
+          .filter(panel => panel.id === selectedPanel?.id || mountedTerminalPanelIds.includes(panel.id))
+          .map(panel => {
+            const selected = panel.id === selectedPanel?.id;
+            return (
+              <div
+                key={panel.id}
+                id={getRemotePanelTabPanelId(panel.id)}
+                role="tabpanel"
+                aria-labelledby={getRemotePanelTabId(panel.id)}
+                hidden={!selected}
+                tabIndex={0}
+                className={selected ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : undefined}
+              >
+                <RemoteTerminalPanel
+                  adapter={adapter}
+                  panel={panel}
+                  sessionId={selectedSession.id}
+                  connectionStatus={connectionStatus}
+                  shortcuts={affordances.terminalShortcuts}
+                  shortcutsLoading={affordancesLoading}
+                  voiceTranscription={affordances.voiceTranscription}
+                  onRefreshShortcuts={() => { void loadAffordances(adapter); }}
+                />
+              </div>
+            );
+          })}
 
         {selectedSession && selectedPanel && selectedPanel.type !== 'terminal' && (
-          <UnsupportedPanel session={selectedSession} panel={selectedPanel} />
+          <div
+            id={getRemotePanelTabPanelId(selectedPanel.id)}
+            role="tabpanel"
+            aria-labelledby={getRemotePanelTabId(selectedPanel.id)}
+            tabIndex={0}
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
+            <UnsupportedPanel session={selectedSession} panel={selectedPanel} />
+          </div>
         )}
       </section>
 
@@ -412,6 +475,8 @@ export function RemotePwaApp() {
         <RemoteCreateSessionDialog
           adapter={adapter}
           project={createSessionProject}
+          restoreFocusRef={createSessionOpenerRef}
+          fallbackFocusRef={sidebarOpenerRef}
           onClose={() => setCreateSessionProject(null)}
           onCreated={(sessionName) => handleRemoteSessionCreated(createSessionProject.id, sessionName)}
         />

@@ -138,17 +138,12 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ request, onR
 
   return (
     <Modal isOpen={true} onClose={() => handleDeny()} size="lg" showCloseButton={false}>
-      <ModalHeader onClose={() => handleDeny()}>
-        <div className="flex items-center gap-3">
-          <Shield className={`w-6 h-6 ${isHighRisk(request.toolName) ? 'text-status-error' : 'text-status-warning'}`} />
-          <div className="flex-1">
-            <h2 className="text-xl font-semibold text-text-primary">Permission Required</h2>
-            <p className="text-sm text-text-secondary mt-1">
-              Claude wants to {getToolDescription(request.toolName)} in session: {session?.name || request.sessionId}
-            </p>
-          </div>
-        </div>
-      </ModalHeader>
+      <ModalHeader
+        title="Permission Required"
+        icon={<Shield className={`w-6 h-6 ${isHighRisk(request.toolName) ? 'text-status-error' : 'text-status-warning'}`} />}
+        description={<>Claude wants to {getToolDescription(request.toolName)} in session: {session?.name || request.sessionId}</>}
+        onClose={() => handleDeny()}
+      />
         
       <ModalBody className="space-y-6">
           <div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, memo, forwardRef, useImperativeHandle, useRef, useCallback, useId } from 'react';
 import { DiffView, DiffModeEnum } from '@git-diff-view/react';
 import type { DiffHighlighter } from '@git-diff-view/shiki';
 import { getDiffViewHighlighter } from '@git-diff-view/shiki';
@@ -40,6 +40,7 @@ const FileAccordion = memo<FileAccordionProps>(({
   highlighter,
   onOpenInEditor,
 }) => {
+  const contentId = useId();
   const hasHunks = file.rawDiff.includes('@@');
   const diffData = useMemo(() => {
     if (!isExpanded || file.isBinary || !hasHunks) return null;
@@ -53,11 +54,16 @@ const FileAccordion = memo<FileAccordionProps>(({
   return (
     <div id={`file-${index}`} className="border-b border-border-primary">
       {/* Clickable header */}
-      <div
-        className="group px-4 py-2.5 bg-surface-secondary hover:bg-surface-hover cursor-pointer transition-colors flex items-center justify-between"
-        onClick={onToggle}
-      >
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="group relative px-4 py-2.5 bg-surface-secondary hover:bg-surface-hover transition-colors flex items-center justify-between">
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          aria-controls={contentId}
+          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} diff for ${file.path}`}
+          onClick={onToggle}
+          className="absolute inset-0 z-0 rounded focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+        />
+        <div className="relative z-10 pointer-events-none flex items-center gap-2 min-w-0">
           {isExpanded
             ? <ChevronDown className="w-4 h-4 flex-shrink-0 text-text-tertiary" />
             : <ChevronRight className="w-4 h-4 flex-shrink-0 text-text-tertiary" />}
@@ -76,7 +82,7 @@ const FileAccordion = memo<FileAccordionProps>(({
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="relative z-10 pointer-events-none flex items-center gap-2 flex-shrink-0">
           {file.additions > 0 && (
             <span className="text-xs text-status-success font-semibold">+{file.additions}</span>
           )}
@@ -85,9 +91,10 @@ const FileAccordion = memo<FileAccordionProps>(({
           )}
           {file.type !== 'deleted' && onOpenInEditor ? (
             <button
+              type="button"
               onClick={(e) => { e.stopPropagation(); onOpenInEditor(file.path); }}
-              title="Open in Editor"
-              className="p-1 rounded hover:bg-surface-hover opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label={`Open ${file.path} in Editor`}
+              className="pointer-events-auto p-1 rounded hover:bg-surface-hover opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
             >
               <ExternalLink className="w-3.5 h-3.5 text-text-tertiary" />
             </button>
@@ -99,7 +106,7 @@ const FileAccordion = memo<FileAccordionProps>(({
 
       {/* Expanded content */}
       {isExpanded && (
-        <div className="border-t border-border-primary">
+        <div id={contentId} className="border-t border-border-primary">
           {file.isBinary ? (
             <div className="p-4 text-text-secondary text-sm">Binary file</div>
           ) : diffData && diffData.hunks.length > 0 ? (

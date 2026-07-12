@@ -5,6 +5,7 @@ import { Button } from './ui/Button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { isMac } from '../utils/platformUtils';
+import { LiveRegion } from './ui/LiveRegion';
 
 interface UpdateDialogProps {
   isOpen: boolean;
@@ -300,6 +301,16 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
     return formatBytes(bytesPerSecond) + '/s';
   };
   const isUpdateBusy = updateState === 'checking' || updateState === 'available' || updateState === 'downloading' || updateState === 'installing';
+  const progressMilestone = downloadProgress ? Math.floor(downloadProgress.percent / 10) * 10 : 0;
+  const statusAnnouncement = message ?? ({
+    idle: '',
+    checking: 'Checking for updates',
+    available: 'Update available',
+    downloading: `Downloading update: ${progressMilestone}%`,
+    downloaded: 'Update downloaded',
+    installing: 'Installing update',
+    error: '',
+  } satisfies Record<UpdateState, string>)[updateState];
 
   const renderMacUpdateActions = () => (
     <div className="space-y-4">
@@ -371,12 +382,12 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
       closeOnEscape={!isUpdateBusy}
       closeOnOverlayClick={!isUpdateBusy}
     >
-      <ModalHeader onClose={isUpdateBusy ? undefined : onClose}>
-        <div className="flex items-center gap-3">
-          <Download className="w-6 h-6 text-interactive" />
-          <h2 className="text-xl font-semibold text-text-primary">Software Update</h2>
-        </div>
-      </ModalHeader>
+      <LiveRegion>{statusAnnouncement}</LiveRegion>
+      <ModalHeader
+        title="Software Update"
+        icon={<Download className="w-6 h-6 text-interactive" />}
+        onClose={isUpdateBusy ? undefined : onClose}
+      />
 
       <ModalBody className="space-y-6">
           {versionInfo && (
@@ -551,7 +562,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                 )}
 
                 {/* Error Details */}
-                <div className="bg-status-error/10 border border-status-error/30 rounded-lg p-4">
+              <div role="alert" className="bg-status-error/10 border border-status-error/30 rounded-lg p-4">
                   <div className="flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-status-error mt-0.5" />
                     <div className="flex-1">

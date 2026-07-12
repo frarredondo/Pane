@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useId } from 'react';
 import { CheckCircle2, Circle, ChevronRight, GitBranch, FileCode } from 'lucide-react';
 import { useSession } from '../../contexts/SessionContext';
 import { panelApi } from '../../services/panelApi';
@@ -23,6 +23,7 @@ interface SetupTasksPanelProps {
 }
 
 const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) => {
+  const disclosureIdPrefix = useId();
   const sessionContext = useSession();
   const [tasksStatus, setTasksStatus] = useState<Record<string, boolean>>({});
   const [isChecking, setIsChecking] = useState(false);
@@ -363,6 +364,7 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
           {setupTasks.map(task => {
             const isComplete = tasksStatus[task.id] || false;
             const isExpanded = expandedTask === task.id;
+            const disclosureId = `${disclosureIdPrefix}-${task.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
             return (
               <div
@@ -376,7 +378,10 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
                 `}
               >
                 <button
+                  type="button"
                   onClick={() => setExpandedTask(isExpanded ? null : task.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={disclosureId}
                   className="w-full px-4 py-3 flex items-center gap-3 hover:bg-surface-hover transition-colors rounded-t-lg"
                 >
                   {/* Status icon */}
@@ -414,7 +419,7 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
 
                 {/* Expanded content */}
                 {isExpanded && (
-                  <div className="px-4 pb-4 border-t border-border-secondary">
+                  <div id={disclosureId} className="px-4 pb-4 border-t border-border-secondary">
                     <p className="mt-3 text-sm text-text-secondary">
                       {task.description}
                     </p>

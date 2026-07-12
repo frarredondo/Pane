@@ -102,9 +102,11 @@ const CommitRow = memo(function CommitRow({
   const date = new Date(entry.committerDate);
   const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   const hasStats = entry.filesChanged != null && entry.filesChanged > 0;
+  const Row = onClick ? 'button' : 'div';
 
   const row = (
-      <div
+      <Row
+        {...(onClick ? { type: 'button' as const } : {})}
         className={`flex items-stretch gap-1.5 w-full text-left rounded-sm min-w-0 ${layout === 'wide' ? (onClick ? 'hover:bg-surface-secondary cursor-pointer transition-colors' : '') : `hover:bg-surface-secondary ${onClick ? 'cursor-pointer' : 'cursor-default'} transition-colors`}`}
         onClick={onClick ? () => onClick(entry.hash) : undefined}
       >
@@ -178,7 +180,7 @@ const CommitRow = memo(function CommitRow({
             </>
           )}
         </div>
-      </div>
+      </Row>
   );
 
   if (layout === 'wide') return row;

@@ -65,6 +65,7 @@ const ExecutionList: React.FC<ExecutionListProps> = memo(({
           Commits <span className="text-text-muted">{executions.filter(e => e.id !== 0).length}</span>
         </span>
         <button
+          type="button"
           onClick={handleSelectAll}
           className="text-[10px] text-text-muted hover:text-interactive transition-colors"
         >
@@ -84,14 +85,20 @@ const ExecutionList: React.FC<ExecutionListProps> = memo(({
             <div
               key={execution.id}
               className={`
-                group flex items-stretch gap-2 px-3 cursor-pointer transition-colors
+                group relative flex items-stretch gap-2 px-3 transition-colors
                 ${isSelected ? 'bg-interactive/10 border-l-2 border-l-interactive' : 'border-l-2 border-l-transparent hover:bg-surface-hover'}
                 ${isUncommitted ? 'bg-status-warning/5' : ''}
               `}
-              onClick={(e) => handleCommitClick(execution.id, e)}
             >
+              <button
+                type="button"
+                aria-pressed={isSelected}
+                aria-label={`Select ${isUncommitted ? 'uncommitted changes' : execution.commit_message || execution.prompt_text || `commit ${execution.execution_sequence}`}`}
+                onClick={(event) => handleCommitClick(execution.id, event)}
+                className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+              />
               {/* Graph rail: vertical line with commit node */}
-              <div className="flex flex-col items-center flex-shrink-0 w-3.5">
+              <div className="relative z-10 pointer-events-none flex flex-col items-center flex-shrink-0 w-3.5">
                 <div className={`w-px flex-1 ${isFirst ? 'bg-transparent' : 'bg-border-secondary'}`} />
                 <GitCommitHorizontal
                   className={`w-3.5 h-3.5 flex-shrink-0 rotate-90 ${
@@ -102,7 +109,7 @@ const ExecutionList: React.FC<ExecutionListProps> = memo(({
               </div>
 
               {/* Content */}
-              <div className="flex-1 min-w-0 py-1.5">
+              <div className="relative z-10 pointer-events-none flex-1 min-w-0 py-1.5">
                 {/* Message + hash */}
                 <div className="flex items-baseline gap-1.5 min-w-0">
                   <span
@@ -133,9 +140,10 @@ const ExecutionList: React.FC<ExecutionListProps> = memo(({
                       <span>No changes</span>
                     )}
                   </div>
-                  <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                  <div className="pointer-events-auto flex flex-col items-end gap-0.5 flex-shrink-0">
                     {isUncommitted && onCommit && execution.stats_files_changed > 0 && (
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); onCommit(); }}
                         className="text-[10px] px-1.5 py-0.5 rounded text-status-success hover:bg-status-success/15 transition-colors font-medium"
                       >
@@ -144,6 +152,7 @@ const ExecutionList: React.FC<ExecutionListProps> = memo(({
                     )}
                     {isUncommitted && onRestore && execution.stats_files_changed > 0 && (
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); onRestore(); }}
                         className="text-[10px] px-1.5 py-0.5 rounded text-status-warning hover:bg-status-warning/15 transition-colors font-medium"
                         title="Restore all uncommitted changes"
@@ -153,9 +162,10 @@ const ExecutionList: React.FC<ExecutionListProps> = memo(({
                     )}
                     {onRevert && !isUncommitted && execution.after_commit_hash && execution.after_commit_hash !== 'UNCOMMITTED' && (
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); onRevert(execution.after_commit_hash!); }}
-                        className="text-[10px] p-0.5 rounded text-text-muted hover:text-status-error hover:bg-status-error/10 transition-colors opacity-0 group-hover:opacity-100"
-                        title="Revert this commit"
+                        className="text-[10px] p-0.5 rounded text-text-muted hover:text-status-error hover:bg-status-error/10 transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                        aria-label="Revert this commit"
                       >
                         <RotateCcw className="w-2.5 h-2.5" />
                       </button>

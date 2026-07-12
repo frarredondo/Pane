@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useEffect, useId, useRef } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from '../../utils/cn';
 import { X } from 'lucide-react';
+import { PortalContainerProvider } from '../../contexts/PortalContainerContext';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -10,14 +12,17 @@ export interface ModalProps {
   closeOnOverlayClick?: boolean;
   closeOnEscape?: boolean;
   showCloseButton?: boolean;
-  ariaLabel?: string;
   className?: string;
+  ariaLabel?: string;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
+  restoreFocusOnClose?: boolean;
 }
 
-const ModalTitleContext = createContext<string | undefined>(undefined);
-const modalStack: HTMLDivElement[] = [];
-let openModalCount = 0;
-let originalBodyOverflow = '';
+function canReceiveFocus(element: HTMLElement | null): element is HTMLElement {
+  if (!element?.isConnected) return false;
+  if (element.matches(':disabled, [aria-disabled="true"]')) return false;
+  return true;
+}
 
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -27,186 +32,106 @@ export const Modal: React.FC<ModalProps> = ({
   closeOnOverlayClick = true,
   closeOnEscape = true,
   showCloseButton = true,
-  ariaLabel,
   className,
+  ariaLabel,
+  initialFocusRef,
+  restoreFocusOnClose = true,
 }) => {
-  const modalRef = useRef<HTMLDivElement>(null);
-  const mouseDownTargetRef = useRef<EventTarget | null>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  const titleId = useId();
-  
-  // Handle escape key
-  useEffect(() => {
-    if (!isOpen || !closeOnEscape) return;
-    
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && modalStack.at(-1) === modalRef.current) {
-        onClose();
-      }
-    };
-    
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose, closeOnEscape]);
-  
-  // Lock body scroll when modal is open
-  useEffect(() => {
-    if (!isOpen) return;
-    if (openModalCount === 0) originalBodyOverflow = document.body.style.overflow;
-    openModalCount += 1;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      openModalCount = Math.max(0, openModalCount - 1);
-      if (openModalCount === 0) document.body.style.overflow = originalBodyOverflow;
-    };
-  }, [isOpen]);
-  
-  // Focus management and restoration.
-  useEffect(() => {
-    if (!isOpen) return;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const didRestoreRef = useRef(false);
+  const restoreFocusRef = useRef(restoreFocusOnClose);
+  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null);
 
-    previouslyFocusedRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const modal = modalRef.current;
-    const previousModal = modalStack.at(-1);
-    if (previousModal) {
-      previousModal.inert = true;
-      previousModal.setAttribute('aria-hidden', 'true');
+  restoreFocusRef.current = restoreFocusOnClose;
+
+  const restoreOpener = () => {
+    if (didRestoreRef.current || !restoreFocusRef.current) return;
+
+    const activeModal = document.activeElement?.closest('[aria-modal="true"]');
+    if (activeModal && activeModal !== contentRef.current) return;
+
+    const opener = openerRef.current;
+    if (canReceiveFocus(opener)) {
+      didRestoreRef.current = true;
+      opener.focus();
     }
-    if (modal) modalStack.push(modal);
-    const keepFocusInTopModal = (event: FocusEvent) => {
-      const target = event.target;
-      if (
-        !modal
-        || modalStack.at(-1) !== modal
-        || !(target instanceof HTMLElement)
-        || modal.contains(target)
-        || target.closest('[data-radix-popper-content-wrapper]')
-      ) return;
-      const firstFocusable = modal.querySelector<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      (firstFocusable ?? modal).focus();
-    };
-    document.addEventListener('focusin', keepFocusInTopModal);
-    const timer = setTimeout(() => {
-      const firstFocusable = modalRef.current?.querySelector<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      (firstFocusable ?? modalRef.current)?.focus();
-    }, 50);
+  };
 
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('focusin', keepFocusInTopModal);
-      const index = modal ? modalStack.lastIndexOf(modal) : -1;
-      if (index >= 0) modalStack.splice(index, 1);
-      const nextModal = modalStack.at(-1);
-      if (nextModal) {
-        nextModal.inert = false;
-        nextModal.removeAttribute('aria-hidden');
-      }
-      window.setTimeout(() => previouslyFocusedRef.current?.focus(), 0);
-    };
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    openerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    didRestoreRef.current = false;
   }, [isOpen]);
-  
-  if (!isOpen) return null;
   
   const sizeClasses = {
     sm: 'max-w-md',
     md: 'max-w-lg',
     lg: 'max-w-2xl',
     xl: 'max-w-4xl',
-    full: 'max-w-full mx-4',
-  };
-  
-  const handleOverlayMouseDown = (e: React.MouseEvent) => {
-    // Store where the mouse down occurred
-    mouseDownTargetRef.current = e.target;
-  };
-  
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    // If click target was removed from DOM (e.g. portal dropdown closed), don't close
-    if (e.target instanceof Node && !document.body.contains(e.target)) return;
-
-    // Check if the click target is the modal content or its children
-    const modalContent = modalRef.current;
-    const isClickInsideModal = modalContent && e.target && e.target instanceof Node && modalContent.contains(e.target);
-    
-    // Only close if:
-    // 1. closeOnOverlayClick is enabled
-    // 2. The click is not inside the modal content
-    // 3. The mousedown also started outside the modal content
-    if (closeOnOverlayClick && !isClickInsideModal) {
-      const wasMouseDownInsideModal = modalContent && mouseDownTargetRef.current && mouseDownTargetRef.current instanceof Node && modalContent.contains(mouseDownTargetRef.current);
-      if (!wasMouseDownInsideModal) {
-        onClose();
-      }
-    }
-    // Reset the ref after handling
-    mouseDownTargetRef.current = null;
-  };
-
-  const handleModalKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Tab' || modalStack.at(-1) !== modalRef.current) return;
-    const focusable = Array.from(modalRef.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ) ?? []).filter((element) => element.offsetParent !== null);
-    if (focusable.length === 0) {
-      event.preventDefault();
-      modalRef.current?.focus();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    full: 'max-w-full',
   };
   
   return (
-    <div
-      className="fixed inset-0 z-modal-backdrop flex items-center justify-center p-4 overflow-y-auto"
-      onMouseDown={handleOverlayMouseDown}
-      onClick={handleOverlayClick}
-    >
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-modal-overlay backdrop-blur-sm pointer-events-none" aria-hidden="true" />
-      
-      {/* Modal */}
-      <div
-        ref={modalRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-        aria-labelledby={ariaLabel ? undefined : titleId}
-        tabIndex={-1}
-        onKeyDown={handleModalKeyDown}
-        className={cn(
-          'relative bg-bg-primary rounded-modal shadow-modal w-full max-h-[90vh] overflow-hidden flex flex-col',
-          sizeClasses[size],
-          'animate-fadeIn',
-          className
-        )}
-      >
-        {showCloseButton && (
-          <div className="absolute top-4 right-4 z-10">
-            <button
-              type="button"
-              aria-label="Close modal"
-              onClick={onClose}
-              className="text-text-tertiary hover:text-text-secondary transition-colors p-1 rounded"
+    <Dialog.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-modal-backdrop bg-modal-overlay backdrop-blur-sm" />
+        <Dialog.Content
+          ref={contentRef}
+          aria-modal="true"
+          aria-describedby={undefined}
+          className={cn(
+            'fixed inset-0 z-modal m-auto h-fit w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)] outline-none',
+            sizeClasses[size],
+          )}
+          onOpenAutoFocus={(event) => {
+            const target = initialFocusRef?.current ?? null;
+            if (canReceiveFocus(target)) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreOpener();
+          }}
+          onEscapeKeyDown={(event) => {
+            if (!closeOnEscape) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (!closeOnOverlayClick) event.preventDefault();
+          }}
+        >
+          {ariaLabel && <Dialog.Title className="sr-only">{ariaLabel}</Dialog.Title>}
+          <PortalContainerProvider value={portalContainer}>
+            <div
+              className={cn(
+                'relative bg-bg-primary rounded-modal shadow-modal w-full max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col animate-fadeIn',
+                className,
+              )}
             >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        )}
-        <ModalTitleContext.Provider value={titleId}>{children}</ModalTitleContext.Provider>
-      </div>
-    </div>
+              {showCloseButton && (
+                <div className="absolute top-4 right-4 z-10">
+                  <button
+                    type="button"
+                    aria-label="Close modal"
+                    onClick={onClose}
+                    className="text-text-tertiary hover:text-text-secondary transition-colors p-1 rounded"
+                  >
+                    <X className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+              {children}
+            </div>
+            <div ref={setPortalContainer} className="fixed inset-0 pointer-events-none" />
+          </PortalContainerProvider>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };
 
@@ -214,15 +139,15 @@ Modal.displayName = 'Modal';
 
 // Modal Header component
 export interface ModalHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
-  title?: string;
+  title: string;
   icon?: React.ReactNode;
+  description?: React.ReactNode;
+  actions?: React.ReactNode;
   onClose?: () => void;
-  children?: React.ReactNode;
 }
 
 export const ModalHeader = React.forwardRef<HTMLDivElement, ModalHeaderProps>(
-  ({ className, title, icon, onClose, children, ...props }, ref) => {
-    const titleId = useContext(ModalTitleContext);
+  ({ className, title, icon, description, actions, onClose, ...props }, ref) => {
     return (
       <div
         ref={ref}
@@ -232,21 +157,29 @@ export const ModalHeader = React.forwardRef<HTMLDivElement, ModalHeaderProps>(
         )}
         {...props}
       >
-        <div className="flex items-center gap-2">
-          {icon && <div className="text-text-secondary">{icon}</div>}
-          <h2 id={titleId} className="text-heading-2 text-text-primary">
-            {title || children}
-          </h2>
+        <div className="flex min-w-0 items-center gap-2">
+          {icon && <div className="text-text-secondary" aria-hidden="true">{icon}</div>}
+          <div className="min-w-0">
+            <Dialog.Title className="text-heading-2 text-text-primary">
+              {title}
+            </Dialog.Title>
+            {description && <div className="mt-1 text-sm text-text-secondary">{description}</div>}
+          </div>
         </div>
-        {onClose && (
-          <button
-            type="button"
-            aria-label="Close modal"
-            onClick={onClose}
-            className="text-text-tertiary hover:text-text-secondary transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+        {(actions || onClose) && (
+          <div className="ml-4 flex flex-shrink-0 items-center gap-2">
+            {actions}
+            {onClose && (
+              <button
+                type="button"
+                aria-label="Close modal"
+                onClick={onClose}
+                className="text-text-tertiary hover:text-text-secondary transition-colors"
+              >
+                <X className="w-5 h-5" aria-hidden="true" />
+              </button>
+            )}
+          </div>
         )}
       </div>
     );

@@ -8,6 +8,7 @@ import { PanelContainer } from './panels/PanelContainer';
 import { Button } from './ui/Button';
 import { ClaudeIcon, OpenAIIcon } from './ui/BrandIcons';
 import { cn } from '../utils/cn';
+import { LiveRegion } from './ui/LiveRegion';
 
 const PANE_CHAT_AGENT_OPTIONS: Array<{
   id: PaneChatAgent;
@@ -23,6 +24,7 @@ export function PaneChatView() {
   const [isLoading, setIsLoading] = useState(true);
   const [switchingAgent, setSwitchingAgent] = useState<PaneChatAgent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusAnnouncement, setStatusAnnouncement] = useState('');
 
   const loadPaneChat = useCallback(async () => {
     setIsLoading(true);
@@ -52,6 +54,7 @@ export function PaneChatView() {
 
     setSwitchingAgent(agent);
     setError(null);
+    setStatusAnnouncement(`Switching Pane Chat to ${agent === 'claude' ? 'Claude' : 'Codex'}`);
 
     try {
       const response = await API.paneChat.setAgent(agent);
@@ -59,6 +62,7 @@ export function PaneChatView() {
         throw new Error(response.error || 'Failed to switch Pane Chat agent');
       }
       setState(response.data);
+      setStatusAnnouncement(`Pane Chat is now using ${agent === 'claude' ? 'Claude' : 'Codex'}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to switch Pane Chat agent');
     } finally {
@@ -69,8 +73,8 @@ export function PaneChatView() {
   if (isLoading && !state) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
-        <div className="flex items-center gap-2 text-sm">
-          <RefreshCw className="h-4 w-4 animate-spin" />
+        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
+          <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
           <span>Opening Pane Chat...</span>
         </div>
       </div>
@@ -83,7 +87,7 @@ export function PaneChatView() {
         <div className="max-w-md text-center">
           <Terminal className="mx-auto mb-3 h-8 w-8 text-text-tertiary" />
           <h2 className="text-base font-semibold text-text-primary">Pane Chat did not open</h2>
-          <p className="mt-2 text-sm text-text-secondary">{error ?? 'Unknown error'}</p>
+          <p role="alert" className="mt-2 text-sm text-text-secondary">{error ?? 'Unknown error'}</p>
           <Button
             type="button"
             variant="secondary"
@@ -101,45 +105,49 @@ export function PaneChatView() {
 
   return (
     <div className="pane-chat-shell flex-1 flex flex-col overflow-hidden bg-bg-primary">
+      <LiveRegion>{statusAnnouncement}</LiveRegion>
       <div className="flex h-11 flex-shrink-0 items-center justify-between border-b border-border-primary px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
           <h1 className="truncate text-sm font-semibold text-text-primary">Pane Chat</h1>
           {error && (
-            <span className="truncate text-xs text-status-error">{error}</span>
+            <span role="alert" className="truncate text-xs text-status-error">{error}</span>
           )}
         </div>
-        <div
-          role="tablist"
-          aria-label="Pane Chat agent"
+        <fieldset
           className="flex h-8 flex-shrink-0 items-center rounded-md border border-border-secondary bg-surface-secondary p-0.5"
         >
+          <legend className="sr-only">Pane Chat agent</legend>
           {PANE_CHAT_AGENT_OPTIONS.map((option) => {
             const Icon = switchingAgent === option.id ? RefreshCw : option.icon;
             const selected = state.agent === option.id;
 
             return (
-              <button
+              <label
                 key={option.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                aria-label={`Use ${option.label} for Pane Chat`}
-                disabled={switchingAgent !== null}
-                onClick={() => void handleAgentChange(option.id)}
                 className={cn(
-                  'inline-flex h-7 min-w-[76px] items-center justify-center gap-1.5 rounded px-2 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-interactive disabled:cursor-not-allowed disabled:opacity-70',
+                  'relative inline-flex h-7 min-w-[76px] cursor-pointer items-center justify-center gap-1.5 rounded px-2 text-xs font-medium transition-colors focus-within:ring-2 focus-within:ring-interactive',
+                  switchingAgent !== null && 'cursor-not-allowed opacity-70',
                   selected
                     ? 'bg-bg-primary text-text-primary shadow-sm'
                     : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
                 )}
               >
+                <input
+                  type="radio"
+                  name="pane-chat-agent"
+                  value={option.id}
+                  checked={selected}
+                  disabled={switchingAgent !== null}
+                  onChange={() => void handleAgentChange(option.id)}
+                  className="sr-only"
+                />
                 <Icon className={cn('h-3.5 w-3.5', switchingAgent === option.id && 'animate-spin')} />
                 <span>{option.label}</span>
-              </button>
+              </label>
             );
           })}
-        </div>
+        </fieldset>
       </div>
 
       <SessionProvider session={state.session}>

@@ -70,7 +70,7 @@ interface HelpProps {
 export default function Help({ isOpen, onClose }: HelpProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl" showCloseButton={false}>
-      <ModalHeader>Pane Help</ModalHeader>
+      <ModalHeader title="Pane Help" />
       <ModalBody>
         <div className="space-y-8">
             {/* Quick Start */}

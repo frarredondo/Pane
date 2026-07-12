@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, ClipboardPaste, Download, Monitor, Smartphone, Trash2 } from 'lucide-react';
 import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
 
@@ -22,12 +22,14 @@ export function RemoteConnectionScreen({
 }: RemoteConnectionScreenProps) {
   const [code, setCode] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectingProfileId, setConnectingProfileId] = useState<string | null>(null);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectionScreenMode>(() => (
     savedProfiles.length > 0 ? 'connect' : 'menu'
   ));
   const canReadClipboard = typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText);
   const mobileInstallPlatform = getMobileInstallPlatform();
+  const connectionErrorId = useId();
 
   useEffect(() => {
     if (savedProfiles.length > 0) {
@@ -61,6 +63,25 @@ export function RemoteConnectionScreen({
     }
   };
 
+  const submitConnectionCode = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleSubmit();
+  };
+
+  const handleProfileConnect = async (profile: RemotePaneConnectionProfile) => {
+    setIsConnecting(true);
+    setConnectingProfileId(profile.id);
+    setClipboardError(null);
+    try {
+      await onConnectProfile(profile);
+    } catch {
+      // The parent owns the visible error state.
+    } finally {
+      setIsConnecting(false);
+      setConnectingProfileId(null);
+    }
+  };
+
   const showFirstRunMenu = savedProfiles.length === 0 && mode === 'menu';
   const showBackToMenu = savedProfiles.length === 0 && mode === 'connect';
 
@@ -69,7 +90,7 @@ export function RemoteConnectionScreen({
       <section className="w-full max-w-sm sm:max-w-2xl">
         <div className="mb-6 flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-secondary text-interactive">
-            <Monitor className="h-5 w-5" />
+            <Monitor className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-semibold text-text-primary">Remote Pane</h1>
@@ -91,14 +112,14 @@ export function RemoteConnectionScreen({
               >
                 <div>
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-md bg-surface-secondary text-interactive">
-                    <ClipboardPaste className="h-5 w-5" />
+                    <ClipboardPaste className="h-5 w-5" aria-hidden="true" />
                   </div>
                   <h2 className="text-base font-semibold text-text-primary">Connect with a code</h2>
                   <p className="mt-2 text-sm leading-5 text-text-secondary">Paste a pane-remote:// code from an existing remote host.</p>
                 </div>
                 <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-interactive">
                   Open connection form
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                 </span>
               </button>
 
@@ -110,27 +131,34 @@ export function RemoteConnectionScreen({
               >
                 <div>
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-md bg-surface-secondary text-interactive">
-                    <BookOpen className="h-5 w-5" />
+                    <BookOpen className="h-5 w-5" aria-hidden="true" />
                   </div>
                   <h2 className="text-base font-semibold text-text-primary">Set up a remote host</h2>
                   <p className="mt-2 text-sm leading-5 text-text-secondary">Run Pane on a VM, WSL box, server, or desktop and create a connection code.</p>
                 </div>
                 <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-interactive">
                   Open setup guide
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                 </span>
               </a>
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-border-primary bg-surface-primary p-5 shadow-lg sm:p-6">
+          <form
+            onSubmit={submitConnectionCode}
+            aria-busy={isConnecting}
+            className="rounded-lg border border-border-primary bg-surface-primary p-5 shadow-lg sm:p-6"
+          >
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {isConnecting ? connectingProfileId ? 'Connecting to saved profile' : 'Connecting to remote Pane' : ''}
+            </div>
             {showBackToMenu && (
               <button
                 type="button"
                 onClick={() => setMode('menu')}
                 className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-text-secondary hover:text-text-primary"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                 Back
               </button>
             )}
@@ -142,12 +170,14 @@ export function RemoteConnectionScreen({
               id="connection-code"
               value={code}
               onChange={event => setCode(event.target.value)}
+              aria-invalid={Boolean(error || clipboardError)}
+              aria-describedby={error || clipboardError ? connectionErrorId : undefined}
               placeholder="pane-remote://..."
               className="ph-no-capture min-h-32 max-h-52 w-full resize-y rounded-md border border-border-primary bg-bg-secondary p-3 font-mono text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-border-focus"
             />
 
             {(error || clipboardError) && (
-              <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+              <div id={connectionErrorId} role="alert" className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
                 <p>{error || clipboardError}</p>
                 {error && (
                   <p className="mt-2 text-xs text-red-500/90">
@@ -159,12 +189,12 @@ export function RemoteConnectionScreen({
 
             <div className="mt-4 flex justify-stretch sm:justify-end">
               <button
-                type="button"
-                onClick={handleSubmit}
+                type="submit"
                 disabled={isConnecting || (!code.trim() && !canReadClipboard)}
+                aria-busy={isConnecting && connectingProfileId === null}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-interactive px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:py-2"
               >
-                {code.trim() ? <ArrowRight className="h-4 w-4" /> : <ClipboardPaste className="h-4 w-4" />}
+                {code.trim() ? <ArrowRight className="h-4 w-4" aria-hidden="true" /> : <ClipboardPaste className="h-4 w-4" aria-hidden="true" />}
                 {isConnecting ? 'Connecting...' : code.trim() ? 'Import & Connect' : 'Paste & Connect'}
               </button>
             </div>
@@ -182,7 +212,9 @@ export function RemoteConnectionScreen({
                       <div className="flex shrink-0 items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => { void onConnectProfile(profile).catch(() => {}); }}
+                          onClick={() => { void handleProfileConnect(profile); }}
+                          disabled={isConnecting}
+                          aria-busy={connectingProfileId === profile.id}
                           className="min-w-0 flex-1 rounded-md bg-interactive px-3 py-2 text-sm font-semibold text-white hover:opacity-90 sm:flex-none sm:py-1.5"
                         >
                           Connect
@@ -190,10 +222,11 @@ export function RemoteConnectionScreen({
                         <button
                           type="button"
                           onClick={() => onForgetProfile(profile.id)}
+                          disabled={isConnecting}
                           className="rounded-md p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
                           aria-label={`Forget ${profile.label}`}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
                         </button>
                       </div>
                     </div>
@@ -201,7 +234,7 @@ export function RemoteConnectionScreen({
                 </div>
               </div>
             )}
-          </div>
+          </form>
         )}
       </section>
     </main>
@@ -215,12 +248,12 @@ function MobileInstallPrompt({ platform }: { platform: MobileInstallPlatform }) 
     <div className="rounded-lg border border-border-primary bg-surface-primary p-4 shadow-lg">
       <div className="flex gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-secondary text-interactive">
-          <Smartphone className="h-5 w-5" />
+          <Smartphone className="h-5 w-5" aria-hidden="true" />
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-text-primary">Install Remote Pane</h2>
-            <Download className="h-4 w-4 text-interactive" />
+            <Download className="h-4 w-4 text-interactive" aria-hidden="true" />
           </div>
           <ol className="mt-2 list-inside list-decimal space-y-1 text-sm leading-5 text-text-secondary">
             {steps.map(step => (

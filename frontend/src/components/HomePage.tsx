@@ -126,10 +126,10 @@ function OpenProjectCard({
   return (
     <Dropdown
       trigger={
-        <div className={actionCardClassName}>
+        <button type="button" className={actionCardClassName}>
           <FolderOpenIcon className="w-8 h-8 text-text-secondary" />
           <span className="text-sm font-medium text-text-primary">Open Project</span>
-        </div>
+        </button>
       }
       items={projects.map(project => ({
         id: String(project.id),
@@ -340,6 +340,7 @@ export function HomePage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  aria-label="Decrease UI scale"
                   onClick={() => void handleScaleChange(-0.1)}
                   disabled={uiScale <= 0.8}
                   className="rounded-md bg-surface-tertiary p-1 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
@@ -349,6 +350,7 @@ export function HomePage() {
                 <span className="w-10 text-center text-sm text-text-secondary">{uiScale.toFixed(1)}x</span>
                 <button
                   type="button"
+                  aria-label="Increase UI scale"
                   onClick={() => void handleScaleChange(0.1)}
                   disabled={uiScale >= 1.5}
                   className="rounded-md bg-surface-tertiary p-1 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"

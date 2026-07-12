@@ -4,6 +4,7 @@ import { createDefaultCloudVmState } from '../../../shared/types/cloud';
 import { useCloudStore } from '../stores/cloudStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { openCloudSetupTerminal } from '../services/cloudSetupTerminal';
+import { LiveRegion } from './ui/LiveRegion';
 
 const DEFAULT_CLOUD_STATE = createDefaultCloudVmState();
 
@@ -208,12 +209,23 @@ export function CloudWidget() {
     if (tunnelConnecting) return 'Connecting tunnel...';
     return 'Loading...';
   };
+  const cloudAnnouncement = isTransitioning || daemonBootstrapping || daemonConnectionReconnecting || tunnelConnecting || loading
+    ? getTransitionLabel()
+    : daemonConnected
+      ? 'Cloud runtime connected'
+      : tunnelReady
+        ? 'Cloud tunnel connected'
+        : isOff
+          ? 'Cloud VM stopped'
+          : '';
 
   return (
-    <div className="fixed bottom-4 right-4 flex items-center gap-1.5" style={{ zIndex: 1300 }}>
+    <div aria-busy={isTransitioning || loading} className="fixed bottom-4 right-4 flex items-center gap-1.5" style={{ zIndex: 1300 }}>
+      <LiveRegion>{cloudAnnouncement}</LiveRegion>
       {/* Error tooltip */}
       {vmState.error && (
         <div
+          role="alert"
           className="px-2 py-1 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 max-w-72"
           title={vmState.error}
         >
@@ -224,7 +236,7 @@ export function CloudWidget() {
       {/* Transitioning state (VM starting/stopping or tunnel connecting) */}
       {(isTransitioning || daemonBootstrapping || daemonConnectionReconnecting || tunnelConnecting || loading) && (
         <div className="flex items-center gap-2 px-3 py-2 bg-bg-secondary/95 backdrop-blur-sm border border-border-primary rounded-xl shadow-lg">
-          <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />
+          <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin text-yellow-400" />
           <span className="text-xs text-text-secondary">
             {getTransitionLabel()}
           </span>

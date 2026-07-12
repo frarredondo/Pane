@@ -4,6 +4,7 @@ import { cn } from '../../utils/cn';
 import { Kbd } from '../ui/Kbd';
 import type { TerminalSuggestion, PasteMode } from '../../services/terminalInterceptor/types';
 import { LINE_COUNT_PRESETS } from '../../services/terminalInterceptor/types';
+import { LiveRegion } from '../ui/LiveRegion';
 
 interface InterceptorDropdownProps {
   visible: boolean;
@@ -70,9 +71,15 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
     selectedItemRef.current.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex, visible]);
 
-  if (!visible) return null;
+  const selectedTerminal = terminals[selectedIndex];
+  const announcement = visible && selectedTerminal
+    ? `${selectedTerminal.title}, ${formatPresetLabel(LINE_COUNT_PRESETS[lineCountPresetIndex])} lines, ${pasteMode} mode`
+    : '';
 
-  return createPortal(
+  return (
+    <>
+      <LiveRegion>{announcement}</LiveRegion>
+      {visible && createPortal(
     <div
       ref={containerRef}
       className={cn(
@@ -200,6 +207,8 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
       </div>
     </div>,
     document.body
+      )}
+    </>
   );
 };
 

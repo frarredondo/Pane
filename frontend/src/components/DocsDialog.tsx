@@ -86,6 +86,7 @@ export function DocsDialog({ isOpen, onClose }: DocsDialogProps) {
 
   return (
     <Modal
+      ariaLabel="Pane documentation"
       isOpen={isOpen}
       onClose={onClose}
       size="full"

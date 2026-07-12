@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { cn } from '../../utils/cn';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -18,9 +18,14 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     fullWidth = false,
     icon,
     id,
+    'aria-describedby': ariaDescribedBy,
+    'aria-invalid': ariaInvalid,
     ...props 
   }, ref) => {
-    const inputId = id || `input-${Math.random().toString(36).substr(2, 9)}`;
+    const generatedId = useId();
+    const inputId = id || `input-${generatedId}`;
+    const messageId = error ? `${inputId}-error` : helperText ? `${inputId}-helper` : undefined;
+    const describedBy = [ariaDescribedBy, messageId].filter(Boolean).join(' ') || undefined;
     
     const baseStyles = 'px-input-x py-input-y bg-bg-primary text-text-primary placeholder:text-text-muted border rounded-input transition-all duration-normal focus:outline-none focus:ring-1 focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -56,8 +61,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               icon && 'pl-10',
               className
             )}
-            aria-invalid={!!error}
-            aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-helper` : undefined}
+            aria-invalid={ariaInvalid ?? !!error}
+            aria-describedby={describedBy}
             {...props}
           />
         </div>
@@ -94,9 +99,14 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     helperText,
     fullWidth = false,
     id,
+    'aria-describedby': ariaDescribedBy,
+    'aria-invalid': ariaInvalid,
     ...props 
   }, ref) => {
-    const textareaId = id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
+    const generatedId = useId();
+    const textareaId = id || `textarea-${generatedId}`;
+    const messageId = error ? `${textareaId}-error` : helperText ? `${textareaId}-helper` : undefined;
+    const describedBy = [ariaDescribedBy, messageId].filter(Boolean).join(' ') || undefined;
     
     const baseStyles = 'px-input-x py-input-y bg-bg-primary text-text-primary placeholder:text-text-muted border rounded-input transition-all duration-normal focus:outline-none focus:ring-1 focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 resize-none';
 
@@ -125,8 +135,8 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             widthStyles,
             className
           )}
-          aria-invalid={!!error}
-          aria-describedby={error ? `${textareaId}-error` : helperText ? `${textareaId}-helper` : undefined}
+          aria-invalid={ariaInvalid ?? !!error}
+          aria-describedby={describedBy}
           {...props}
         />
         {error && (
@@ -158,7 +168,8 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
     id,
     ...props 
   }, ref) => {
-    const checkboxId = id || `checkbox-${Math.random().toString(36).substr(2, 9)}`;
+    const generatedId = useId();
+    const checkboxId = id || `checkbox-${generatedId}`;
     
     return (
       <label htmlFor={checkboxId} className="flex items-center space-x-2 cursor-pointer">

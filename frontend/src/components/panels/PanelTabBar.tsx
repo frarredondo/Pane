@@ -80,6 +80,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const { config, fetchConfig, updateConfig } = useConfigStore();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const addToolButtonRef = useRef<HTMLButtonElement>(null);
   const dropdownMenuRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   // Rename state moved to PanelTabStrip
@@ -258,6 +259,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       case 'Escape':
         e.preventDefault();
         setShowDropdown(false);
+        requestAnimationFrame(() => addToolButtonRef.current?.focus());
         break;
       case 'Tab':
         // Allow tab to close dropdown and move to next element
@@ -400,8 +402,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       {/* Flex container */}
       <div
         className="relative flex items-center min-h-[var(--panel-tab-height)] px-2"
-        role="tablist"
-        aria-label="Panel Tabs"
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
@@ -427,6 +427,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             disabled then because the strip shows a subset and the 1-9 indexes
             would lie. */}
         <PanelTabStrip
+          idNamespace="top"
           panels={primaryGroupPanels ?? sortedPanels}
           activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
           onPanelSelect={handlePanelClick}
@@ -446,6 +447,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>
           <Tooltip content={hotkeyDisplay('open-add-tool') ? <Kbd>{hotkeyDisplay('open-add-tool')}</Kbd> : undefined} side="bottom">
             <button
+              ref={addToolButtonRef}
+              type="button"
               className="inline-flex items-center h-[var(--panel-tab-height)] px-3 text-sm text-text-tertiary hover:text-text-primary hover:bg-surface-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
               onClick={() => setShowDropdown(!showDropdown)}
               onKeyDown={(e) => {
@@ -547,41 +550,40 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 const currentRefIndex = refIndex++;
                 const shortcutDisplay = hotkeyDisplay(`add-tool-custom-${index}`);
                 return (
-                <button
-                  key={`custom-${index}`}
-                  ref={(el) => { dropdownItemsRef.current[currentRefIndex] = el; }}
-                  role="menuitem"
-                  className={menuItemClass}
-                  onClick={() => handleAddPanel('terminal', {
-                    initialCommand: cmd.command,
-                    title: cmd.name
-                  })}
-                  onKeyDown={(e) => {
-                    // Delete or Backspace removes the custom command
-                    if (e.key === 'Delete' || e.key === 'Backspace') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      deleteCustomCommand(index);
-                    }
-                  }}
-                  title={`${cmd.name} (Delete/Backspace to remove)`}
-                >
-                  {getCliBrandIcon(cmd.command, 'w-4 h-4 flex-shrink-0 mt-0.5') || <TerminalSquare className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-                  <span className="ml-2 flex-1 min-w-0">
-                    <span className="block truncate">{cmd.name}</span>
-                    {shortcutDisplay && <Kbd size="xs" variant="muted" className="mt-1 origin-left scale-[0.7]">{shortcutDisplay}</Kbd>}
-                  </span>
+                <div key={`custom-${index}`} role="none" className="flex items-center">
                   <button
-                    className="p-0.5 ml-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteCustomCommand(index);
+                    ref={(el) => { dropdownItemsRef.current[currentRefIndex] = el; }}
+                    type="button"
+                    role="menuitem"
+                    className={menuItemClass}
+                    onClick={() => handleAddPanel('terminal', {
+                      initialCommand: cmd.command,
+                      title: cmd.name
+                    })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Delete' || e.key === 'Backspace') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        deleteCustomCommand(index);
+                      }
                     }}
-                    title="Remove shortcut"
+                    title={`${cmd.name} (Delete/Backspace to remove)`}
+                  >
+                    {getCliBrandIcon(cmd.command, 'w-4 h-4 flex-shrink-0 mt-0.5') || <TerminalSquare className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+                    <span className="ml-2 flex-1 min-w-0">
+                      <span className="block truncate">{cmd.name}</span>
+                      {shortcutDisplay && <Kbd size="xs" variant="muted" className="mt-1 origin-left scale-[0.7]">{shortcutDisplay}</Kbd>}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="p-1 mr-2 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
+                    onClick={() => deleteCustomCommand(index)}
+                    aria-label={`Remove ${cmd.name} shortcut`}
                   >
                     <X className="w-3 h-3" />
                   </button>
-                </button>
+                </div>
               );})}
               {/* Add Custom Command input */}
               {availablePanelTypes.includes('terminal') && (
@@ -666,10 +668,12 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 </span>
               } side="bottom">
               <button
+                type="button"
+                aria-label={resolvedRunScript ? `Run ${resolvedRunScript.command}` : 'Set up run script'}
                 className="inline-flex items-center justify-center h-[var(--panel-tab-height)] px-2.5 rounded text-text-tertiary hover:text-status-success hover:bg-surface-hover transition-colors flex-shrink-0"
                 onClick={handleRunDevServer}
               >
-                <Play className="w-4 h-4" />
+                <Play aria-hidden="true" className="w-4 h-4" />
               </button>
             </Tooltip>
           )}

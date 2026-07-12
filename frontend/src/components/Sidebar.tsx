@@ -217,9 +217,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     startActive();
   }, [refresh, startActive]);
 
-  const closeResourcePopover = useCallback(() => {
+  const closeResourcePopover = useCallback((restoreFocus = false) => {
     setShowResourcePopover(false);
     stopActive();
+    if (restoreFocus) {
+      requestAnimationFrame(() => resourceMenuButtonRef.current?.focus());
+    }
   }, [stopActive]);
 
   const toggleResourceSection = useCallback((id: string) => {
@@ -272,6 +275,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   useEffect(() => {
     if (!showResourcePopover) return;
 
+    const focusFrame = requestAnimationFrame(() => {
+      resourcePopoverRef.current
+        ?.querySelector<HTMLElement>('button:not(:disabled), [tabindex="0"]')
+        ?.focus();
+    });
+
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       if (
@@ -284,6 +293,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
     const timer = setTimeout(() => document.addEventListener('mousedown', handleClickOutside), 0);
     return () => {
+      cancelAnimationFrame(focusFrame);
       clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
     };
@@ -293,7 +303,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     if (!showResourcePopover) return;
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeResourcePopover();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeResourcePopover(true);
+      }
     };
 
     document.addEventListener('keydown', handleEscape);
@@ -665,21 +678,22 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             </Tooltip>
             {version && (
               <div className="flex items-center justify-center gap-1.5 text-xs text-text-tertiary truncate">
-                <span
-                  className="cursor-pointer hover:text-text-secondary transition-colors"
+                <button
+                  type="button"
+                  className="hover:text-text-secondary transition-colors"
                   onClick={onAboutClick}
-                  title="Click to view version details"
+                  aria-label={`About Pane version ${version}`}
                 >
                   v{version}{worktreeName && ` \u00b7 ${worktreeName}`}{gitCommit && ` \u00b7 ${gitCommit}`}
-                </span>
+                </button>
                 <span className="text-border-primary">&middot;</span>
-                <span
-                  className="cursor-pointer hover:text-text-secondary transition-colors"
+                <button
+                  type="button"
+                  className="hover:text-text-secondary transition-colors"
                   onClick={onDocsClick}
-                  title="Open documentation"
                 >
                   Docs
-                </span>
+                </button>
               </div>
             )}
           </div>
@@ -689,6 +703,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       {showResourcePopover && createPortal(
         <div
           ref={resourcePopoverRef}
+          role="dialog"
+          aria-label="Resource Usage"
+          aria-busy={resourceLoading}
+          tabIndex={-1}
           className="bg-surface-primary border border-border-subtle/60 rounded-lg shadow-dropdown-elevated backdrop-blur-sm animate-dropdown-enter overflow-hidden w-[320px] max-w-[calc(100vw-16px)]"
           style={resourcePopoverStyle}
         >
@@ -697,12 +715,13 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               Resource Usage
             </span>
             <button
+              type="button"
               onClick={handleResourceRefresh}
               className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors"
               disabled={resourceLoading}
               aria-label="Refresh resource usage"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${resourceLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw aria-hidden="true" className={`w-3.5 h-3.5 ${resourceLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
 
@@ -724,7 +743,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               <div className="max-h-[400px] overflow-y-auto">
                 <div className="border-b border-border-secondary">
                   <button
+                    type="button"
                     onClick={() => toggleResourceSection('pane-app')}
+                    aria-expanded={expandedResourceSections.has('pane-app')}
+                    aria-controls="resource-pane-app-processes"
                     className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-surface-hover transition-colors"
                   >
                     <div className="flex items-center gap-1.5">
@@ -738,7 +760,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                       <span>{formatMemory(electronTotalMem)}</span>
                     </div>
                   </button>
-                  {expandedResourceSections.has('pane-app') && snapshot.electronProcesses.map(p => (
+                  {expandedResourceSections.has('pane-app') && <div id="resource-pane-app-processes">{snapshot.electronProcesses.map(p => (
                     <div key={p.pid} className="flex items-center justify-between px-3 py-1 pl-8">
                       <span className="text-xs text-text-secondary">{p.label}</span>
                       <div className="flex items-center gap-3 text-xs text-text-tertiary font-mono">
@@ -746,13 +768,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                         <span>{formatMemory(p.memoryMB)}</span>
                       </div>
                     </div>
-                  ))}
+                  ))}</div>}
                 </div>
 
                 {snapshot.sessions.map(sess => (
                   <div key={sess.sessionId} className="border-b border-border-secondary">
                     <button
+                      type="button"
                       onClick={() => toggleResourceSection(sess.sessionId)}
+                      aria-expanded={expandedResourceSections.has(sess.sessionId)}
+                      aria-controls={`resource-session-${sess.sessionId}`}
                       className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-surface-hover transition-colors"
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -766,7 +791,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                         <span>{formatMemory(sess.totalMemoryMB)}</span>
                       </div>
                     </button>
-                    {expandedResourceSections.has(sess.sessionId) && sess.children.map(child => (
+                    {expandedResourceSections.has(sess.sessionId) && <div id={`resource-session-${sess.sessionId}`}>{sess.children.map(child => (
                       <div key={child.pid} className="flex items-center justify-between px-3 py-1 pl-8">
                         <span className="text-xs text-text-secondary truncate">{child.name}</span>
                         <div className="flex items-center gap-3 text-xs text-text-tertiary font-mono flex-shrink-0 ml-2">
@@ -774,7 +799,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                           <span>{formatMemory(child.memoryMB)}</span>
                         </div>
                       </div>
-                    ))}
+                    ))}</div>}
                   </div>
                 ))}
               </div>

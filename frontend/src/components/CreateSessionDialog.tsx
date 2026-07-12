@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { API } from '../utils/api';
 import type { CreateSessionRequest } from '../types/session';
 import type { Project } from '../types/project';
@@ -42,6 +42,8 @@ export function CreateSessionDialog({
   initialFolderId,
   onSessionCreated
 }: CreateSessionDialogProps) {
+  const branchListboxId = useId();
+  const advancedOptionsId = useId();
   const [sessionName, setSessionName] = useState<string>(initialSessionName || '');
   const [sessionCount, setSessionCount] = useState<number>(1);
   const [formData, setFormData] = useState<CreateSessionRequest>({
@@ -400,9 +402,7 @@ export function CreateSessionDialog({
       size="lg"
       closeOnOverlayClick={false}
     >
-      <ModalHeader>
-        New Pane{projectName && ` in ${projectName}`}
-      </ModalHeader>
+      <ModalHeader title={`New Pane${projectName ? ` in ${projectName}` : ''}`} />
 
       <ModalBody className="p-0">
         <div className="flex-1 overflow-y-auto">
@@ -438,6 +438,13 @@ export function CreateSessionDialog({
                       ref={branchInputRef}
                       id="baseBranch"
                       type="text"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={isBranchDropdownOpen}
+                      aria-controls={branchListboxId}
+                      aria-activedescendant={isBranchDropdownOpen && flatFilteredBranches[highlightedBranchIndex]
+                        ? `${branchListboxId}-option-${highlightedBranchIndex}`
+                        : undefined}
                       value={isBranchDropdownOpen ? branchSearch : (formData.baseBranch || '')}
                       onChange={(e) => {
                         setBranchSearch(e.target.value);
@@ -460,6 +467,7 @@ export function CreateSessionDialog({
                     <button
                       type="button"
                       tabIndex={-1}
+                      aria-label={isBranchDropdownOpen ? 'Close branch options' : 'Open branch options'}
                       onClick={() => {
                         setIsBranchDropdownOpen(!isBranchDropdownOpen);
                         if (!isBranchDropdownOpen) {
@@ -476,7 +484,10 @@ export function CreateSessionDialog({
 
                   {isBranchDropdownOpen && (
                     <div
+                      id={branchListboxId}
                       ref={branchListRef}
+                      role="listbox"
+                      aria-label="Branches"
                       className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-md border border-border-primary bg-surface-secondary shadow-lg"
                     >
                       {flatFilteredBranches.length === 0 ? (
@@ -488,15 +499,18 @@ export function CreateSessionDialog({
                           {/* Remote branches group */}
                           {filteredBranches.some(b => b.isRemote) && (
                             <>
-                              <div className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
+                              <div role="presentation" className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
                                 Remote Branches
                               </div>
                               {filteredBranches.filter(b => b.isRemote).map(branch => {
                                 const flatIndex = flatFilteredBranches.indexOf(branch);
                                 return (
                                   <div
+                                    id={`${branchListboxId}-option-${flatIndex}`}
                                     key={branch.name}
                                     data-branch-item
+                                    role="option"
+                                    aria-selected={formData.baseBranch === branch.name}
                                     className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer ${
                                       flatIndex === highlightedBranchIndex
                                         ? 'bg-interactive/10 text-text-primary'
@@ -522,15 +536,18 @@ export function CreateSessionDialog({
                           {/* Local branches group */}
                           {filteredBranches.some(b => !b.isRemote) && (
                             <>
-                              <div className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
+                              <div role="presentation" className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
                                 Local Branches
                               </div>
                               {filteredBranches.filter(b => !b.isRemote).map(branch => {
                                 const flatIndex = flatFilteredBranches.indexOf(branch);
                                 return (
                                   <div
+                                    id={`${branchListboxId}-option-${flatIndex}`}
                                     key={branch.name}
                                     data-branch-item
+                                    role="option"
+                                    aria-selected={formData.baseBranch === branch.name}
                                     className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer ${
                                       flatIndex === highlightedBranchIndex
                                         ? 'bg-interactive/10 text-text-primary'
@@ -604,6 +621,8 @@ export function CreateSessionDialog({
                   setShowAdvanced(newShowAdvanced);
                   savePreferences({ showAdvanced: newShowAdvanced });
                 }}
+                aria-expanded={showAdvanced}
+                aria-controls={advancedOptionsId}
                 variant="ghost"
                 size="sm"
                 className="text-text-secondary hover:text-text-primary"
@@ -615,7 +634,7 @@ export function CreateSessionDialog({
 
             {/* Advanced Options - Collapsible */}
             {showAdvanced && (
-              <div className="px-6 pb-6 border-t border-border-primary pt-5">
+              <div id={advancedOptionsId} className="px-6 pb-6 border-t border-border-primary pt-5">
                 <div className="rounded-lg border border-border-primary overflow-hidden divide-y divide-border-primary">
                   {/* Start Pinned Toggle */}
                   <div className="flex items-center gap-4 px-5 py-4">

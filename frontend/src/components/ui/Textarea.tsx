@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useId } from 'react';
 import { cn } from '../../utils/cn';
 
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
@@ -10,12 +10,29 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, error, label, description, helperText, fullWidth, id, ...props }, ref) => {
+  ({
+    className,
+    error,
+    label,
+    description,
+    helperText,
+    fullWidth = false,
+    id,
+    'aria-describedby': ariaDescribedBy,
+    'aria-invalid': ariaInvalid,
+    ...props
+  }, ref) => {
+    const generatedId = useId();
+    const textareaId = id || `textarea-${generatedId}`;
+    const visibleMessage = error || description || helperText;
+    const messageId = visibleMessage ? `${textareaId}-${error ? 'error' : 'help'}` : undefined;
+    const describedBy = [ariaDescribedBy, messageId].filter(Boolean).join(' ') || undefined;
+
     return (
-      <div className="w-full">
+      <div className={cn(fullWidth && 'w-full')}>
         {label && (
           <label 
-            htmlFor={id}
+            htmlFor={textareaId}
             className="block text-sm font-medium text-text-primary mb-2"
           >
             {label}
@@ -23,7 +40,9 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         
         <textarea
-          id={id}
+          id={textareaId}
+          aria-describedby={describedBy}
+          aria-invalid={ariaInvalid ?? !!error}
           className={cn(
             'w-full px-3 py-2 rounded-md border transition-colors',
             'text-text-primary placeholder-text-tertiary',
@@ -39,19 +58,19 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         />
         
         {error && (
-          <p className="mt-2 text-sm text-status-error">
+          <p id={messageId} role="alert" className="mt-2 text-sm text-status-error">
             {error}
           </p>
         )}
         
         {description && !error && (
-          <p className="mt-2 text-sm text-text-tertiary">
+          <p id={messageId} className="mt-2 text-sm text-text-tertiary">
             {description}
           </p>
         )}
         
         {helperText && !error && !description && (
-          <p className="mt-2 text-sm text-text-tertiary">
+          <p id={messageId} className="mt-2 text-sm text-text-tertiary">
             {helperText}
           </p>
         )}

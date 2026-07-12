@@ -226,10 +226,12 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
           {onSwapLayout && (
             <Tooltip content="Swap terminal and detail panel positions" side="top">
               <button
+                type="button"
+                aria-label="Swap terminal and detail panel positions"
                 onClick={onSwapLayout}
                 className="p-1 hover:bg-surface-hover rounded transition-colors flex-shrink-0 mr-2 mt-1"
               >
-                <ArrowLeftRight className="w-3.5 h-3.5 text-text-tertiary" />
+                <ArrowLeftRight aria-hidden="true" className="w-3.5 h-3.5 text-text-tertiary" />
               </button>
             </Tooltip>
           )}
@@ -284,10 +286,12 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
           {onSwapLayout && (
             <Tooltip content="Swap terminal and detail panel positions" side="left">
               <button
+                type="button"
+                aria-label="Swap terminal and detail panel positions"
                 onClick={onSwapLayout}
                 className="p-1 hover:bg-surface-hover rounded transition-colors flex-shrink-0"
               >
-                <ArrowLeftRight className="w-3.5 h-3.5 text-text-tertiary" />
+                <ArrowLeftRight aria-hidden="true" className="w-3.5 h-3.5 text-text-tertiary" />
               </button>
             </Tooltip>
           )}
@@ -566,7 +570,11 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
             <div className="px-2 pt-2 flex-shrink-0">
               <SectionHeader>History</SectionHeader>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
+            <div
+              tabIndex={0}
+              aria-label="Commit history"
+              className="flex-1 min-h-0 overflow-y-auto px-2 pb-2"
+            >
               <GitHistoryGraph
                 sessionId={session.id}
                 baseBranch={session.baseBranch || 'main'}

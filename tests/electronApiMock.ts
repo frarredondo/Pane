@@ -16,6 +16,10 @@ type ElectronApiMockOptions = {
   configGetFailures?: number;
   notificationsSupported?: boolean;
   mainAnalyticsEvents?: AnalyticsMainEvent[];
+  initialProjects?: Array<Record<string, unknown>>;
+  initialSessions?: Array<Record<string, unknown>>;
+  initialPanels?: Array<Record<string, unknown>>;
+  activeProjectId?: number | null;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -154,7 +158,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         started: false,
       };
     };
-    let mockSessions: Array<Record<string, unknown>> = [];
+    let mockProjects = clone(mockOptions.initialProjects ?? []);
+    let mockSessions = clone(mockOptions.initialSessions ?? []);
+    let mockPanels = clone(mockOptions.initialPanels ?? []);
+    let mockActiveProjectId = mockOptions.activeProjectId === undefined
+      ? (mockProjects.find((project) => project.active === true)?.id as number | undefined) ?? null
+      : mockOptions.activeProjectId;
     let cloudDisconnectError: string | null = null;
     let configGetCount = 0;
     let nextConfigUpdateError: string | null = null;
@@ -381,7 +390,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       panels: namespace({
-        getSessionPanels: () => success([]),
+        getSessionPanels: (sessionId: string) => success(
+          clone(mockPanels.filter((panel) => panel.sessionId === sessionId)),
+        ),
         shouldAutoCreate: () => success(false),
       }),
       permissions: namespace({
@@ -396,8 +407,24 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       projects: namespace({
-        getAll: () => success([]),
-        getActive: () => success(null),
+        getAll: () => success(clone(mockProjects.map((project) => ({
+          ...project,
+          active: mockActiveProjectId === null
+            ? false
+            : project.id === mockActiveProjectId,
+        })))),
+        getActive: () => success(clone(
+          mockProjects.find((project) => project.id === mockActiveProjectId) ?? null,
+        )),
+        activate: (projectId: string) => {
+          mockActiveProjectId = Number(projectId);
+          return success();
+        },
+        detectBranch: () => success('main'),
+        listBranches: () => success([
+          { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
+          { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
+        ]),
         refreshGitStatus: () => success(),
       }),
       prompts: namespace({
@@ -682,6 +709,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setSessions(sessions: Array<Record<string, unknown>>) {
           mockSessions = clone(sessions);
+        },
+        setProjects(projects: Array<Record<string, unknown>>, activeProjectId: number | null = null) {
+          mockProjects = clone(projects);
+          mockActiveProjectId = activeProjectId;
+        },
+        setPanels(panels: Array<Record<string, unknown>>) {
+          mockPanels = clone(panels);
         },
         getSessionsReadCount() {
           return sessionsGetCount;
