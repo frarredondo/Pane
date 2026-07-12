@@ -39,6 +39,24 @@ async function openSettings(page: Page) {
 }
 
 test.describe('Dropdown keyboard navigation', () => {
+  test('footer-only dropdown focuses and activates its footer action', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await dismissStartupDialogs(page);
+
+    const trigger = page
+      .locator('[aria-haspopup="menu"]')
+      .filter({ hasText: 'Open Project' });
+    await expect(trigger).toBeVisible({ timeout: 5000 });
+    await trigger.click();
+
+    const footerAction = page.getByRole('button', { name: 'Add Repository' });
+    await expect(footerAction).toBeFocused();
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByText('Add New Repository')).toBeVisible();
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  });
+
   test('theme dropdown is navigable with arrow keys and Enter', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await dismissStartupDialogs(page);
