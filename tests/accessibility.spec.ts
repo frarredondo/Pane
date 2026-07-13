@@ -123,8 +123,12 @@ const remoteAffordances = {
   },
 };
 
-async function openDesktop(page: Page): Promise<void> {
+async function openDesktop(
+  page: Page,
+  options: { paneChatAgentChangeDelayMs?: number } = {},
+): Promise<void> {
   await installElectronApiMock(page, {
+    ...options,
     initialProjects: [project],
     initialSessions: [session],
     initialPanels: panels,
@@ -298,6 +302,20 @@ test('seeded pane exposes separate compound actions and arrow-keyed panel tabs',
   await expect(archiveButton).toBeAttached();
   await expect(pinButton).toBeAttached();
   await expect(paneButton.locator('button, a, [role="button"]')).toHaveCount(0);
+  await archiveButton.click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & {
+      __paneTestElectronMock: { getSessionDeleteCalls: () => string[] };
+    }
+  ).__paneTestElectronMock.getSessionDeleteCalls())).toEqual([session.id]);
+  await expect(paneButton).not.toHaveAttribute('aria-current', 'page');
+  await pinButton.click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & {
+      __paneTestElectronMock: { getSessionFavoriteToggleCalls: () => string[] };
+    }
+  ).__paneTestElectronMock.getSessionFavoriteToggleCalls())).toEqual([session.id]);
+  await expect(paneButton).not.toHaveAttribute('aria-current', 'page');
   await paneButton.click();
 
   const explorerTab = page.getByRole('tab', { name: /^Explorer/ }).first();
@@ -314,11 +332,21 @@ test('seeded pane exposes separate compound actions and arrow-keyed panel tabs',
   await expect(dashboardTab).toHaveCount(0);
   await expect(explorerTab).toBeFocused();
 
+  const explorerTabId = await explorerTab.getAttribute('id');
+  expect(explorerTabId).not.toBeNull();
+  await explorerTab.dblclick();
+  const panelTablist = page.locator('[role="tablist"][aria-label="Panel tabs"]').first();
+  await expect.poll(async () => (
+    (await panelTablist.getAttribute('aria-owns'))?.split(' ').includes(explorerTabId!) ?? false
+  )).toBe(false);
+  await expectNoAxeViolations(page, { include: '.pane-session-shell' });
+  await page.keyboard.press('Escape');
+
   await expectNoAxeViolations(page, { include: '.pane-session-shell' });
 });
 
 test('Pane Chat agent choice uses native radio semantics', async ({ page }) => {
-  await openDesktop(page);
+  await openDesktop(page, { paneChatAgentChangeDelayMs: 200 });
 
   await page.getByRole('button', { name: 'Pane Chat' }).click();
   const radios = page.getByRole('radio');
@@ -326,6 +354,7 @@ test('Pane Chat agent choice uses native radio semantics', async ({ page }) => {
   await expect(page.getByRole('radio', { checked: true })).toHaveCount(1);
   await radios.first().focus();
   await page.keyboard.press('ArrowRight');
+  await expect(radios.nth(1)).toBeFocused();
   await expect(radios.nth(1)).toBeChecked();
   await expectNoAxeViolations(page, { include: '.pane-chat-shell' });
 });

@@ -20,6 +20,7 @@ type ElectronApiMockOptions = {
   initialSessions?: Array<Record<string, unknown>>;
   initialPanels?: Array<Record<string, unknown>>;
   activeProjectId?: number | null;
+  paneChatAgentChangeDelayMs?: number;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -171,6 +172,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let remainingConfigGetFailures = mockOptions.configGetFailures ?? 0;
     const configUpdates: Array<Record<string, unknown>> = [];
     const preferenceWrites: Array<{ key: string; value: string }> = [];
+    const sessionDeleteCalls: string[] = [];
+    const sessionFavoriteToggleCalls: string[] = [];
     let sessionsGetCount = 0;
 
     const subscribe = (channel: string, callback: (...args: unknown[]) => void) => {
@@ -384,7 +387,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       paneChat: namespace({
         getOrCreate: () => success(createPaneChatState()),
-        setAgent: (agent: 'claude' | 'codex') => {
+        setAgent: async (agent: 'claude' | 'codex') => {
+          if (mockOptions.paneChatAgentChangeDelayMs) {
+            await new Promise((resolve) => setTimeout(resolve, mockOptions.paneChatAgentChangeDelayMs));
+          }
           configState.defaultOrchestratorAgent = agent === 'codex' ? 'codex' : 'claude';
           return success(createPaneChatState());
         },
@@ -441,6 +447,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         stopActive: () => success(),
       }),
       sessions: namespace({
+        delete: (sessionId: string) => {
+          sessionDeleteCalls.push(sessionId);
+          return success();
+        },
+        toggleFavorite: (sessionId: string) => {
+          sessionFavoriteToggleCalls.push(sessionId);
+          return success();
+        },
         getAll: () => {
           sessionsGetCount += 1;
           return success(clone(mockSessions));
@@ -719,6 +733,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionsReadCount() {
           return sessionsGetCount;
+        },
+        getSessionDeleteCalls() {
+          return clone(sessionDeleteCalls);
+        },
+        getSessionFavoriteToggleCalls() {
+          return clone(sessionFavoriteToggleCalls);
         },
       },
     });

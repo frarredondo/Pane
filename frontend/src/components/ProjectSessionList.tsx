@@ -747,7 +747,7 @@ function SessionRow({
           className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
         />
       </Tooltip>
-      <div className="relative z-10 pointer-events-none contents">
+      <div className="pointer-events-none contents">
         <SessionRowContent
           session={session}
           gs={gs}
@@ -761,7 +761,7 @@ function SessionRow({
           rowLayout={rowLayout}
         />
 
-        <div className="pointer-events-auto flex flex-shrink-0 items-center gap-0.5">
+        <div className="relative z-10 pointer-events-auto flex flex-shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onArchive(); }}

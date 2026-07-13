@@ -571,6 +571,7 @@ export function DetailPanel({ isVisible, width, height, onResize, mergeError, pr
               <SectionHeader>History</SectionHeader>
             </div>
             <div
+              role="region"
               tabIndex={0}
               aria-label="Commit history"
               className="flex-1 min-h-0 overflow-y-auto px-2 pb-2"

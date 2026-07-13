@@ -4,10 +4,12 @@ import type { RemotePaneConnectionProfile } from '../../../../shared/types/remot
 
 type ConnectionScreenMode = 'menu' | 'connect';
 type MobileInstallPlatform = 'ios' | 'android' | 'mobile';
+export type RemoteConnectionErrorKind = 'connection-code' | 'connection';
 
 interface RemoteConnectionScreenProps {
   savedProfiles: RemotePaneConnectionProfile[];
   error: string | null;
+  errorKind: RemoteConnectionErrorKind | null;
   onConnectCode: (code: string) => Promise<void>;
   onConnectProfile: (profile: RemotePaneConnectionProfile) => Promise<void>;
   onForgetProfile: (profileId: string) => void;
@@ -16,6 +18,7 @@ interface RemoteConnectionScreenProps {
 export function RemoteConnectionScreen({
   savedProfiles,
   error,
+  errorKind,
   onConnectCode,
   onConnectProfile,
   onForgetProfile,
@@ -30,9 +33,7 @@ export function RemoteConnectionScreen({
   const canReadClipboard = typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText);
   const mobileInstallPlatform = getMobileInstallPlatform();
   const connectionErrorId = useId();
-  const showConnectionTroubleshooting = Boolean(
-    error && !/^(Connection code|Invalid remote Pane connection code)/.test(error),
-  );
+  const showConnectionTroubleshooting = Boolean(error && errorKind === 'connection');
 
   useEffect(() => {
     if (savedProfiles.length > 0) {

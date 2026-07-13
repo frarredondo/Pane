@@ -3,7 +3,10 @@ import * as Dialog from '@radix-ui/react-dialog';
 import type { ToolPanel } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
-import { RemoteConnectionScreen } from './components/RemoteConnectionScreen';
+import {
+  RemoteConnectionScreen,
+  type RemoteConnectionErrorKind,
+} from './components/RemoteConnectionScreen';
 import { RemoteCreateSessionDialog } from './components/RemoteCreateSessionDialog';
 import {
   getRemotePanelTabId,
@@ -57,6 +60,7 @@ export function RemotePwaApp() {
   const [activeProfile, setActiveProfile] = useState<RemotePaneConnectionProfile | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<RemotePaneConnectionStatus>('local');
   const [lastError, setLastError] = useState<string | null>(null);
+  const [connectionErrorKind, setConnectionErrorKind] = useState<RemoteConnectionErrorKind | null>(null);
   const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingTerminal, setCreatingTerminal] = useState(false);
@@ -171,6 +175,7 @@ export function RemotePwaApp() {
     const runtime = new RemoteRuntimeAdapter(profile);
     setConnectionStatus('connecting');
     setLastError(null);
+    setConnectionErrorKind(null);
 
     try {
       await runtime.connect();
@@ -185,17 +190,20 @@ export function RemotePwaApp() {
       setActiveProfile(null);
       setConnectionStatus('local');
       setLastError(error instanceof Error ? error.message : 'Failed to connect to remote Pane');
+      setConnectionErrorKind('connection');
       throw error;
     }
   }, [loadAffordances, refreshProjects]);
 
   const connectCode = useCallback(async (code: string) => {
     setLastError(null);
+    setConnectionErrorKind(null);
     let profile: RemotePaneConnectionProfile;
     try {
       profile = decodeRemoteConnectionCode(code);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : 'Invalid remote Pane connection code');
+      setConnectionErrorKind('connection-code');
       throw error;
     }
 
@@ -209,6 +217,7 @@ export function RemotePwaApp() {
     setActiveProfile(null);
     setConnectionStatus('local');
     setLastError(null);
+    setConnectionErrorKind(null);
     setLastSeenAt(null);
     setAffordances(EMPTY_AFFORDANCES);
     setAffordancesLoading(false);
@@ -357,6 +366,7 @@ export function RemotePwaApp() {
       <RemoteConnectionScreen
         savedProfiles={savedProfiles}
         error={lastError}
+        errorKind={connectionErrorKind}
         onConnectCode={connectCode}
         onConnectProfile={connectProfile}
         onForgetProfile={forgetProfile}

@@ -138,7 +138,7 @@ export function PaneChatView() {
                   name="pane-chat-agent"
                   value={option.id}
                   checked={selected}
-                  disabled={switchingAgent !== null}
+                  aria-disabled={switchingAgent !== null || undefined}
                   onChange={() => void handleAgentChange(option.id)}
                   className="sr-only"
                 />

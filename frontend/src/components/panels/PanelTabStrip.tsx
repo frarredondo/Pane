@@ -126,6 +126,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const [stripDropIndex, setStripDropIndex] = useState<number | null>(null);
   const [rovingPanelId, setRovingPanelId] = useState<string | null>(activePanelId ?? panels[0]?.id ?? null);
   const previousActivePanelIdRef = useRef(activePanelId);
@@ -207,7 +208,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
       const preferredTarget = focusTarget
         ? document.getElementById(getPanelTabId(idNamespace, focusTarget.id))
         : null;
-      const fallbackTarget = document.querySelector<HTMLElement>('[role="tab"][tabindex="0"]');
+      const fallbackTarget = stripRef.current?.querySelector<HTMLElement>('[role="tab"][tabindex="0"]');
       (preferredTarget ?? fallbackTarget)?.focus();
     });
   }, [getPanelTabPresentation, idNamespace, onPanelClose, panels]);
@@ -321,16 +322,22 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
 
   return (
     <div
+      ref={stripRef}
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
         compact ? "max-w-full" : "flex-1",
       )}
       onDragLeave={handleStripDragLeave}
     >
+      {/* Drag/drop requires tabs to remain siblings, so this semantic tablist
+          owns the rendered tab buttons instead of wrapping them. */}
       <div
         role="tablist"
         aria-label="Panel tabs"
-        aria-owns={panels.map((panel) => getPanelTabId(idNamespace, panel.id)).join(' ')}
+        aria-owns={panels
+          .filter((panel) => panel.id !== editingPanelId)
+          .map((panel) => getPanelTabId(idNamespace, panel.id))
+          .join(' ') || undefined}
         className="contents"
       />
       {panels.map((panel, index) => {
@@ -383,13 +390,13 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               compact
                 ? cn(
                     "h-6 text-[11px]",
-                    isPermanent ? "px-2" : "px-2 pr-5",
+                    isPermanent ? "px-2" : "px-2 pr-7",
                   )
                 : cn(
                     "h-[var(--panel-tab-height)]",
                     isCompactTab
-                      ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-6")
-                      : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-7"),
+                      ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-8")
+                      : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-8"),
                   ),
               isActive
                 ? "text-text-primary"
@@ -420,6 +427,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               <input
                 ref={setEditInputRefCallback}
                 type="text"
+                aria-label={`Rename ${displayTitle}`}
                 value={editingTitle}
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onKeyDown={handleRenameKeyDown}
@@ -456,7 +464,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 type="button"
                 aria-label={`Close ${displayTitle}`}
                 className={cn(
-                  "absolute z-20 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
                   compact ? "right-1" : "right-1.5",
                 )}
                 onClick={(e) => handlePanelClose(e, panel)}
