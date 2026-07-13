@@ -14,7 +14,7 @@
  */
 
 import React, { useCallback, useMemo } from 'react';
-import { PanelTabStrip } from './PanelTabStrip';
+import { getPanelTabId, getPanelTabPanelId, PanelTabStrip } from './PanelTabStrip';
 import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
 import { dropZoneFor, subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
@@ -190,10 +190,10 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
           show (e.g. the primary group holding only permanent tabs). */}
       {multiGroup && stripPanels.length > 0 && (
         <div
-          role="tablist"
           className="flex-shrink-0 flex justify-center bg-bg-chrome border-b border-border-primary px-2 py-0.5"
         >
           <PanelTabStrip
+            idNamespace={group.id}
             panels={stripPanels}
             activePanelId={group.activePanelId}
             onPanelSelect={onPanelSelect}
@@ -217,10 +217,16 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
         {orderedPanels.map(panel => {
           const isActiveTab = panel.id === group.activePanelId;
           const keepAlive = panel.type === 'terminal';
+          const panelTabNamespace = !multiGroup || panel.metadata?.permanent === true ? 'top' : group.id;
           if (!isActiveTab && !keepAlive) return null;
           return (
             <div
               key={panel.id}
+              id={getPanelTabPanelId(panelTabNamespace, panel.id)}
+              role="tabpanel"
+              aria-labelledby={getPanelTabId(panelTabNamespace, panel.id)}
+              aria-hidden={!isActiveTab}
+              inert={!isActiveTab ? true : undefined}
               className="absolute inset-0"
               style={{
                 display: isActiveTab ? 'block' : 'none',

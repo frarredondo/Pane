@@ -1,5 +1,6 @@
 import { ChevronDown, GitBranch, GitFork, Pin, Search, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { generatePaneName, sanitizePaneName } from '../../utils/paneName';
 import type { RemoteBranchInfo, RemoteProjectWithSessions, RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 
@@ -13,6 +14,8 @@ const REMOTE_START_PINNED_PREFERENCE_KEY = 'pane.remoteCreateSession.startPinned
 interface RemoteCreateSessionDialogProps {
   adapter: RemoteRuntimeAdapter;
   project: RemoteProjectWithSessions;
+  restoreFocusRef: RefObject<HTMLElement | null>;
+  fallbackFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   onCreated: (sessionName: string) => Promise<void>;
 }
@@ -20,6 +23,8 @@ interface RemoteCreateSessionDialogProps {
 export function RemoteCreateSessionDialog({
   adapter,
   project,
+  restoreFocusRef,
+  fallbackFocusRef,
   onClose,
   onCreated,
 }: RemoteCreateSessionDialogProps) {
@@ -33,8 +38,17 @@ export function RemoteCreateSessionDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
+  const [activeBranchIndex, setActiveBranchIndex] = useState(0);
+  const [announcement, setAnnouncement] = useState('');
   const [userEditedName, setUserEditedName] = useState(false);
   const branchDropdownRef = useRef<HTMLDivElement>(null);
+  const branchInputRef = useRef<HTMLInputElement>(null);
+  const branchListboxId = useId();
+  const branchIdPrefix = useId();
+  const branchHelpId = useId();
+  const nameHelpId = useId();
+  const errorId = useId();
+  const paneNameInvalid = error === 'Pane name is required.';
 
   const existingNames = useMemo(() => new Set((project.sessions ?? []).map(session => session.name)), [project.sessions]);
 
@@ -56,6 +70,18 @@ export function RemoteCreateSessionDialog({
       setPaneName(generatePaneName(branchName, existingNames, branches));
     }
   }, [branches, existingNames, userEditedName]);
+
+  useEffect(() => {
+    setActiveBranchIndex(0);
+  }, [branchSearch]);
+
+  useEffect(() => {
+    if (loadingBranches) {
+      setAnnouncement('Loading branches');
+    } else if (!error) {
+      setAnnouncement(`${branches.length} ${branches.length === 1 ? 'branch' : 'branches'} available`);
+    }
+  }, [branches.length, error, loadingBranches]);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +135,43 @@ export function RemoteCreateSessionDialog({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [branchOpen]);
 
+  const handleBranchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!branchOpen) {
+        setBranchOpen(true);
+        return;
+      }
+      if (filteredBranches.length === 0) return;
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      setActiveBranchIndex(previous => (previous + direction + filteredBranches.length) % filteredBranches.length);
+      return;
+    }
+    if (event.key === 'Home' && branchOpen) {
+      event.preventDefault();
+      setActiveBranchIndex(0);
+      return;
+    }
+    if (event.key === 'End' && branchOpen) {
+      event.preventDefault();
+      setActiveBranchIndex(Math.max(0, filteredBranches.length - 1));
+      return;
+    }
+    if (event.key === 'Enter' && branchOpen) {
+      const branch = filteredBranches[activeBranchIndex];
+      if (branch) {
+        event.preventDefault();
+        setSelectedBranch(branch.name);
+      }
+      return;
+    }
+    if (event.key === 'Escape' && branchOpen) {
+      event.preventDefault();
+      setBranchOpen(false);
+      setBranchSearch('');
+    }
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (loadingBranches || submitting) return;
@@ -123,6 +186,7 @@ export function RemoteCreateSessionDialog({
       return;
     }
 
+    setAnnouncement(`Creating ${cleanedName}`);
     setSubmitting(true);
     setError(null);
     try {
@@ -147,21 +211,37 @@ export function RemoteCreateSessionDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end bg-black/65 p-0 sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true" aria-label={`New Pane in ${project.name}`}>
-      <button
-        type="button"
-        className="absolute inset-0"
-        aria-label="Close new pane dialog"
-        onClick={() => {
-          if (!submitting) onClose();
-        }}
-      />
-      <form
-        onSubmit={handleSubmit}
-        className="relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-xl border border-border-primary bg-surface-primary shadow-2xl sm:max-w-xl sm:rounded-xl"
-      >
+    <Dialog.Root open onOpenChange={(open) => { if (!open && !submitting) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/65" />
+        <Dialog.Content
+          asChild
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            requestAnimationFrame(() => {
+              if (document.activeElement?.closest('[aria-modal="true"]')) return;
+              const target = restoreFocusRef.current?.isConnected
+                ? restoreFocusRef.current
+                : fallbackFocusRef?.current;
+              if (target?.isConnected) target.focus();
+            });
+          }}
+          onEscapeKeyDown={(event) => {
+            if (submitting || branchOpen) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => { if (submitting) event.preventDefault(); }}
+        >
+          <form
+            onSubmit={handleSubmit}
+            aria-busy={loadingBranches || submitting}
+            className="fixed inset-x-0 bottom-0 z-[71] flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-xl border border-border-primary bg-surface-primary shadow-2xl outline-none sm:inset-auto sm:left-1/2 sm:top-1/2 sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl"
+          >
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
         <div className="flex shrink-0 items-center justify-between border-b border-border-primary px-5 py-4">
-          <h2 className="min-w-0 truncate text-lg font-semibold text-text-primary">New Pane in {project.name}</h2>
+          <Dialog.Title asChild>
+            <h2 className="min-w-0 truncate text-lg font-semibold text-text-primary">New Pane in {project.name}</h2>
+          </Dialog.Title>
           <button
             type="button"
             onClick={onClose}
@@ -169,53 +249,67 @@ export function RemoteCreateSessionDialog({
             className="ml-3 rounded-md p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
             aria-label="Close"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <section className="border-b border-border-primary p-5">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary">
-              <GitBranch className="h-4 w-4 text-text-tertiary" />
+              <GitBranch className="h-4 w-4 text-text-tertiary" aria-hidden="true" />
               <label htmlFor="remote-create-branch">Base Branch</label>
             </div>
             <div ref={branchDropdownRef} className="relative">
-              <button
-                id="remote-create-branch"
-                type="button"
-                disabled={loadingBranches || branches.length === 0}
-                onClick={() => setBranchOpen(previous => !previous)}
-                className="flex h-12 w-full items-center justify-between gap-3 rounded-md border border-border-primary bg-surface-secondary px-3 text-left text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="truncate">{loadingBranches ? 'Loading branches...' : baseBranch || 'No branches found'}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-text-tertiary" />
-              </button>
+              <div className="flex h-12 w-full items-center gap-2 rounded-md border border-border-primary bg-surface-secondary px-3 focus-within:border-interactive focus-within:ring-2 focus-within:ring-interactive">
+                <Search className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+                <input
+                  ref={branchInputRef}
+                  id="remote-create-branch"
+                  disabled={loadingBranches || branches.length === 0}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={branchOpen}
+                  aria-controls={branchOpen ? branchListboxId : undefined}
+                  aria-activedescendant={branchOpen && filteredBranches[activeBranchIndex]
+                    ? `${branchIdPrefix}-${activeBranchIndex}`
+                    : undefined}
+                  aria-describedby={branchHelpId}
+                  value={branchOpen ? branchSearch : baseBranch}
+                  onFocus={() => setBranchOpen(true)}
+                  onClick={() => setBranchOpen(true)}
+                  onChange={(event) => {
+                    setBranchSearch(event.target.value);
+                    setBranchOpen(true);
+                  }}
+                  onKeyDown={handleBranchKeyDown}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  placeholder={loadingBranches ? 'Loading branches...' : 'Search branches'}
+                />
+                <ChevronDown className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+              </div>
 
               {branchOpen && (
                 <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-border-primary bg-surface-primary shadow-xl">
-                  <div className="flex items-center gap-2 border-b border-border-primary px-3 py-2">
-                    <Search className="h-4 w-4 shrink-0 text-text-tertiary" />
-                    <input
-                      value={branchSearch}
-                      onChange={(event) => setBranchSearch(event.target.value)}
-                      autoFocus
-                      className="h-8 min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
-                      placeholder="Search branches"
-                    />
-                  </div>
-                  <div className="max-h-56 overflow-y-auto py-1">
-                    {filteredBranches.map(branch => (
-                      <button
+                  <div id={branchListboxId} role="listbox" aria-label="Base branches" className="max-h-56 overflow-y-auto py-1">
+                    {filteredBranches.map((branch, index) => (
+                      <div
                         key={branch.name}
-                        type="button"
-                        onClick={() => setSelectedBranch(branch.name)}
+                        id={`${branchIdPrefix}-${index}`}
+                        role="option"
+                        aria-selected={branch.name === baseBranch}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          setSelectedBranch(branch.name);
+                          branchInputRef.current?.focus();
+                        }}
+                        onPointerMove={() => setActiveBranchIndex(index)}
                         className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover ${
-                          branch.name === baseBranch ? 'text-text-primary' : 'text-text-secondary'
+                          index === activeBranchIndex ? 'bg-surface-hover text-text-primary' : branch.name === baseBranch ? 'text-text-primary' : 'text-text-secondary'
                         }`}
                       >
                         <span className="truncate">{branch.name}</span>
                         {branch.isCurrent && <span className="shrink-0 text-xs text-text-tertiary">current</span>}
-                      </button>
+                      </div>
                     ))}
                     {filteredBranches.length === 0 && (
                       <div className="px-3 py-3 text-sm text-text-secondary">No branches match.</div>
@@ -224,13 +318,15 @@ export function RemoteCreateSessionDialog({
                 </div>
               )}
             </div>
-            <p className="mt-2 text-xs text-text-tertiary">Remote branches will track their remote for git pull/push.</p>
+            <p id={branchHelpId} className="mt-2 text-xs text-text-tertiary">Remote branches will track their remote for git pull/push.</p>
           </section>
 
           <section className="border-b border-border-primary p-5">
             <label htmlFor="remote-create-name" className="mb-2 block text-sm font-semibold text-text-primary">Pane Name</label>
             <input
               id="remote-create-name"
+              aria-describedby={`${nameHelpId}${paneNameInvalid ? ` ${errorId}` : ''}`}
+              aria-invalid={paneNameInvalid}
               value={paneName}
               onChange={(event) => {
                 setPaneName(event.target.value);
@@ -239,13 +335,13 @@ export function RemoteCreateSessionDialog({
               className="h-12 w-full rounded-md border border-border-primary bg-surface-secondary px-3 text-text-primary outline-none focus:border-interactive focus:ring-2 focus:ring-interactive"
               placeholder="pane-name"
             />
-            <p className="mt-2 text-xs text-text-tertiary">Auto-filled from branch. Edit to customize.</p>
+            <p id={nameHelpId} className="mt-2 text-xs text-text-tertiary">Auto-filled from branch. Edit to customize.</p>
           </section>
 
           <section className="border-b border-border-primary p-5">
             <label className="flex items-center justify-between gap-4">
               <span className="flex min-w-0 gap-3">
-                <Pin className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" />
+                <Pin className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold text-text-primary">Start pinned</span>
                   <span className="mt-1 block text-sm text-text-secondary">Show this pane in the pinned section immediately.</span>
@@ -271,7 +367,7 @@ export function RemoteCreateSessionDialog({
           <section className="p-5">
             <label className="flex items-center justify-between gap-4">
               <span className="flex min-w-0 gap-3">
-                <GitFork className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" />
+                <GitFork className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold text-text-primary">Use worktree</span>
                   <span className="mt-1 block text-sm text-text-secondary">Run in an isolated git worktree.</span>
@@ -291,7 +387,7 @@ export function RemoteCreateSessionDialog({
           </section>
 
           {error && (
-            <div className="mx-5 mb-5 rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-status-error">
+            <div id={errorId} role="alert" className="mx-5 mb-5 rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-status-error">
               {error}
             </div>
           )}
@@ -309,13 +405,16 @@ export function RemoteCreateSessionDialog({
           <button
             type="submit"
             disabled={loadingBranches || submitting || !baseBranch}
-            className="rounded-md bg-interactive px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-60"
+            aria-busy={submitting}
+            className="rounded-md bg-interactive px-5 py-2 text-sm font-semibold text-text-on-interactive transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? 'Creating...' : 'Create'}
           </button>
         </div>
-      </form>
-    </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

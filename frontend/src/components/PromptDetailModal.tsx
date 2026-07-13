@@ -4,6 +4,7 @@ import { formatDistanceToNow } from '../utils/formatters';
 import { formatDuration, getTimeDifference, isValidTimestamp, parseTimestamp } from '../utils/timestampUtils';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { IconButton } from './ui/IconButton';
+import { LiveRegion } from './ui/LiveRegion';
 
 interface PromptMarker {
   id: number;
@@ -60,18 +61,16 @@ export function PromptDetailModal({ prompt, promptIndex, onClose }: PromptDetail
 
   return (
     <Modal isOpen={true} onClose={onClose} size="lg" showCloseButton={false}>
-      <ModalHeader onClose={onClose}>
-        <div className="flex items-center justify-between flex-1 pr-2">
-          <div className="flex items-center space-x-3">
-            <h2 className="text-lg font-semibold text-text-primary">
-              Prompt #{promptIndex + 1}
-            </h2>
-            <div className="flex items-center space-x-2 text-sm text-text-tertiary">
-              <span>{formatDistanceToNow(parseTimestamp(prompt.timestamp))} ago</span>
-              <span className="text-text-tertiary">•</span>
-              <span className="font-medium">{calculateDuration()}</span>
-            </div>
+      <ModalHeader
+        title={`Prompt #${promptIndex + 1}`}
+        description={
+          <div className="flex items-center space-x-2 text-sm text-text-tertiary">
+            <span>{formatDistanceToNow(parseTimestamp(prompt.timestamp))} ago</span>
+            <span aria-hidden="true">&middot;</span>
+            <span className="font-medium">{calculateDuration()}</span>
           </div>
+        }
+        actions={
           <IconButton
             onClick={handleCopy}
             variant="ghost"
@@ -79,8 +78,9 @@ export function PromptDetailModal({ prompt, promptIndex, onClose }: PromptDetail
             aria-label="Copy prompt"
             icon={copied ? <Check className="h-4 w-4 text-status-success" /> : <Copy className="h-4 w-4" />}
           />
-        </div>
-      </ModalHeader>
+        }
+        onClose={onClose}
+      />
 
       <ModalBody>
         <pre className="whitespace-pre-wrap font-mono text-sm text-text-primary bg-surface-primary p-4 rounded-md border border-border-secondary">
@@ -94,6 +94,7 @@ export function PromptDetailModal({ prompt, promptIndex, onClose }: PromptDetail
           <span>Double-click any prompt to view details</span>
         </div>
       </ModalFooter>
+      <LiveRegion>{copied ? 'Prompt copied to clipboard' : ''}</LiveRegion>
     </Modal>
   );
 }

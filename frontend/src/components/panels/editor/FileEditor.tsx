@@ -16,6 +16,7 @@ import { isMac, isWindows } from '../../../utils/platformUtils';
 import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
 import { TerminalPopover, PopoverButton } from '../../terminal/TerminalPopover';
 import { useConfigStore } from '../../../stores/configStore';
+import { LiveRegion } from '../../ui/LiveRegion';
 
 interface FileItem {
   name: string;
@@ -760,6 +761,7 @@ function HeadlessFileTree({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <LiveRegion>{uploadStatus ?? ''}</LiveRegion>
       <div className="flex items-center justify-between p-2 border-b border-border-primary">
         <span className="text-sm font-medium text-text-primary">Files</span>
         <div className="flex gap-1">
@@ -852,7 +854,7 @@ function HeadlessFileTree({
         </div>
       )}
       {error && (
-        <div className="px-3 py-2 bg-status-error/20 text-status-error text-sm border-b border-status-error/30">
+        <div role="alert" className="px-3 py-2 bg-status-error/20 text-status-error text-sm border-b border-status-error/30">
           {error}
         </div>
       )}
@@ -865,15 +867,15 @@ function HeadlessFileTree({
       {searchQuery && (
         <div className="flex-1 overflow-auto">
           {getFilteredFiles().map(file => (
-            <div
+            <button
+              type="button"
               key={file.path}
-              className={`flex items-center px-2 py-1 hover:bg-surface-hover cursor-pointer group ${
+              disabled={file.isDirectory}
+              className={`flex w-full items-center px-2 py-1 text-left hover:bg-surface-hover group disabled:cursor-default ${
                 selectedPath === file.path ? 'bg-interactive' : ''
               }`}
               style={{ paddingLeft: '8px' }}
-              onClick={() => {
-                if (!file.isDirectory) onFileSelect(file);
-              }}
+              onClick={() => onFileSelect(file)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -891,7 +893,7 @@ function HeadlessFileTree({
               <span className="text-xs text-text-tertiary ml-2 truncate max-w-[120px]">
                 {file.path}
               </span>
-            </div>
+            </button>
           ))}
           {getFilteredFiles().length === 0 && (
             <div className="p-4 text-text-secondary text-sm">No matching files</div>
@@ -926,11 +928,13 @@ function HeadlessFileTree({
           const isExpanded = item.isExpanded();
           const isItemSelected = item.isSelected();
           const isOpenFile = selectedPath === data.path && !isFolder;
+          const treeItemProps = item.getProps();
 
           return (
             <div
               key={item.getId()}
-              {...item.getProps()}
+              {...treeItemProps}
+              role={treeItemProps.role}
               ref={(element) => {
                 if (element) itemElementRefs.current.set(data.path, element);
                 else itemElementRefs.current.delete(data.path);
@@ -1680,7 +1684,7 @@ export function FileEditor({
               </div>
             </div>
             {error && (
-              <div className="px-4 py-2 bg-status-error/20 text-status-error text-sm">
+              <div role="alert" className="px-4 py-2 bg-status-error/20 text-status-error text-sm">
                 Error: {error}
               </div>
             )}

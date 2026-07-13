@@ -126,8 +126,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
         title="Project Settings" 
         icon={<Settings className="w-5 h-5" />}
         onClose={onClose}
-      >
-        <div className="flex items-center gap-2">
+        actions={
           <Button
             onClick={handleSave}
             disabled={isSaving || !name || !path}
@@ -139,8 +138,8 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
           >
             Save Changes
           </Button>
-        </div>
-      </ModalHeader>
+        }
+      />
 
       <ModalBody>
         {error && (

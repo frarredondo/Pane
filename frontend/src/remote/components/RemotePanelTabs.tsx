@@ -1,5 +1,5 @@
 import { ChevronDown, Plus, TerminalSquare } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
 import type { ToolPanel } from '../../../../shared/types/panels';
@@ -29,6 +29,10 @@ export function RemotePanelTabs({
 }: RemotePanelTabsProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const addTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const addMenuId = useId();
 
   useEffect(() => {
     if (!showAddMenu) return;
@@ -43,26 +47,82 @@ export function RemotePanelTabs({
     return () => window.removeEventListener('pointerdown', closeOnPointerDown);
   }, [showAddMenu]);
 
+  useEffect(() => {
+    if (!showAddMenu) return;
+    const frame = window.requestAnimationFrame(() => menuItemRefs.current[0]?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [showAddMenu]);
+
   const addTerminal = (options?: RemoteTerminalCreateOptions) => {
     onCreateTerminal(options);
     setShowAddMenu(false);
   };
 
+  const selectTabAt = (index: number) => {
+    const panel = panels[index];
+    if (!panel) return;
+    onSelectPanel(panel.id);
+    tabRefs.current[index]?.focus();
+  };
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % panels.length;
+    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + panels.length) % panels.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = panels.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectTabAt(nextIndex);
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = menuItemRefs.current.filter((item): item is HTMLButtonElement => Boolean(item));
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex: number | null = null;
+
+    if (event.key === 'ArrowDown') nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+    if (event.key === 'ArrowUp') nextIndex = currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = items.length - 1;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setShowAddMenu(false);
+      addTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key === 'Tab') {
+      setShowAddMenu(false);
+      return;
+    }
+    if (nextIndex !== null && items[nextIndex]) {
+      event.preventDefault();
+      items[nextIndex].focus();
+    }
+  };
+
   return (
     <div className="flex min-h-12 shrink-0 items-end gap-2 border-b border-border-primary bg-bg-secondary px-2 pt-2">
-      <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">
-        {panels.map(panel => (
+      <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" role="tablist" aria-label="Remote tool panels">
+        {panels.map((panel, index) => (
           <button
             key={panel.id}
+            ref={(element) => { tabRefs.current[index] = element; }}
             type="button"
+            role="tab"
+            id={getRemotePanelTabId(panel.id)}
+            aria-selected={selectedPanelId === panel.id}
+            aria-controls={getRemotePanelTabPanelId(panel.id)}
+            tabIndex={selectedPanelId === panel.id || (!selectedPanelId && index === 0) ? 0 : -1}
             onClick={() => onSelectPanel(panel.id)}
+            onKeyDown={(event) => handleTabKeyDown(event, index)}
             className={`relative flex h-10 max-w-[min(12rem,55vw)] shrink-0 items-center gap-2 rounded-t-lg border px-3 text-sm font-medium shadow-sm transition-colors ${
               selectedPanelId === panel.id
                 ? 'border-border-primary border-b-bg-primary bg-bg-primary text-text-primary shadow-[0_-1px_0_rgba(255,255,255,0.04)_inset]'
                 : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
-            <TerminalSquare className="h-4 w-4 shrink-0" />
+            <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span className="truncate">{panel.title}</span>
           </button>
         ))}
@@ -70,31 +130,38 @@ export function RemotePanelTabs({
 
       <div ref={menuRef} className="relative shrink-0">
         <button
+          ref={addTriggerRef}
           type="button"
           onClick={() => setShowAddMenu(value => !value)}
           disabled={creating}
           className="mb-1.5 flex h-8 shrink-0 items-center gap-1 rounded-md border border-border-secondary bg-surface-primary px-2 text-sm font-medium text-text-secondary shadow-sm hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
           aria-haspopup="menu"
           aria-expanded={showAddMenu}
+          aria-controls={showAddMenu ? addMenuId : undefined}
           aria-label="Add tool"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           <span className="hidden sm:inline">Add Tool</span>
-          <ChevronDown className="hidden h-3 w-3 sm:block" />
+          <ChevronDown className="hidden h-3 w-3 sm:block" aria-hidden="true" />
         </button>
 
         {showAddMenu && (
           <div
+            id={addMenuId}
             className="absolute right-0 top-full z-30 mt-2 w-[min(20rem,calc(100vw-1rem))] overflow-hidden rounded-lg border border-border-primary bg-surface-primary shadow-dropdown"
             role="menu"
+            aria-label="Add tool"
+            onKeyDown={handleMenuKeyDown}
           >
             <AddToolMenuItem
+              buttonRef={(element) => { menuItemRefs.current[0] = element; }}
               icon={<TerminalSquare className="h-4 w-4" />}
               title="Terminal"
               description="Start a shell on the remote host"
               onClick={() => addTerminal()}
             />
             <AddToolMenuItem
+              buttonRef={(element) => { menuItemRefs.current[1] = element; }}
               icon={<ClaudeIcon className="h-4 w-4" />}
               title="Claude Code"
               description="Run claude --dangerously-skip-permissions"
@@ -104,6 +171,7 @@ export function RemotePanelTabs({
               })}
             />
             <AddToolMenuItem
+              buttonRef={(element) => { menuItemRefs.current[2] = element; }}
               icon={<OpenAIIcon className="h-4 w-4" />}
               title="Codex"
               description="Run codex --yolo"
@@ -115,6 +183,7 @@ export function RemotePanelTabs({
             {customCommands.map((command, index) => (
               <AddToolMenuItem
                 key={`${command.name}-${index}`}
+                buttonRef={(element) => { menuItemRefs.current[index + 3] = element; }}
                 icon={getCliBrandIcon(command.command, 'h-4 w-4') ?? <TerminalSquare className="h-4 w-4" />}
                 title={command.name}
                 description={command.command}
@@ -132,11 +201,13 @@ export function RemotePanelTabs({
 }
 
 function AddToolMenuItem({
+  buttonRef,
   icon,
   title,
   description,
   onClick,
 }: {
+  buttonRef: (element: HTMLButtonElement | null) => void;
   icon: ReactNode;
   title: string;
   description: string;
@@ -144,16 +215,30 @@ function AddToolMenuItem({
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       role="menuitem"
+      tabIndex={-1}
       onClick={onClick}
       className="flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
     >
-      <span className="mt-0.5 shrink-0 text-text-tertiary">{icon}</span>
+      <span className="mt-0.5 shrink-0 text-text-tertiary" aria-hidden="true">{icon}</span>
       <span className="min-w-0">
         <span className="block font-medium text-text-primary">{title}</span>
         <span className="block truncate text-xs text-text-tertiary">{description}</span>
       </span>
     </button>
   );
+}
+
+function toDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+export function getRemotePanelTabId(panelId: string): string {
+  return `remote-panel-tab-${toDomId(panelId)}`;
+}
+
+export function getRemotePanelTabPanelId(panelId: string): string {
+  return `remote-panel-tabpanel-${toDomId(panelId)}`;
 }

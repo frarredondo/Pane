@@ -3,6 +3,7 @@ import { Search, X, Download, Trash2, ChevronUp, ChevronDown, Filter, Copy, Chec
 import { cn } from '../../../utils/cn';
 import AnsiToHtml from 'ansi-to-html';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { LiveRegion } from '../../ui/LiveRegion';
 
 interface LogEntry {
   timestamp: string;
@@ -235,6 +236,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
 
   return (
     <div className="h-full flex flex-col bg-bg-primary relative">
+      <LiveRegion>{copied ? 'Logs copied to clipboard' : ''}</LiveRegion>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary border-b border-border-primary">
         <div className="text-sm text-text-secondary">

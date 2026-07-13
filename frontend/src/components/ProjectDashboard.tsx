@@ -12,6 +12,7 @@ import { MultiOriginStatus } from './dashboard/MultiOriginStatus';
 import { StatusSummaryCards } from './dashboard/StatusSummaryCards';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
+import { LiveRegion } from './ui/LiveRegion';
 
 interface ProjectDashboardProps {
   projectId: number;
@@ -25,6 +26,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'stale' | 'changes' | 'pr'>('all');
+  const [statusAnnouncement, setStatusAnnouncement] = useState('');
   const [isProgressive] = useState(true); // Use progressive loading by default
   const pendingSessionUpdatesRef = useRef<Map<string, SessionBranchInfo>>(new Map());
 
@@ -65,6 +67,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
       if (cachedData) {
         setDashboardData(cachedData);
         setLastRefreshTime(new Date(Date.now() - 30000)); // Show it was from cache
+        setStatusAnnouncement('Dashboard loaded from cache');
         return;
       }
     }
@@ -72,6 +75,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
     setIsLoading(!dashboardData); // Only show loading on initial load
     setIsRefreshing(!!dashboardData); // Show refreshing if we already have data
     setError(null);
+    setStatusAnnouncement(dashboardData ? 'Refreshing dashboard' : 'Loading dashboard');
     
     try {
       if (useProgressive && isProgressive) {
@@ -83,6 +87,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
           setLastRefreshTime(new Date());
           // Cache the data
           dashboardCache.set(projectId, response.data);
+          setStatusAnnouncement('Dashboard updated');
         } else {
           setError(response.error || 'Failed to fetch project status');
         }
@@ -95,6 +100,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
           setLastRefreshTime(new Date());
           // Cache the data
           dashboardCache.set(projectId, response.data);
+          setStatusAnnouncement('Dashboard updated');
         } else {
           setError(response.error || 'Failed to fetch project status');
         }
@@ -210,15 +216,15 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
     };
     
     return (
-      <tr key={session.sessionId} className={`hover:bg-surface-hover ${staleClass} cursor-pointer`} onClick={handleSessionClick}>
+      <tr key={session.sessionId} className={`hover:bg-surface-hover ${staleClass}`}>
         <td className="px-4 py-3 text-sm">
-          <div className="flex items-center gap-2">
+          <button type="button" className="flex w-full items-center gap-2 text-left" onClick={handleSessionClick}>
             <GitBranch className="w-4 h-4 text-text-tertiary" />
             <div>
               <div className="font-medium text-text-primary">{session.sessionName}</div>
               <div className="text-text-tertiary text-xs">{session.branchName}</div>
             </div>
-          </div>
+          </button>
         </td>
         <td className="px-4 py-3 text-sm text-text-secondary">
           <code className="text-xs bg-surface-secondary px-1 py-0.5 rounded">
@@ -268,7 +274,6 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-interactive hover:text-interactive-hover"
-              onClick={(e) => e.stopPropagation()}
             >
               <GitPullRequest className="w-4 h-4" />
               <span>#{session.pullRequest.number}</span>
@@ -308,13 +313,14 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
 
   if (error) {
     return (
-      <div className="p-6 bg-status-error/10 rounded-lg">
+      <div role="alert" className="p-6 bg-status-error/10 rounded-lg">
         <div className="flex items-center gap-2 text-status-error">
           <AlertCircle className="w-5 h-5" />
           <span className="font-medium">Error loading dashboard</span>
         </div>
         <p className="mt-1 text-sm text-status-error/80">{error}</p>
         <button
+          type="button"
           onClick={() => fetchDashboardData(false)}
           className="mt-3 px-3 py-1 text-sm bg-status-error text-text-on-status-error rounded hover:bg-status-error-hover"
         >
@@ -325,11 +331,12 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
   }
 
   if (isLoading && !dashboardData) {
-    return <ProjectDashboardSkeleton />;
+    return <div><LiveRegion>{statusAnnouncement}</LiveRegion><ProjectDashboardSkeleton /></div>;
   }
 
   return (
     <Card className="flex flex-col h-full">
+      <LiveRegion>{statusAnnouncement}</LiveRegion>
       <div className="px-6 py-4 border-b border-border-primary">
         <div className="flex items-center justify-between">
           <div>

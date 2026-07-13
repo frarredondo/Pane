@@ -5,7 +5,7 @@
  * (via PanelGroupView) so there is one tab-rendering implementation.
  */
 
-import React, { useCallback, useState, useRef, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { X, Terminal, GitBranch, FileCode, FolderTree, BarChart3, Globe } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { ToolPanel, ToolPanelType, LogsPanelState } from '../../../../shared/types/panels';
@@ -56,6 +56,20 @@ export interface PanelTabStripProps {
   draggedPanelId?: string | null;
   /** Optional per-panel title/disabled presentation override. */
   getPanelTabPresentation?: PanelTabPresentationResolver;
+  /** Stable group/strip namespace used for tab and tabpanel relationships. */
+  idNamespace: string;
+}
+
+function safeDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+export function getPanelTabId(namespace: string, panelId: string): string {
+  return `panel-tab-${safeDomId(namespace)}-${safeDomId(panelId)}`;
+}
+
+export function getPanelTabPanelId(namespace: string, panelId: string): string {
+  return `panel-content-${safeDomId(namespace)}-${safeDomId(panelId)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,13 +120,28 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   isTabDragging = false,
   draggedPanelId = null,
   getPanelTabPresentation,
+  idNamespace,
 }) => {
   const compact = variant === 'compact';
   const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const [stripDropIndex, setStripDropIndex] = useState<number | null>(null);
+  const [rovingPanelId, setRovingPanelId] = useState<string | null>(activePanelId ?? panels[0]?.id ?? null);
+  const previousActivePanelIdRef = useRef(activePanelId);
   const getPanelActivityStatus = usePanelStore(s => s.getPanelActivityStatus);
+
+  useEffect(() => {
+    const activePanelChanged = previousActivePanelIdRef.current !== activePanelId;
+    previousActivePanelIdRef.current = activePanelId;
+    setRovingPanelId((current) => {
+      if (activePanelChanged && panels.some((panel) => panel.id === activePanelId)) return activePanelId;
+      if (current && panels.some((panel) => panel.id === current)) return current;
+      if (panels.some((panel) => panel.id === activePanelId)) return activePanelId;
+      return panels[0]?.id ?? null;
+    });
+  }, [activePanelId, panels]);
 
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -170,8 +199,19 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         return;
       }
     }
+    const panelIndex = panels.findIndex((candidate) => candidate.id === panel.id);
+    const isFocusable = (candidate: ToolPanel) => !getPanelTabPresentation?.(candidate)?.disabled;
+    const focusTarget = panels.slice(panelIndex + 1).find(isFocusable)
+      ?? panels.slice(0, panelIndex).reverse().find(isFocusable);
     onPanelClose(panel);
-  }, [onPanelClose]);
+    requestAnimationFrame(() => {
+      const preferredTarget = focusTarget
+        ? document.getElementById(getPanelTabId(idNamespace, focusTarget.id))
+        : null;
+      const fallbackTarget = stripRef.current?.querySelector<HTMLElement>('[role="tab"][tabindex="0"]');
+      (preferredTarget ?? fallbackTarget)?.focus();
+    });
+  }, [getPanelTabPresentation, idNamespace, onPanelClose, panels]);
 
   // --- Drag handlers ---
   const handleDragStart = useCallback((e: React.DragEvent, panelId: string) => {
@@ -247,14 +287,59 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     );
   }, [shortcutHintsEnabled, panels, hotkeyDisplay]);
 
+  const handleTabKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const currentPanel = panels[index];
+    if (!currentPanel) return;
+    const currentDisabled = getPanelTabPresentation?.(currentPanel)?.disabled === true;
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (!currentDisabled) onPanelSelect(currentPanel);
+      return;
+    }
+
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+
+    const navigableIndexes = panels.map((_, panelIndex) => panelIndex);
+    if (navigableIndexes.length === 0) return;
+
+    event.preventDefault();
+    const currentPosition = navigableIndexes.indexOf(index);
+    let targetIndex: number;
+    if (event.key === 'Home') targetIndex = navigableIndexes[0];
+    else if (event.key === 'End') targetIndex = navigableIndexes[navigableIndexes.length - 1];
+    else {
+      const step = event.key === 'ArrowRight' ? 1 : -1;
+      const start = currentPosition >= 0 ? currentPosition : 0;
+      targetIndex = navigableIndexes[(start + step + navigableIndexes.length) % navigableIndexes.length];
+    }
+
+    const targetPanel = panels[targetIndex];
+    setRovingPanelId(targetPanel.id);
+    if (!getPanelTabPresentation?.(targetPanel)?.disabled) onPanelSelect(targetPanel);
+    requestAnimationFrame(() => document.getElementById(getPanelTabId(idNamespace, targetPanel.id))?.focus());
+  }, [getPanelTabPresentation, idNamespace, onPanelSelect, panels]);
+
   return (
     <div
+      ref={stripRef}
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
         compact ? "max-w-full" : "flex-1",
       )}
       onDragLeave={handleStripDragLeave}
     >
+      {/* Drag/drop requires tabs to remain siblings, so this semantic tablist
+          owns the rendered tab buttons instead of wrapping them. */}
+      <div
+        role="tablist"
+        aria-label="Panel tabs"
+        aria-owns={panels
+          .filter((panel) => panel.id !== editingPanelId)
+          .map((panel) => getPanelTabId(idNamespace, panel.id))
+          .join(' ') || undefined}
+        className="contents"
+      />
       {panels.map((panel, index) => {
         const isPermanent = panel.metadata?.permanent === true;
         const isEditing = editingPanelId === panel.id;
@@ -266,6 +351,36 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         const isDragged = panel.id === draggedPanelId;
         const isCompactTab = panel.type === 'diff' || panel.type === 'explorer' || panel.type === 'browser';
         const shortcutHint = shortcutHints[index];
+        const tabId = getPanelTabId(idNamespace, panel.id);
+        const tabPanelId = getPanelTabPanelId(idNamespace, panel.id);
+        const tooltipContent = presentation?.disabledReason || shortcutHint ? (
+          <span className="flex flex-col items-start gap-1">
+            <span className="text-text-secondary">{presentation?.disabledReason ?? displayTitle}</span>
+            {shortcutHint && (
+              <Kbd size="xs" variant="muted" className="origin-left scale-[0.8]">{shortcutHint}</Kbd>
+            )}
+          </span>
+        ) : null;
+
+        const tabButton = !isEditing ? (
+          <button
+            id={tabId}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            aria-disabled={isDisabled || undefined}
+            aria-controls={tabPanelId}
+            aria-label={displayTitle}
+            tabIndex={panel.id === rovingPanelId ? 0 : -1}
+            onFocus={() => setRovingPanelId(panel.id)}
+            onClick={() => { if (!isDisabled) onPanelSelect(panel); }}
+            onDoubleClick={(event) => {
+              if (!isDisabled && !isPermanent && !isDiffPanel) handleStartRename(event, panel);
+            }}
+            onKeyDown={(event) => handleTabKeyDown(event, index)}
+            className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle"
+          />
+        ) : null;
 
         const tab = (
           <div
@@ -275,13 +390,13 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               compact
                 ? cn(
                     "h-6 text-[11px]",
-                    isPermanent ? "px-2" : "px-2 pr-5",
+                    isPermanent ? "px-2" : "px-2 pr-7",
                   )
                 : cn(
                     "h-[var(--panel-tab-height)]",
                     isCompactTab
-                      ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-6")
-                      : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-7"),
+                      ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-8")
+                      : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-8"),
                   ),
               isActive
                 ? "text-text-primary"
@@ -295,24 +410,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             onDragEnd={handleDragEnd}
             onDragOver={(e) => handleStripDragOver(e, index)}
             onDrop={handleStripDrop}
-            onClick={() => !isEditing && !isDisabled && onPanelSelect(panel)}
-            onDoubleClick={(e) => {
-              if (!isEditing && !isPermanent && !isDiffPanel) {
-                handleStartRename(e, panel);
-              }
-            }}
-            role="tab"
-            aria-selected={isActive}
-            aria-disabled={isDisabled || undefined}
-            tabIndex={isActive && !isDisabled ? 0 : -1}
-            onKeyDown={(e) => {
-              if (isEditing || isDisabled) return;
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onPanelSelect(panel);
-              }
-            }}
           >
+            {tooltipContent && tabButton ? (
+              <Tooltip content={tooltipContent} side="bottom">{tabButton}</Tooltip>
+            ) : tabButton}
             {/* Strip drop indicator line. Between-tab boundaries render as the
                 next tab's left edge; only the strip's end renders a right edge. */}
             {isTabDragging && stripDropIndex === index && (
@@ -326,12 +427,13 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               <input
                 ref={setEditInputRefCallback}
                 type="text"
+                aria-label={`Rename ${displayTitle}`}
                 value={editingTitle}
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onKeyDown={handleRenameKeyDown}
                 onBlur={handleRenameSubmit}
                 className={cn(
-                  "px-1 bg-bg-primary border border-border-primary rounded outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus text-text-primary",
+                  "relative z-20 px-1 bg-bg-primary border border-border-primary rounded outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus text-text-primary",
                   compact ? "text-[11px]" : "text-sm",
                 )}
                 onClick={(e) => e.stopPropagation()}
@@ -339,7 +441,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               />
             ) : (
               <span className={cn(
-                "inline-flex items-center justify-center min-w-0",
+                "relative z-10 pointer-events-none inline-flex items-center justify-center min-w-0",
                 compact ? "gap-1" : "gap-2",
               )}>
                 {panel.type === 'terminal' && (
@@ -359,8 +461,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
 
             {!isPermanent && !isEditing && (
               <button
+                type="button"
+                aria-label={`Close ${displayTitle}`}
                 className={cn(
-                  "absolute top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
                   compact ? "right-1" : "right-1.5",
                 )}
                 onClick={(e) => handlePanelClose(e, panel)}
@@ -376,26 +480,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           <div className="h-4 w-px bg-border-primary mx-1 flex-shrink-0" aria-hidden="true" />
         ) : null;
 
-        const tooltipContent = presentation?.disabledReason || shortcutHint ? (
-          <span className="flex flex-col items-start gap-1">
-            <span className="text-text-secondary">{presentation?.disabledReason ?? displayTitle}</span>
-            {shortcutHint && (
-              <Kbd size="xs" variant="muted" className="origin-left scale-[0.8]">{shortcutHint}</Kbd>
-            )}
-          </span>
-        ) : null;
-
-        return tooltipContent ? (
-          <React.Fragment key={panel.id}>
-            <Tooltip
-              content={tooltipContent}
-              side="bottom"
-            >
-              {tab}
-            </Tooltip>
-            {divider}
-          </React.Fragment>
-        ) : <React.Fragment key={panel.id}>{tab}{divider}</React.Fragment>;
+        return <React.Fragment key={panel.id}>{tab}{divider}</React.Fragment>;
       })}
       {/* Trailing drop target: the strip's empty space appends after the last tab */}
       {isTabDragging && (

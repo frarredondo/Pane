@@ -20,12 +20,10 @@ export const FolderArchiveDialog: React.FC<FolderArchiveDialogProps> = ({
 }) => {
   return (
     <Modal isOpen={isOpen} onClose={onCancel} size="md">
-      <ModalHeader>
-        <div className="flex items-center gap-2">
-          <FolderArchive className="w-5 h-5 text-text-secondary" />
-          Archive Folder?
-        </div>
-      </ModalHeader>
+      <ModalHeader
+        title="Archive Folder?"
+        icon={<FolderArchive className="w-5 h-5 text-text-secondary" />}
+      />
 
       <ModalBody>
         <p className="text-text-secondary">

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import type { IpcRendererEvent } from 'electron';
 import { Loader2, Archive, CheckCircle, AlertCircle } from 'lucide-react';
+import { LiveRegion } from './ui/LiveRegion';
 
 interface ArchiveTask {
   sessionId: string;
@@ -20,6 +21,7 @@ interface ArchiveProgressData {
 }
 
 export function ArchiveProgress() {
+  const taskListId = useId();
   const [progress, setProgress] = useState<ArchiveProgressData | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -59,8 +61,18 @@ export function ArchiveProgress() {
     }
   };
 
+  const completedCount = progress?.tasks.filter(task => task.status === 'completed').length ?? 0;
+  const failedTask = progress?.tasks.find(task => task.status === 'failed');
+  const archiveAnnouncement = progress && progress.totalCount > 0
+    ? progress.activeCount > 0
+      ? `Archiving ${progress.activeCount} ${progress.activeCount === 1 ? 'pane' : 'panes'}`
+      : completedCount === progress.totalCount
+        ? `Archive complete for ${completedCount} ${completedCount === 1 ? 'pane' : 'panes'}`
+        : ''
+    : '';
+
   if (!progress || progress.totalCount === 0) {
-    return null;
+    return <LiveRegion>{archiveAnnouncement}</LiveRegion>;
   }
 
   const getStatusIcon = (status: ArchiveTask['status']) => {
@@ -110,8 +122,13 @@ export function ArchiveProgress() {
 
   return (
     <div className="border-t border-border-primary flex-shrink-0">
+      <LiveRegion>{archiveAnnouncement}</LiveRegion>
+      <LiveRegion mode="assertive">{failedTask ? `Archive failed for ${failedTask.sessionName}: ${failedTask.error ?? 'Unknown error'}` : ''}</LiveRegion>
       <button
+        type="button"
         onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        aria-controls={taskListId}
         className="w-full px-4 py-2 flex items-center justify-between hover:bg-surface-hover transition-colors"
       >
         <div className="flex items-center gap-2">
@@ -148,7 +165,7 @@ export function ArchiveProgress() {
       </button>
 
       {isExpanded && (
-        <div className="border-t border-border-primary max-h-48 overflow-y-auto bg-surface-secondary">
+        <div id={taskListId} className="border-t border-border-primary max-h-48 overflow-y-auto bg-surface-secondary">
           {progress.tasks.length === 0 ? (
             <div className="px-4 py-2 text-xs text-text-tertiary">
               No archive tasks

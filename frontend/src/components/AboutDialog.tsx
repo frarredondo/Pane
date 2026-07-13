@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { X, Download, Check, Loader2, Github } from 'lucide-react';
+import { Download, Check, Loader2, Github } from 'lucide-react';
 import { usePaneLogo } from '../hooks/usePaneLogo';
+import { Modal } from './ui/Modal';
+import { LiveRegion } from './ui/LiveRegion';
 
 interface VersionInfo {
   current: string;
@@ -29,9 +31,13 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isHandingOff, setIsHandingOff] = useState(false);
+  const [hasCheckedForUpdates, setHasCheckedForUpdates] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      setIsHandingOff(false);
+      setHasCheckedForUpdates(false);
       loadCurrentVersion();
     }
   }, [isOpen]);
@@ -66,7 +72,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
       if (result.success) {
         setVersionInfo(result.data);
         if (result.data.hasUpdate) {
-          onUpdate(result.data);
+          handleUpdate(result.data);
         }
       } else {
         setError(result.error || 'Failed to check for updates');
@@ -76,7 +82,13 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
       console.error('Update check failed:', error);
     } finally {
       setIsChecking(false);
+      setHasCheckedForUpdates(true);
     }
+  };
+
+  const handleUpdate = (nextVersionInfo: VersionInfo) => {
+    setIsHandingOff(true);
+    onUpdate(nextVersionInfo);
   };
 
   const formatDate = (dateString: string) => {
@@ -91,28 +103,25 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
     }
   };
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
-      <div className="relative bg-surface-primary rounded-xl shadow-2xl w-[360px] mx-4 overflow-hidden border border-border-primary/50" onClick={(e) => e.stopPropagation()}>
-        {/* Close button - absolute positioned */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-10 text-text-tertiary hover:text-text-primary transition-colors p-1 rounded-md hover:bg-surface-secondary"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
+    <Modal
+      ariaLabel="About Pane"
+      isOpen={isOpen}
+      onClose={onClose}
+      size="sm"
+      restoreFocusOnClose={!isHandingOff}
+      className="mx-auto !w-[360px] max-w-full !rounded-xl border border-border-primary/50 !bg-surface-primary !shadow-2xl"
+    >
+        <LiveRegion>
+          {isChecking
+            ? 'Checking for updates'
+            : hasCheckedForUpdates && !error
+              ? versionInfo?.hasUpdate
+                ? `Pane ${versionInfo.latest} is available`
+                : 'Pane is up to date'
+              : ''}
+        </LiveRegion>
+        <div className="min-h-0 flex-1 overflow-y-auto">
         {/* Main content */}
         <div className="px-8 pt-10 pb-8">
           {/* Logo and branding */}
@@ -140,7 +149,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
             </span>
             {!versionInfo?.hasUpdate && versionInfo?.current && !isChecking && (
               <span className="flex items-center gap-1 text-xs text-status-success">
-                <Check className="w-3 h-3" />
+                <Check aria-hidden="true" className="w-3 h-3 text-status-success" />
                 Latest
               </span>
             )}
@@ -161,7 +170,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
                   )}
                 </div>
                 <button
-                  onClick={() => versionInfo && onUpdate(versionInfo)}
+                  onClick={() => versionInfo && handleUpdate(versionInfo)}
                   className="px-3 py-1.5 bg-interactive hover:bg-interactive-hover text-on-interactive text-xs font-medium rounded-md transition-colors"
                 >
                   Update
@@ -173,13 +182,15 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
           {/* Action buttons */}
           <div className="space-y-2 mb-6">
             <button
+              type="button"
               onClick={checkForUpdates}
               disabled={isChecking}
+              aria-busy={isChecking}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-surface-secondary hover:bg-surface-tertiary border border-border-primary text-text-primary text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
             >
               {isChecking ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" />
                   <span>Checking...</span>
                 </>
               ) : (
@@ -203,6 +214,12 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
             </a>
           </div>
 
+          {error && (
+            <div role="alert" className="mb-6 p-2 bg-status-error/10 border border-status-error/20 rounded text-xs text-status-error text-center">
+              {error}
+            </div>
+          )}
+
           {/* Links - minimal style */}
           <div className="flex items-center justify-center gap-4 text-xs text-text-tertiary">
             <a
@@ -214,7 +231,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
               <Github className="w-3.5 h-3.5" />
               <span>GitHub</span>
             </a>
-            <span className="text-border-primary">•</span>
+            <span aria-hidden="true" className="text-border-primary">•</span>
             <a
               href="https://runpane.com"
               target="_blank"
@@ -223,7 +240,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
             >
               Website
             </a>
-            <span className="text-border-primary">•</span>
+            <span aria-hidden="true" className="text-border-primary">•</span>
             <a
               href="https://runpane.com/docs"
               target="_blank"
@@ -241,14 +258,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
             Made by <a href="https://dcouple.ai" target="_blank" rel="noopener noreferrer" className="hover:text-text-secondary">Dcouple</a> · macOS, Windows & Linux
           </p>
         </div>
-
-        {error && (
-          <div className="absolute bottom-16 left-4 right-4 p-2 bg-status-error/10 border border-status-error/20 rounded text-xs text-status-error text-center">
-            {error}
-          </div>
-        )}
-      </div>
-
-    </div>
+        </div>
+    </Modal>
   );
 }

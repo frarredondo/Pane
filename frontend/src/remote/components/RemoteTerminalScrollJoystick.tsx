@@ -19,7 +19,7 @@ export function RemoteTerminalScrollJoystick({
   onScrollToBottom,
 }: RemoteTerminalScrollJoystickProps) {
   const [offset, setOffset] = useState(0);
-  const trackRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLInputElement | null>(null);
   const offsetRef = useRef(0);
   const activeRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
@@ -74,6 +74,23 @@ export function RemoteTerminalScrollJoystick({
     animationFrameRef.current = window.requestAnimationFrame(tick);
   }, []);
 
+  const applyKeyboardOffset = useCallback((nextOffset: number) => {
+    const clampedOffset = clamp(nextOffset, -MAX_OFFSET, MAX_OFFSET);
+    if (Math.abs(clampedOffset) <= DEAD_ZONE) {
+      stopScrolling();
+      return;
+    }
+
+    offsetRef.current = clampedOffset;
+    setOffset(clampedOffset);
+    activeRef.current = true;
+    lineRemainderRef.current = 0;
+    lastFrameTimeRef.current = null;
+    if (animationFrameRef.current === null) {
+      animationFrameRef.current = window.requestAnimationFrame(tick);
+    }
+  }, [stopScrolling, tick]);
+
   const updateOffset = useCallback((clientY: number) => {
     const track = trackRef.current;
     if (!track) {
@@ -86,11 +103,12 @@ export function RemoteTerminalScrollJoystick({
     setOffset(nextOffset);
   }, []);
 
-  const startScrolling = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startScrolling = useCallback((event: React.PointerEvent<HTMLInputElement>) => {
     if (disabled) {
       return;
     }
 
+    event.currentTarget.focus();
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     activeRef.current = true;
@@ -103,7 +121,7 @@ export function RemoteTerminalScrollJoystick({
     }
   }, [disabled, tick, updateOffset]);
 
-  const moveScrolling = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const moveScrolling = useCallback((event: React.PointerEvent<HTMLInputElement>) => {
     if (!activeRef.current) {
       return;
     }
@@ -112,58 +130,82 @@ export function RemoteTerminalScrollJoystick({
     updateOffset(event.clientY);
   }, [updateOffset]);
 
-  const finishScrolling = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const finishScrolling = useCallback((event: React.PointerEvent<HTMLInputElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     stopScrolling();
   }, [stopScrolling]);
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (disabled) {
       return;
     }
 
-    if (event.key === 'ArrowUp') {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
       event.preventDefault();
-      onScrollLines(-4);
-    } else if (event.key === 'ArrowDown') {
+      applyKeyboardOffset(offsetRef.current - 12);
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
       event.preventDefault();
-      onScrollLines(4);
+      applyKeyboardOffset(offsetRef.current + 12);
     } else if (event.key === 'PageUp') {
       event.preventDefault();
-      onScrollLines(-24);
+      applyKeyboardOffset(offsetRef.current - 24);
     } else if (event.key === 'PageDown') {
       event.preventDefault();
-      onScrollLines(24);
+      applyKeyboardOffset(offsetRef.current + 24);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      applyKeyboardOffset(-MAX_OFFSET);
     } else if (event.key === 'End') {
       event.preventDefault();
+      stopScrolling();
       onScrollToBottom();
+    } else if (event.key === 'Escape' || event.key === '0') {
+      event.preventDefault();
+      stopScrolling();
     }
-  }, [disabled, onScrollLines, onScrollToBottom]);
+  }, [applyKeyboardOffset, disabled, onScrollToBottom, stopScrolling]);
 
   useEffect(() => stopScrolling, [stopScrolling]);
 
+  const roundedOffset = Math.round(offset);
+  const scrollSpeed = Math.round((Math.abs(roundedOffset) / MAX_OFFSET) * 100);
+  const valueText = scrollSpeed === 0
+    ? 'Neutral'
+    : `${scrollSpeed}% ${roundedOffset < 0 ? 'up' : 'down'}`;
+
   return (
     <div className="pointer-events-none absolute right-2 top-1/2 z-30 -translate-y-1/2 md:hidden">
-      <div
-        ref={trackRef}
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        aria-disabled={disabled}
-        aria-label="Smooth terminal scroll"
-        title="Drag to scroll"
-        onPointerDown={startScrolling}
-        onPointerMove={moveScrolling}
-        onPointerUp={finishScrolling}
-        onPointerCancel={finishScrolling}
-        onLostPointerCapture={stopScrolling}
-        onKeyDown={handleKeyDown}
-        className={`pointer-events-auto relative h-40 w-11 touch-none select-none rounded-full border border-white/10 bg-black/45 shadow-lg outline-none backdrop-blur transition-colors focus-visible:ring-2 focus-visible:ring-interactive ${disabled ? 'opacity-50' : ''}`}
-      >
+      <div className={`pointer-events-auto relative h-40 w-11 rounded-full border border-white/10 bg-black/45 shadow-lg backdrop-blur transition-colors focus-within:ring-2 focus-within:ring-interactive ${disabled ? 'opacity-50' : ''}`}>
+        <input
+          ref={trackRef}
+          type="range"
+          min={-MAX_OFFSET}
+          max={MAX_OFFSET}
+          step={1}
+          value={roundedOffset}
+          disabled={disabled}
+          aria-label="Terminal scroll direction and speed"
+          aria-orientation="vertical"
+          aria-valuetext={valueText}
+          title="Drag to scroll"
+          onChange={(event) => {
+            applyKeyboardOffset(Number(event.target.value));
+          }}
+          onPointerDown={startScrolling}
+          onPointerMove={moveScrolling}
+          onPointerUp={finishScrolling}
+          onPointerCancel={finishScrolling}
+          onLostPointerCapture={stopScrolling}
+          onBlur={stopScrolling}
+          onKeyDown={handleKeyDown}
+          className="absolute inset-0 z-10 h-full w-full cursor-ns-resize touch-none opacity-0 disabled:cursor-not-allowed"
+        />
         <div className="absolute bottom-4 left-1/2 top-4 w-px -translate-x-1/2 bg-white/15" />
         <div
-          className="absolute left-1/2 top-1/2 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-surface-secondary/95 text-text-secondary shadow-md transition-colors"
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 top-1/2 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-surface-secondary/95 text-text-secondary shadow-md transition-colors"
           style={{ transform: `translate(-50%, calc(-50% + ${offset}px))` }}
         >
           <ChevronsUpDown className="h-5 w-5" />

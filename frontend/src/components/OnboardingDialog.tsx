@@ -134,6 +134,7 @@ export function SupportPaneDialog({ isOpen, onClose }: SupportPaneDialogProps) {
 
   return (
     <Modal
+      ariaLabel="Support Pane"
       isOpen={isOpen}
       onClose={onClose}
       size="sm"
@@ -314,6 +315,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   return (
     <Modal
+      ariaLabel="Get Started with Pane"
       isOpen={isOpen}
       onClose={() => {}}
       size="md"

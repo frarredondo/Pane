@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { Search } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { Input } from './ui/Input';
@@ -22,6 +22,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
 
   const getAll = useHotkeyStore((s) => s.getAll);
   const search = useHotkeyStore((s) => s.search);
@@ -40,8 +41,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     if (isOpen) {
       setSearchTerm('');
       setSelectedIndex(0);
-      // Focus input after modal animation
-      setTimeout(() => inputRef.current?.focus(), 60);
     }
   }, [isOpen]);
 
@@ -71,10 +70,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {
       case 'ArrowDown':
+        if (commandCount === 0) break;
         e.preventDefault();
         setSelectedIndex((prev) => (prev + 1) % commandCount);
         break;
       case 'ArrowUp':
+        if (commandCount === 0) break;
         e.preventDefault();
         setSelectedIndex((prev) => (prev - 1 + commandCount) % commandCount);
         break;
@@ -87,8 +88,10 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
 
   return (
     <Modal
+      ariaLabel="Command Palette"
       isOpen={isOpen}
       onClose={onClose}
+      initialFocusRef={inputRef}
       size="md"
       showCloseButton={false}
       className="!max-h-[min(500px,80vh)]"
@@ -101,6 +104,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           </div>
           <Input
             ref={inputRef}
+            aria-label="Search commands"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={commandCount > 0}
+            aria-controls={listboxId}
+            aria-activedescendant={commandCount > 0 ? `${listboxId}-option-${selectedIndex}` : undefined}
             type="text"
             placeholder="Search commands..."
             value={searchTerm}
@@ -112,7 +121,14 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
       </div>
 
       {/* Results list */}
-      <div ref={listRef} className="overflow-y-auto py-2" style={{ maxHeight: '380px' }}>
+      <div
+        id={listboxId}
+        ref={listRef}
+        role="listbox"
+        aria-label="Commands"
+        className="overflow-y-auto py-2"
+        style={{ maxHeight: '380px' }}
+      >
         {commandCount === 0 ? (
           <div className="px-4 py-8 text-center text-text-tertiary text-sm">
             No commands found
@@ -133,8 +149,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             const button = (
               <button
                 key={item.hotkey.id}
+                id={`${listboxId}-option-${item.flatIndex}`}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
                 data-selected={isSelected}
                 aria-disabled={item.disabled}
+                tabIndex={-1}
                 className={cn(
                   'w-full flex items-center justify-between px-4 py-2 text-sm transition-colors',
                   item.disabled

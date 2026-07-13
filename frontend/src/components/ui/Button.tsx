@@ -21,6 +21,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     loadingText,
     icon,
     disabled,
+    'aria-busy': ariaBusy,
     children,
     ...props 
   }, ref) => {
@@ -53,10 +54,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           className
         )}
         disabled={disabled || loading}
+        aria-busy={ariaBusy ?? loading}
         {...props}
       >
         {loading && (
           <svg 
+            aria-hidden="true"
+            focusable="false"
             className="animate-spin -ml-1 mr-2 h-4 w-4" 
             xmlns="http://www.w3.org/2000/svg" 
             fill="none" 
@@ -77,7 +81,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             />
           </svg>
         )}
-        {icon && !loading && <span className="mr-2">{icon}</span>}
+        {icon && !loading && <span className="mr-2" aria-hidden="true">{icon}</span>}
         {loading && loadingText ? loadingText : children}
       </button>
     );

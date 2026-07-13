@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { FileText, Folder, Zap } from 'lucide-react';
 
 interface FileItem {
@@ -44,6 +44,7 @@ const FilePathAutocomplete: React.FC<FilePathAutocompleteProps> = ({
   onBlur,
   style
 }) => {
+  const listboxId = useId();
   const [suggestions, setSuggestions] = useState<FileItem[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -417,7 +418,14 @@ const FilePathAutocomplete: React.FC<FilePathAutocompleteProps> = ({
     placeholder,
     className,
     disabled,
-    style
+    style,
+    role: 'combobox' as const,
+    'aria-autocomplete': 'list' as const,
+    'aria-expanded': showSuggestions && suggestions.length > 0,
+    'aria-controls': listboxId,
+    'aria-activedescendant': showSuggestions && suggestions[selectedIndex]
+      ? `${listboxId}-option-${selectedIndex}`
+      : undefined,
   };
 
   return (
@@ -438,7 +446,10 @@ const FilePathAutocomplete: React.FC<FilePathAutocompleteProps> = ({
       
       {showSuggestions && suggestions.length > 0 && (
         <div
+          id={listboxId}
           ref={dropdownRef}
+          role="listbox"
+          aria-label={activePattern?.type === 'slash' ? 'Slash commands' : 'Files'}
           className="absolute z-50 max-h-60 overflow-auto rounded-md bg-surface-secondary py-1 shadow-lg ring-1 ring-black ring-opacity-5 border border-border-primary"
           style={{
             minWidth: Math.min(300, dropdownPosition?.maxWidth || 300) + 'px',
@@ -458,13 +469,19 @@ const FilePathAutocomplete: React.FC<FilePathAutocompleteProps> = ({
 
             return (
               <div
+                id={`${listboxId}-option-${index}`}
                 key={suggestion.path}
+                role="option"
+                aria-selected={index === selectedIndex}
                 className={`flex items-center px-4 py-2.5 cursor-pointer min-w-0 transition-colors ${
                   index === selectedIndex
                     ? 'bg-interactive text-on-interactive'
                     : 'text-text-secondary hover:bg-surface-hover'
                 }`}
-                onClick={() => selectSuggestion(suggestion)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  selectSuggestion(suggestion);
+                }}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
                 {isSlashCommand ? (

@@ -22,22 +22,6 @@ async function dismissStartupDialogs(page: Page) {
   }
 }
 
-async function clickDomNode(locator: ReturnType<Page['locator']>) {
-  await locator.evaluate((node: HTMLElement) => node.click());
-}
-
-async function openSettings(page: Page) {
-  const collapseSidebarButton = page.getByRole('button', { name: 'Collapse sidebar' });
-  await expect(collapseSidebarButton).toBeVisible({ timeout: 5000 });
-  await collapseSidebarButton.click();
-
-  const settingsButton = page.getByRole('button', { name: 'Settings' }).first();
-  await expect(settingsButton).toBeVisible({ timeout: 5000 });
-  await clickDomNode(settingsButton);
-
-  await expect(page.getByText('Pane Settings')).toBeVisible({ timeout: 5000 });
-}
-
 test.describe('Dropdown keyboard navigation', () => {
   test('footer-only dropdown focuses and activates its footer action', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -60,15 +44,13 @@ test.describe('Dropdown keyboard navigation', () => {
   test('theme dropdown is navigable with arrow keys and Enter', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await dismissStartupDialogs(page);
-    await openSettings(page);
 
-    // The Appearance section is expanded by default; open the theme dropdown.
-    // Scope to the settings form: HomePage underneath also renders a theme picker.
     const trigger = page
-      .locator('#settings-form [aria-haspopup="menu"]')
+      .locator('[aria-haspopup="menu"]')
       .filter({ hasText: 'Light (rounded)' });
     await expect(trigger).toBeVisible({ timeout: 5000 });
-    await trigger.click();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
 
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible({ timeout: 5000 });
@@ -92,7 +74,7 @@ test.describe('Dropdown keyboard navigation', () => {
     // Menu closes and the theme is applied.
     await expect(page.getByRole('menu')).toHaveCount(0);
     await expect(
-      page.locator('#settings-form').getByText('Forge', { exact: true }),
+      page.getByRole('button', { name: /Forge/ }),
     ).toBeVisible();
     await expect.poll(async () =>
       page.evaluate(() => document.documentElement.classList.contains('forge')),
@@ -104,13 +86,13 @@ test.describe('Dropdown keyboard navigation', () => {
   test('Escape closes the dropdown without changing the theme', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await dismissStartupDialogs(page);
-    await openSettings(page);
 
     const trigger = page
-      .locator('#settings-form [aria-haspopup="menu"]')
+      .locator('[aria-haspopup="menu"]')
       .filter({ hasText: 'Light (rounded)' });
     await expect(trigger).toBeVisible({ timeout: 5000 });
-    await trigger.click();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
 
     await expect(page.getByRole('menu')).toBeVisible({ timeout: 5000 });
 

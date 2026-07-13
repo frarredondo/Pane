@@ -25,12 +25,11 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl">
-      <ModalHeader className="bg-status-error/10">
-        <div className="flex items-center space-x-3">
-          <AlertCircle className="w-6 h-6 text-status-error" />
-          <span className="text-status-error">{errorDetails.title}</span>
-        </div>
-      </ModalHeader>
+      <ModalHeader
+        title={errorDetails.title}
+        icon={<AlertCircle className="w-6 h-6 text-status-error" />}
+        className="bg-status-error/10"
+      />
 
       <ModalBody>
           <div className="space-y-6">
@@ -168,4 +167,4 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
       </ModalFooter>
     </Modal>
   );
-}; 
+};

@@ -6,6 +6,7 @@ import { useHotkey } from '../hooks/useHotkey';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
+import { LiveRegion } from './ui/LiveRegion';
 import '@xterm/xterm/css/xterm.css';
 import { useSessionView } from '../hooks/useSessionView';
 import { DetailPanel } from './DetailPanel';
@@ -125,6 +126,16 @@ export const SessionView = memo(() => {
     // Otherwise look in regular sessions
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
+  const lastAnnouncedSessionStateRef = useRef<string | null>(activeSession?.status ?? null);
+  const [sessionStatusAnnouncement, setSessionStatusAnnouncement] = useState('');
+
+  useEffect(() => {
+    if (!activeSession || lastAnnouncedSessionStateRef.current === activeSession.status) return;
+    lastAnnouncedSessionStateRef.current = activeSession.status;
+    setSessionStatusAnnouncement(
+      `${activeSession.name || 'Pane'} is ${activeSession.status}${activeSession.statusMessage ? `: ${activeSession.statusMessage}` : ''}`,
+    );
+  }, [activeSession?.id, activeSession?.name, activeSession?.status, activeSession?.statusMessage]);
 
   // Panel store state and actions
   const {
@@ -1717,6 +1728,9 @@ export const SessionView = memo(() => {
   
   return (
     <div className="pane-session-shell flex-1 flex flex-col overflow-hidden bg-bg-primary">
+      <LiveRegion mode={activeSession.status === 'error' ? 'assertive' : 'polite'}>
+        {sessionStatusAnnouncement}
+      </LiveRegion>
       {/* SINGLE SessionProvider wraps everything */}
       <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
 
@@ -1937,10 +1951,10 @@ export const SessionView = memo(() => {
                         {/* Custom command pills */}
                         {customCommands.map((cmd, index) => {
                           const shortcutDisplay = hotkeyDisplay(`add-tool-custom-${index}`);
-                          const pill = (
-                            <span
-                              key={`shortcut-${index}`}
-                              className="group/pill inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-[11px] font-medium text-text-tertiary border border-border-primary hover:bg-surface-hover hover:text-text-secondary transition-colors whitespace-nowrap flex-shrink-0 cursor-pointer"
+                          const commandButton = (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 pl-2 py-0.5 text-[11px] font-medium text-text-tertiary hover:text-text-secondary whitespace-nowrap"
                               onClick={() => handlePanelCreate('terminal', {
                                 initialCommand: cmd.command,
                                 title: cmd.name
@@ -1949,20 +1963,28 @@ export const SessionView = memo(() => {
                             >
                               {getCliBrandIcon(cmd.command, 'w-3 h-3') || <TerminalSquare className="w-3 h-3" />}
                               {cmd.name.length > 13 ? cmd.name.slice(0, 13) + '…' : cmd.name}
+                            </button>
+                          );
+                          return (
+                            <span
+                              key={`shortcut-${index}`}
+                              className="group/pill inline-flex items-center gap-0 pr-1 rounded-full text-text-tertiary border border-border-primary hover:bg-surface-hover transition-colors whitespace-nowrap flex-shrink-0"
+                            >
+                              {shortcutDisplay ? (
+                                <Tooltip content={<Kbd>{shortcutDisplay}</Kbd>} side="top">
+                                  {commandButton}
+                                </Tooltip>
+                              ) : commandButton}
                               <button
-                                className="p-0.5 rounded-full opacity-0 group-hover/pill:opacity-100 hover:bg-surface-tertiary hover:text-text-primary transition-all"
-                                onClick={(e) => { e.stopPropagation(); deleteCustomCommand(index); }}
-                                title="Remove shortcut"
+                                type="button"
+                                className="p-0.5 rounded-full opacity-0 group-hover/pill:opacity-100 group-focus-within/pill:opacity-100 hover:bg-surface-tertiary hover:text-text-primary transition-all"
+                                onClick={() => deleteCustomCommand(index)}
+                                aria-label={`Remove ${cmd.name} shortcut`}
                               >
                                 <X className="w-2.5 h-2.5" />
                               </button>
                             </span>
                           );
-                          return shortcutDisplay ? (
-                            <Tooltip key={`shortcut-${index}`} content={<Kbd>{shortcutDisplay}</Kbd>} side="top">
-                              {pill}
-                            </Tooltip>
-                          ) : pill;
                         })}
                       </div>
 

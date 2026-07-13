@@ -1,4 +1,5 @@
 import { LogOut, Menu } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../../shared/types/remoteDaemon';
 
 interface RemoteStatusBarProps {
@@ -21,9 +22,32 @@ export function RemoteStatusBar({
   const connected = status === 'connected';
   const statusLabel = getStatusLabel(status);
   const title = connected ? profile.label : `${statusLabel} ${profile.label}`;
+  const [announcement, setAnnouncement] = useState('');
+  const previousAnnouncementRef = useRef('');
+
+  useEffect(() => {
+    const nextAnnouncement = status === 'error' && lastError
+      ? `${statusLabel} ${profile.label}. ${lastError}`
+      : `${statusLabel} ${profile.label}`;
+    if (nextAnnouncement !== previousAnnouncementRef.current) {
+      previousAnnouncementRef.current = nextAnnouncement;
+      setAnnouncement(nextAnnouncement);
+    }
+  }, [lastError, profile.label, status, statusLabel]);
 
   return (
-    <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-border-primary bg-surface-primary px-3 py-2 sm:px-4">
+    <div
+      className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-border-primary bg-surface-primary px-3 py-2 sm:px-4"
+      aria-busy={status === 'connecting' || status === 'reconnecting'}
+    >
+      <div
+        className="sr-only"
+        role={status === 'error' ? 'alert' : 'status'}
+        aria-live={status === 'error' ? 'assertive' : 'polite'}
+        aria-atomic="true"
+      >
+        {announcement}
+      </div>
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <button
           type="button"
@@ -31,9 +55,9 @@ export function RemoteStatusBar({
           className="rounded-md p-2 text-text-secondary hover:bg-surface-hover hover:text-text-primary md:hidden"
           aria-label="Open remote panes"
         >
-          <Menu className="h-5 w-5" />
+          <Menu className="h-5 w-5" aria-hidden="true" />
         </button>
-        <span className={`flex h-2.5 w-2.5 shrink-0 rounded-full ${connected ? 'bg-status-success' : status === 'error' ? 'bg-status-error' : 'bg-status-warning'}`} />
+        <span aria-hidden="true" className={`flex h-2.5 w-2.5 shrink-0 rounded-full ${connected ? 'bg-status-success' : status === 'error' ? 'bg-status-error' : 'bg-status-warning'}`} />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-text-primary">{title}</p>
           <p className="truncate text-xs text-text-tertiary">
@@ -45,9 +69,10 @@ export function RemoteStatusBar({
       <button
         type="button"
         onClick={onDisconnect}
+        aria-label="Disconnect"
         className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border-primary px-2.5 py-2 text-sm font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary sm:px-3 sm:py-1.5"
       >
-        <LogOut className="h-4 w-4 sm:hidden" />
+        <LogOut className="h-4 w-4 sm:hidden" aria-hidden="true" />
         <span className="hidden sm:inline">Disconnect</span>
       </button>
     </div>

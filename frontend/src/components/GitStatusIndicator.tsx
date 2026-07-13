@@ -325,17 +325,8 @@ const GitStatusIndicator: React.FC<GitStatusIndicatorProps> = React.memo(({ gitS
     ariaLabel = `Behind by ${primaryCount} commit${primaryCount !== 1 ? 's' : ''}`;
   }
 
-  return (
-    <span 
-      className={`inline-flex items-center ${primaryCount > 0 ? 'justify-center gap-0.5' : 'justify-center'} w-[5.5ch] ${sizeConfig.padding} ${sizeConfig.text} rounded-md border ${config.bgColor} ${config.color} border-gray-300 dark:border-gray-600 ${(onClick || sessionId) ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-      title={tooltipContent}
-      onClick={handleClick}
-      aria-label={ariaLabel}
-      data-testid={sessionId ? `session-${sessionId}-git-status` : 'git-status'}
-      data-git-state={gitStatus.state}
-      data-git-ahead={gitStatus.ahead}
-      data-git-behind={gitStatus.behind}
-    >
+  const content = (
+    <>
       <span className="flex-shrink-0">
         {config.icon}
       </span>
@@ -344,6 +335,26 @@ const GitStatusIndicator: React.FC<GitStatusIndicatorProps> = React.memo(({ gitS
           {primaryCount > 9 ? '★' : primaryCount}
         </span>
       )}
+    </>
+  );
+
+  const className = `inline-flex items-center ${primaryCount > 0 ? 'justify-center gap-0.5' : 'justify-center'} w-[5.5ch] ${sizeConfig.padding} ${sizeConfig.text} rounded-md border ${config.bgColor} ${config.color} border-gray-300 dark:border-gray-600 ${(onClick || sessionId) ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`;
+  const dataProps = {
+    title: tooltipContent,
+    'aria-label': ariaLabel,
+    'data-testid': sessionId ? `session-${sessionId}-git-status` : 'git-status',
+    'data-git-state': gitStatus.state,
+    'data-git-ahead': gitStatus.ahead,
+    'data-git-behind': gitStatus.behind,
+  };
+
+  return onClick || sessionId ? (
+    <button type="button" className={className} onClick={handleClick} {...dataProps}>
+      {content}
+    </button>
+  ) : (
+    <span className={className} {...dataProps}>
+      {content}
     </span>
   );
 });

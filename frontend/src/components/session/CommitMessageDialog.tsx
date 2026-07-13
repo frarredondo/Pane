@@ -37,14 +37,13 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
   const isProcessing = isMerging || isMergingAndArchiving;
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl">
-      <ModalHeader>
-        {dialogType === 'commit'
+      <ModalHeader
+        title={dialogType === 'commit'
           ? 'Commit Changes'
           : dialogType === 'squash'
             ? `Merge to ${gitCommands?.comparisonBaseBranch || 'Main'}`
-            : `Rebase from ${gitCommands?.comparisonBaseBranch || 'Main'}`
-        }
-      </ModalHeader>
+            : `Rebase from ${gitCommands?.comparisonBaseBranch || 'Main'}`}
+      />
       
       <ModalBody>
           <div className="space-y-4">
@@ -141,4 +140,4 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
       </ModalFooter>
     </Modal>
   );
-}; 
+};

@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect, ReactNode, CSSProperties } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useId, ReactNode, CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { Slot } from '@radix-ui/react-slot';
 import { cn } from '../../utils/cn';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Kbd } from './Kbd';
 import { initialActiveIndex } from './dropdownNavigation';
+import { usePortalContainer } from '../../contexts/PortalContainerContext';
 
 export interface DropdownItem {
   id: string;
@@ -21,7 +23,7 @@ export interface DropdownItem {
 
 export interface DropdownProps {
   // Trigger element
-  trigger: ReactNode;
+  trigger: React.ReactElement;
   triggerClassName?: string;
   
   // Items
@@ -94,12 +96,15 @@ export function Dropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [actualPosition, setActualPosition] = useState<'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'>('bottom-right');
   const [activeIndex, setActiveIndex] = useState(-1);
+  const menuId = useId();
+  const portalContainer = usePortalContainer();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement>(null);
 
   const handleToggle = () => {
     const newState = !isOpen;
+    setActiveIndex(newState ? initialActiveIndex(items, selectedId) : -1);
     setIsOpen(newState);
     onOpenChange?.(newState);
   };
@@ -145,7 +150,7 @@ export function Dropdown({
 
   // Roving tabindex: DOM focus follows the active item. If there are no regular
   // items, focus the first footer control so footer-only menus remain usable.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) return;
     const controls = getMenuControls(contentRef.current);
     const target = controls[activeIndex] ?? controls[0];
@@ -282,36 +287,33 @@ export function Dropdown({
   return (
     <div ref={dropdownRef} className={cn('relative', className)} style={style}>
       {/* Trigger */}
-      <div
+      <Slot
         ref={triggerRef}
         onClick={handleToggle}
         className={triggerClassName}
-        // Make trigger focusable for keyboard navigation
-        tabIndex={0}
         aria-haspopup="menu"
         aria-expanded={isOpen}
+        aria-controls={isOpen ? menuId : undefined}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleToggle();
-          } else if (e.key === 'ArrowDown' && !isOpen) {
+          if (e.key === 'ArrowDown' && !isOpen) {
             e.preventDefault();
             handleToggle();
           }
         }}
       >
         {trigger}
-      </div>
+      </Slot>
 
       {/* Dropdown Menu - rendered via portal to escape overflow clipping */}
       {isOpen && createPortal(
         <div
+          id={menuId}
           ref={contentRef}
           role="menu"
           aria-orientation="vertical"
           onKeyDown={handleMenuKeyDown}
           className={cn(
-            'z-[10000]',
+            'z-[10000] pointer-events-auto',
             'bg-surface-primary rounded-md shadow-dropdown-elevated',
             'border border-border-subtle/60',
             'backdrop-blur-sm',
@@ -418,7 +420,7 @@ export function Dropdown({
               )}
             </div>
         </div>,
-        document.body
+        portalContainer ?? document.body
       )}
     </div>
   );
