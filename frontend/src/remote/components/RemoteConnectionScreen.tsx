@@ -30,6 +30,9 @@ export function RemoteConnectionScreen({
   const canReadClipboard = typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText);
   const mobileInstallPlatform = getMobileInstallPlatform();
   const connectionErrorId = useId();
+  const showConnectionTroubleshooting = Boolean(
+    error && !/^(Connection code|Invalid remote Pane connection code)/.test(error),
+  );
 
   useEffect(() => {
     if (savedProfiles.length > 0) {
@@ -177,10 +180,10 @@ export function RemoteConnectionScreen({
             />
 
             {(error || clipboardError) && (
-              <div id={connectionErrorId} role="alert" className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+              <div id={connectionErrorId} role="alert" className="mt-3 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
                 <p>{error || clipboardError}</p>
-                {error && (
-                  <p className="mt-2 text-xs text-red-500/90">
+                {showConnectionTroubleshooting && (
+                  <p className="mt-2 text-xs text-status-error">
                     If this profile uses Tailscale, install or open Tailscale on this device, sign in to the same tailnet as the host, then retry.
                   </p>
                 )}
@@ -192,7 +195,7 @@ export function RemoteConnectionScreen({
                 type="submit"
                 disabled={isConnecting || (!code.trim() && !canReadClipboard)}
                 aria-busy={isConnecting && connectingProfileId === null}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-interactive px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:py-2"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-interactive px-4 py-2.5 text-sm font-semibold text-text-on-interactive transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:py-2"
               >
                 {code.trim() ? <ArrowRight className="h-4 w-4" aria-hidden="true" /> : <ClipboardPaste className="h-4 w-4" aria-hidden="true" />}
                 {isConnecting ? 'Connecting...' : code.trim() ? 'Import & Connect' : 'Paste & Connect'}
@@ -215,7 +218,7 @@ export function RemoteConnectionScreen({
                           onClick={() => { void handleProfileConnect(profile); }}
                           disabled={isConnecting}
                           aria-busy={connectingProfileId === profile.id}
-                          className="min-w-0 flex-1 rounded-md bg-interactive px-3 py-2 text-sm font-semibold text-white hover:opacity-90 sm:flex-none sm:py-1.5"
+                          className="min-w-0 flex-1 rounded-md bg-interactive px-3 py-2 text-sm font-semibold text-text-on-interactive hover:opacity-90 sm:flex-none sm:py-1.5"
                         >
                           Connect
                         </button>

@@ -70,6 +70,59 @@ const panels = [
   },
 ];
 
+const remoteSession = {
+  ...session,
+  id: 'remote-accessibility-session',
+  name: 'Remote accessibility pane',
+  worktreePath: '/tmp/remote-accessibility-fixture/remote-accessibility-pane',
+  projectId: 2,
+};
+
+const remoteProject = {
+  ...project,
+  id: 2,
+  name: 'Remote accessibility fixture',
+  path: '/tmp/remote-accessibility-fixture',
+  sessions: [remoteSession],
+};
+
+const remotePanels = [{
+  ...panels[1],
+  id: 'remote-accessibility-explorer',
+  sessionId: remoteSession.id,
+}];
+
+const remoteAffordances = {
+  terminalShortcuts: [],
+  customCommands: [],
+  voiceTranscription: {
+    availableModes: [],
+    defaultMode: 'streaming',
+    configured: {
+      cleanup: false,
+      recorded: false,
+      streaming: false,
+      fal: false,
+      deepgram: false,
+      openRouter: false,
+    },
+    modes: {
+      streaming: {
+        label: 'Live',
+        priceLabel: '~$0.462/hr ASR + cleanup',
+        latencyLabel: 'Realtime text while speaking',
+        recommended: true,
+      },
+      recorded: {
+        label: 'Batch',
+        priceLabel: '~$0.084/hr full pipeline',
+        latencyLabel: 'Text appears after stop',
+        recommended: false,
+      },
+    },
+  },
+};
+
 async function openDesktop(page: Page): Promise<void> {
   await installElectronApiMock(page, {
     initialProjects: [project],
@@ -80,6 +133,87 @@ async function openDesktop(page: Page): Promise<void> {
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
+}
+
+async function openConnectedRemote(page: Page): Promise<void> {
+  await page.addInitScript((profile) => {
+    window.localStorage.setItem('pane.remotePwa.savedProfiles', JSON.stringify([profile]));
+
+    class MockEventSource {
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+
+      constructor(readonly url: string) {
+        window.setTimeout(() => this.onopen?.(new Event('open')), 0);
+      }
+
+      addEventListener(): void {}
+      removeEventListener(): void {}
+      close(): void {}
+    }
+
+    Object.defineProperty(window, 'EventSource', {
+      configurable: true,
+      value: MockEventSource,
+    });
+  }, {
+    id: 'qa-host',
+    label: 'QA host',
+    baseUrl: 'http://qa-pane.test/remote/browser',
+    token: 'qa-token-12345678',
+    transport: 'http+sse',
+  });
+
+  await page.route('http://qa-pane.test/**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      return;
+    }
+
+    const body = JSON.parse(request.postData() ?? '{}') as { channel?: string };
+    let result: unknown = null;
+    switch (body.channel) {
+      case 'sessions:get-all-with-projects':
+        result = [remoteProject];
+        break;
+      case 'panels:list':
+        result = remotePanels;
+        break;
+      case 'panels:getActive':
+        result = remotePanels[0];
+        break;
+      case 'remote:pwa-affordances':
+        result = remoteAffordances;
+        break;
+      case 'projects:list-branches':
+        result = [
+          { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
+          { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
+        ];
+        break;
+      case 'projects:detect-branch':
+        result = 'main';
+        break;
+      default:
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ ok: false, error: { message: `Unexpected channel: ${body.channel ?? 'unknown'}` } }),
+        });
+        return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, result }),
+    });
+  });
+
+  await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Remote accessibility pane' })).toBeVisible({ timeout: 10_000 });
 }
 
 test('Home and About are axe-clean and the modal contains and restores focus', async ({ page }) => {
@@ -118,6 +252,16 @@ test('Home and About are axe-clean and the modal contains and restores focus', a
   await expect(themeTrigger).toBeFocused();
 });
 
+test('Night Owl recent-pane metadata remains axe-clean', async ({ page }) => {
+  await openDesktop(page);
+
+  const themeTrigger = page.getByRole('button', { name: /\(sharp\)|\(rounded\)|OLED|Dusk|Forge|Ember|Aurora|Night Owl|Terracotta/ }).last();
+  await themeTrigger.click();
+  await page.getByRole('menuitemradio', { name: 'Night Owl', exact: true }).click();
+  await expect(themeTrigger).toHaveText(/Night Owl/);
+  await expectNoAxeViolations(page);
+});
+
 test('seeded Create Pane dialog is keyboard reachable and axe-clean', async ({ page }) => {
   await openDesktop(page);
 
@@ -128,7 +272,18 @@ test('seeded Create Pane dialog is keyboard reachable and axe-clean', async ({ p
 
   const dialog = page.getByRole('dialog', { name: /New Pane in Accessibility fixture/i });
   await expect(dialog).toBeVisible();
-  await expect(page.getByRole('combobox', { name: /Base Branch/i })).toBeVisible();
+  const branchCombobox = page.getByRole('combobox', { name: /Base Branch/i });
+  await expect(branchCombobox).toBeVisible();
+  await branchCombobox.click();
+  await expect(page.getByRole('listbox', { name: 'Branches' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('listbox', { name: 'Branches' })).toBeHidden();
+  await expect(branchCombobox).toBeFocused();
+
+  await page.getByRole('button', { name: 'Advanced' }).click();
+  await expect(page.getByRole('switch', { name: 'Start pinned' })).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Use worktree' })).toBeVisible();
   await expectNoAxeViolations(page);
 });
 
@@ -178,6 +333,30 @@ test('Pane Chat agent choice uses native radio semantics', async ({ page }) => {
 test('disconnected Remote Pane screen is axe-clean', async ({ page }) => {
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Remote Pane' })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole('button', { name: /Connect with a code/i })).toBeVisible();
+  await page.getByRole('button', { name: /Connect with a code/i }).click();
+  const codeInput = page.getByLabel('Connection Code');
+  await codeInput.fill('pane-remote://not-json');
   await expectNoAxeViolations(page);
+  await page.getByRole('button', { name: 'Import & Connect' }).click();
+  await expect(page.getByRole('alert')).toContainText('Connection code is not valid');
+  await expect(page.getByRole('alert')).not.toContainText('Tailscale');
+  await expect(codeInput).toHaveAttribute('aria-invalid', 'true');
+  await expectNoAxeViolations(page);
+});
+
+test('connected Remote Create Pane keeps its dialog open on branch Escape and is axe-clean', async ({ page }) => {
+  await openConnectedRemote(page);
+
+  await page.getByRole('button', { name: 'New pane in Remote accessibility fixture' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New Pane in Remote accessibility fixture' });
+  await expect(dialog).toBeVisible();
+
+  const branchCombobox = page.getByRole('combobox', { name: 'Base Branch' });
+  await branchCombobox.click();
+  await expect(page.getByRole('listbox', { name: 'Base branches' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('listbox', { name: 'Base branches' })).toBeHidden();
+  await expect(branchCombobox).toBeFocused();
+  await expectNoAxeViolations(page, { include: '[role="dialog"]' });
 });

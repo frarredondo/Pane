@@ -124,7 +124,7 @@
   --owl-600: #3d2528;
   --owl-500: #5c3a3e;
   --owl-400: #7d5558;
-  --owl-300: #a07578;
+  --owl-300: #a5797c;
   --owl-200: #c49a9e;
   --owl-100: #e8cdd0;
 
@@ -195,12 +195,12 @@
   --color-border-focus: rgb(88 166 255);
 
   /* Semantic Tokens - Interactive */
-  --color-interactive-primary: rgb(47 129 247);   /* GitHub #2f81f7 */
-  --color-interactive-hover: rgb(56 139 253);
-  --color-interactive-active: rgb(88 166 255);
+  --color-interactive-primary: rgb(31 111 235);   /* #1f6feb - AA with white text */
+  --color-interactive-hover: rgb(26 95 208);
+  --color-interactive-active: rgb(11 79 194);
   --color-interactive-text: rgb(88 166 255);      /* GitHub #58a6ff */
   --color-focus-ring: rgb(88 166 255);
-  --color-interactive-rgb: 47 129 247;
+  --color-interactive-rgb: 31 111 235;
 
   /* High-contrast interactive text for dark backgrounds */
   --color-text-interactive-on-dark: rgb(88 166 255);

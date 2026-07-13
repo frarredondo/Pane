@@ -401,6 +401,7 @@ export function CreateSessionDialog({
       }}
       size="lg"
       closeOnOverlayClick={false}
+      closeOnEscape={!isBranchDropdownOpen}
     >
       <ModalHeader title={`New Pane${projectName ? ` in ${projectName}` : ''}`} />
 
@@ -645,6 +646,7 @@ export function CreateSessionDialog({
                     </div>
                     <Toggle
                       checked={startPinned}
+                      aria-label="Start pinned"
                       onChange={(checked) => {
                         setStartPinned(checked);
                         savePreferences({ startPinned: checked });
@@ -662,6 +664,7 @@ export function CreateSessionDialog({
                     </div>
                     <Toggle
                       checked={useWorktree}
+                      aria-label="Use worktree"
                       onChange={(checked) => {
                         setUseWorktree(checked);
                         if (!checked) {

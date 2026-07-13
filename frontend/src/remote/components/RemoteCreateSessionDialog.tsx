@@ -227,7 +227,9 @@ export function RemoteCreateSessionDialog({
               if (target?.isConnected) target.focus();
             });
           }}
-          onEscapeKeyDown={(event) => { if (submitting) event.preventDefault(); }}
+          onEscapeKeyDown={(event) => {
+            if (submitting || branchOpen) event.preventDefault();
+          }}
           onPointerDownOutside={(event) => { if (submitting) event.preventDefault(); }}
         >
           <form
@@ -404,7 +406,7 @@ export function RemoteCreateSessionDialog({
             type="submit"
             disabled={loadingBranches || submitting || !baseBranch}
             aria-busy={submitting}
-            className="rounded-md bg-interactive px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md bg-interactive px-5 py-2 text-sm font-semibold text-text-on-interactive transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? 'Creating...' : 'Create'}
           </button>

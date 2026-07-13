@@ -190,7 +190,15 @@ export function RemotePwaApp() {
   }, [loadAffordances, refreshProjects]);
 
   const connectCode = useCallback(async (code: string) => {
-    const profile = decodeRemoteConnectionCode(code);
+    setLastError(null);
+    let profile: RemotePaneConnectionProfile;
+    try {
+      profile = decodeRemoteConnectionCode(code);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : 'Invalid remote Pane connection code');
+      throw error;
+    }
+
     forgetProfilesForBaseUrl(profile.baseUrl, setSavedProfiles);
     await connectProfile(profile);
   }, [connectProfile]);
