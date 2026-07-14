@@ -2979,6 +2979,15 @@ export class DatabaseService {
       .all() as Session[];
   }
 
+  getPowerSaveSnapshotSessions(options?: { includeHidden?: boolean }): Session[] {
+    const hiddenClause = options?.includeHidden ? "" : "WHERE (is_hidden = 0 OR is_hidden IS NULL)";
+    return this.db
+      .prepare(
+        `SELECT * FROM sessions ${hiddenClause} ORDER BY created_at DESC`,
+      )
+      .all() as Session[];
+  }
+
   getArchivedSessions(projectId?: number, options?: { includeHidden?: boolean }): Session[] {
     const hiddenClause = options?.includeHidden ? "" : " AND (is_hidden = 0 OR is_hidden IS NULL)";
     if (projectId !== undefined) {

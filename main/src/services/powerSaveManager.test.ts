@@ -27,7 +27,15 @@ class ConfigManagerStub extends EventEmitter {
   }
 }
 
-class SessionManagerStub extends EventEmitter {}
+class SessionManagerStub extends EventEmitter {
+  constructor(private readonly snapshotSessions: Session[] = []) {
+    super();
+  }
+
+  getPowerSaveSnapshotSessions(): Session[] {
+    return this.snapshotSessions;
+  }
+}
 
 function createSession(
   id: string,
@@ -152,6 +160,60 @@ describe('PowerSaveManager', () => {
     ]);
 
     expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a tracked active main-repo session held when sessions-loaded omits it', () => {
+    sessionManager.emit(
+      'session-created',
+      createSession('main-repo-session', 'running', { isMainRepo: true }),
+    );
+
+    sessionManager.emit('sessions-loaded', [
+      createSession('ordinary-session', 'stopped'),
+    ]);
+
+    expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
+  });
+
+  it('does not reacquire for an archived running update after prior deletion', () => {
+    sessionManager.emit('session-deleted', { id: 'archived-session' });
+    sessionManager.emit(
+      'session-updated',
+      createSession('archived-session', 'running', { archived: true }),
+    );
+
+    expect(powerSaveBlocker.start).not.toHaveBeenCalled();
+    expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
+  });
+
+  it('drops a previously active session when a late archived running update arrives', () => {
+    sessionManager.emit('session-created', createSession('archived-session', 'running'));
+    sessionManager.emit(
+      'session-updated',
+      createSession('archived-session', 'running', { archived: true }),
+    );
+
+    expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlocker.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('seeds active sessions from the construction snapshot before any event', () => {
+    manager.dispose();
+    powerSaveBlocker.start.mockClear();
+    powerSaveBlocker.stop.mockClear();
+
+    sessionManager = new SessionManagerStub([
+      createSession('main-repo-session', 'running', { isMainRepo: true }),
+      createSession('archived-session', 'running', { archived: true }),
+      createSession('stopped-session', 'stopped'),
+    ]);
+    manager = new PowerSaveManager(configManager, sessionManager);
+    manager.sync();
+
+    expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+    expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
   });
 
   it('defaults keep-awake to enabled for a fresh ConfigManager', () => {

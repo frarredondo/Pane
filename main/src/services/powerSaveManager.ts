@@ -14,27 +14,28 @@ interface PowerSaveConfigSource extends EventEmitter {
   getConfig(): AppConfig;
 }
 
-type PowerSaveSessionSource = EventEmitter;
+interface PowerSaveSessionSource extends EventEmitter {
+  getPowerSaveSnapshotSessions(): Session[];
+}
 
 export class PowerSaveManager {
-  private readonly statuses = new Map<string, Session['status']>();
+  private readonly activeSessionIds = new Set<string>();
   private blockerId: number | null = null;
 
   private readonly handleSessionsLoaded = (sessions: Session[]): void => {
-    this.statuses.clear();
     for (const session of sessions) {
-      this.statuses.set(session.id, session.status);
+      this.retainIfActive(session);
     }
     this.sync();
   };
 
   private readonly handleSessionChanged = (session: Session): void => {
-    this.statuses.set(session.id, session.status);
+    this.retainIfActive(session);
     this.sync();
   };
 
   private readonly handleSessionDeleted = (session: Pick<Session, 'id'>): void => {
-    this.statuses.delete(session.id);
+    this.activeSessionIds.delete(session.id);
     this.sync();
   };
 
@@ -51,13 +52,15 @@ export class PowerSaveManager {
     this.sessionManager.on('session-updated', this.handleSessionChanged);
     this.sessionManager.on('session-deleted', this.handleSessionDeleted);
     this.configManager.on('config-updated', this.handleConfigUpdated);
+
+    for (const session of this.sessionManager.getPowerSaveSnapshotSessions()) {
+      this.retainIfActive(session);
+    }
   }
 
   sync(): void {
     const enabled = this.configManager.getConfig().keepAwakeWhileSessionsActive !== false;
-    const hasActiveSession = Array.from(this.statuses.values()).some(status =>
-      ACTIVE_SESSION_STATUSES.has(status)
-    );
+    const hasActiveSession = this.activeSessionIds.size > 0;
     const shouldBlockSleep = enabled && hasActiveSession;
 
     if (shouldBlockSleep && this.blockerId === null) {
@@ -66,6 +69,15 @@ export class PowerSaveManager {
       powerSaveBlocker.stop(this.blockerId);
       this.blockerId = null;
     }
+  }
+
+  private retainIfActive(session: Session): void {
+    if (!session.archived && ACTIVE_SESSION_STATUSES.has(session.status)) {
+      this.activeSessionIds.add(session.id);
+      return;
+    }
+
+    this.activeSessionIds.delete(session.id);
   }
 
   dispose(): void {
