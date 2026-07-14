@@ -75,6 +75,8 @@ export interface AppConfig {
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
   autoStartOnBoot?: boolean;
+  // Prevent idle sleep while Pane sessions are active
+  keepAwakeWhileSessionsActive?: boolean;
   // Stravu MCP integration
   stravuApiKey?: string;
   stravuServerUrl?: string;
@@ -153,6 +155,7 @@ export interface UpdateConfigRequest {
   defaultOrchestratorAgent?: PaneChatAgent;
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
+  keepAwakeWhileSessionsActive?: boolean;
   stravuApiKey?: string;
   stravuServerUrl?: string;
   theme?: 'light' | 'light-rounded' | 'dark' | 'oled' | 'dusk' | 'dusk-oled' | 'forge' | 'ember' | 'aurora' | 'night-owl' | 'night-owl-oled' | 'terracotta';

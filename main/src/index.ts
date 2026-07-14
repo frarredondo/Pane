@@ -87,6 +87,7 @@ import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
+import { PowerSaveManager } from './services/powerSaveManager';
 
 export let mainWindow: BrowserWindow | null = null;
 
@@ -186,6 +187,7 @@ let versionChecker: VersionChecker;
 let archiveProgressManager: ArchiveProgressManager;
 let analyticsManager: AnalyticsManager;
 let paneDaemonHost: PaneDaemonHost | null = null;
+let powerSaveManager: PowerSaveManager | null = null;
 
 // ptyHost supervisor — forked as an Electron UtilityProcess on app ready,
 // but only when the `usePtyHost` setting is enabled (default: off). When
@@ -984,6 +986,8 @@ async function initializeServices() {
   logger = services.logger as Logger;
   archiveProgressManager = services.archiveProgressManager as ArchiveProgressManager;
   analyticsManager = services.analyticsManager as AnalyticsManager;
+  powerSaveManager = new PowerSaveManager(configManager, sessionManager);
+  powerSaveManager.sync();
 
   ipcMain.handle('analytics:get-identity', async () => {
     try {
@@ -1319,6 +1323,9 @@ if (launchRemoteSetup) {
     // User chose to quit anyway
     archiveProgressManager.clearAll();
   }
+
+  powerSaveManager?.dispose();
+  powerSaveManager = null;
 
   // Safety net: force exit if graceful shutdown takes too long
   // Placed after the dialog so user interaction time isn't counted

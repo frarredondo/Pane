@@ -292,6 +292,11 @@ export class SessionManager extends EventEmitter {
     return dbSessions.map(this.convertDbSessionToSession.bind(this));
   }
 
+  getPowerSaveSnapshotSessions(): Session[] {
+    const dbSessions = this.db.getPowerSaveSnapshotSessions();
+    return dbSessions.map(this.convertDbSessionToSession.bind(this));
+  }
+
   getSessionsForProject(projectId: number): Session[] {
     const dbSessions = this.db.getAllSessions(projectId);
     return dbSessions.map(this.convertDbSessionToSession.bind(this));
@@ -1905,14 +1910,20 @@ export class SessionManager extends EventEmitter {
       }
 
       // Update session status to running
-      this.db.updateSession(sessionId, { status: 'running' });
+      this.updateSession(sessionId, { status: 'running' });
       console.log(`[SessionManager] Resumed session ${sessionId}: ${resumedPanelCount} panels`);
     }
   }
 
   async dismissInterruptedSessions(sessionIds: string[]): Promise<void> {
     for (const sessionId of sessionIds) {
-      this.db.updateSession(sessionId, { status: 'stopped' });
+      const dbSession = this.db.getSession(sessionId);
+      if (!dbSession) {
+        console.warn(`[SessionManager] Session ${sessionId} not found for dismiss`);
+        continue;
+      }
+
+      this.updateSession(sessionId, { status: 'stopped' });
     }
     console.log(`[SessionManager] Dismissed ${sessionIds.length} interrupted sessions`);
   }

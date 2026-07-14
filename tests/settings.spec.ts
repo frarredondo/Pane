@@ -112,6 +112,18 @@ test.describe('Settings', () => {
     expect(writes.preferences).toContainEqual({ key: 'sidebar_pane_row_layout', value: 'two-row' });
   });
 
+  test('persists the keep-awake toggle to config', async ({ page }) => {
+    await bootSettings(page, { initialConfig: { keepAwakeWhileSessionsActive: true } });
+
+    await page.getByRole('switch', { name: 'Keep computer awake while sessions are active' }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    const updates = await page.evaluate(() => (
+      window as typeof window & { __paneTestElectronMock: SettingsMock }
+    ).__paneTestElectronMock.getConfigUpdates());
+    expect(updates).toContainEqual({ keepAwakeWhileSessionsActive: false });
+  });
+
   test('announces a failed save and restores the authoritative value', async ({ page }) => {
     await bootSettings(page, { initialConfig: { autoCheckUpdates: true } });
     await page.evaluate(() => {

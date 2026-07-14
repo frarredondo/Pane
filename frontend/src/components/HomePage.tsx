@@ -7,6 +7,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { API } from '../utils/api';
 import { Dropdown } from './ui/Dropdown';
 import { Badge } from './ui/Badge';
+import { Toggle } from './ui/Toggle';
 import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
@@ -358,6 +359,18 @@ export function HomePage() {
                   <ChevronUp className="w-4 h-4" />
                 </button>
               </div>
+            </div>
+
+            <div
+              className="flex items-center justify-between rounded-lg bg-surface-secondary p-4"
+              title="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
+            >
+              <span className="text-text-primary">Keep Awake</span>
+              <Toggle
+                checked={config?.keepAwakeWhileSessionsActive !== false}
+                aria-label="Keep computer awake while sessions are active"
+                onChange={(value) => void updateConfig({ keepAwakeWhileSessionsActive: value }).catch(() => {})}
+              />
             </div>
 
             {platform === 'win32' && (
