@@ -17,6 +17,7 @@ export type SettingsSettingId =
   | 'automatic-updates'
   | 'check-updates-now'
   | 'start-on-login'
+  | 'keep-awake'
   | 'theme'
   | 'ui-scale'
   | 'sidebar-pane-rows'

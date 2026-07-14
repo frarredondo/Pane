@@ -74,6 +74,21 @@ export function GeneralSettings({ persistence }: { persistence: SettingsPersiste
           />
         </SettingRow>
       </SettingsSection>
+
+      <SettingsSection title="Power" description="System sleep behavior while sessions are active.">
+        <SettingRow
+          settingId="keep-awake"
+          label="Keep computer awake while sessions are active"
+          description="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
+          saveState={persistence.saveStates['keep-awake']}
+        >
+          <ImmediateToggle
+            label="Keep computer awake while sessions are active"
+            value={config.keepAwakeWhileSessionsActive !== false}
+            onSave={(value) => persistence.saveConfig('keep-awake', { keepAwakeWhileSessionsActive: value })}
+          />
+        </SettingRow>
+      </SettingsSection>
     </SettingsPage>
   );
 }

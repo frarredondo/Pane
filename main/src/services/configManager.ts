@@ -55,6 +55,7 @@ export class ConfigManager extends EventEmitter {
       defaultModel: 'sonnet',
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
       autoStartOnBoot: true,
+      keepAwakeWhileSessionsActive: true,
       stravuApiKey: undefined,
       stravuServerUrl: '', // Stravu integration disabled
       notifications: {
