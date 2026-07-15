@@ -11,6 +11,7 @@ import { TerminalPanelProps } from '../../types/panelComponents';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
 import { getTerminalTheme } from '../../utils/terminalTheme';
+import { resolveTerminalKeyHandling } from '../../utils/terminalKeyHandling';
 import { isMac } from '../../utils/platformUtils';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
@@ -762,24 +763,22 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, 
             return false;
           }
 
-          // When a TUI app is running, pass most keys through to the PTY
-          // but still let Ctrl/Cmd+V use the browser's native paste path
-          if (tuiActiveRef.current) {
-            if (ctrlOrMeta && e.key.toLowerCase() === 'v') return false;
-            return true;
-          }
+          const terminalKeyDecision = resolveTerminalKeyHandling(e, {
+            isTuiActive: tuiActiveRef.current,
+            isCliPanel: isCliPanelRef.current,
+          });
 
-          // Shift+Enter: emit the same sequence as Alt+Enter (\x1b\r = ESC+CR)
-          // xterm.js ignores shiftKey on Enter, so Shift+Enter = Enter by default.
-          // Alt+Enter natively sends \x1b\r which CLI tools recognize as "insert newline".
-          // Block both keydown and keyup to fully suppress xterm's default \r.
-          // Guard: skip when Ctrl/Cmd is held so Ctrl+Shift+Enter chords are not swallowed.
-          if (e.shiftKey && !ctrlOrMeta && e.key === 'Enter') {
+          // Shift+Enter sends the same ESC+CR sequence as Alt+Enter for CLI
+          // composers. In fullscreen agent TUIs this must run before generic
+          // passthrough, while ordinary TUIs still receive Shift+Enter directly.
+          if (terminalKeyDecision.action === 'send-input') {
             if (e.type === 'keydown') {
-              window.electronAPI.invoke('terminal:input', panel.id, '\x1b\r');
+              window.electronAPI.invoke('terminal:input', panel.id, terminalKeyDecision.input);
             }
             return false;
           }
+          if (terminalKeyDecision.action === 'block') return false;
+          if (terminalKeyDecision.action === 'pass-through') return true;
 
           // Ctrl/Cmd+1-9: switch sessions
           if (ctrlOrMeta && e.key >= '1' && e.key <= '9') return false;
