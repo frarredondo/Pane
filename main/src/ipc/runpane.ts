@@ -9,6 +9,8 @@ import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/terminalPanelManager';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
+import { fastCheckWorkingDirectory, fastGetAheadBehind } from '../services/gitPlumbingCommands';
+import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/archiveProgressManager';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
@@ -19,6 +21,12 @@ import type {
   RunpaneAgentDoctorResult,
   RunpaneDoctorResult,
   RunpaneInitialInputDeliveryResult,
+  RunpanePaneArchiveBlockCode,
+  RunpanePaneArchiveBlockedResult,
+  RunpanePaneArchiveRequest,
+  RunpanePaneArchiveResult,
+  RunpanePaneArchiveSafetyCheck,
+  RunpanePaneArchiveSuccessResult,
   RunpanePaneListRequest,
   RunpanePaneListResult,
   RunpanePaneCreateFailureItem,
@@ -56,6 +64,7 @@ import type {
   RunpaneRepoSummary,
   RunpaneResolvedTool,
   RunpaneToolSpec,
+  RunpaneWorktreeCleanupState,
 } from '../../../shared/types/runpaneOrchestration';
 
 const RUNPANE_CHANNELS = [
@@ -64,6 +73,7 @@ const RUNPANE_CHANNELS = [
   'runpane:repos:add',
   'runpane:panes:list',
   'runpane:panes:create',
+  'runpane:panes:archive',
   'runpane:panels:create',
   'runpane:panels:list',
   'runpane:panels:output',
@@ -83,6 +93,8 @@ const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
 const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
 const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
+const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
+const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -260,6 +272,69 @@ export function registerRunpaneHandlers(
         items,
       };
     }, result => ({ repoId: result.repo.id, resultCount: result.items.length }));
+  });
+
+  commandRegistry.register('runpane:panes:archive', async (request: unknown): Promise<RunpanePaneArchiveResult> => {
+    return withRunpaneAction(services, 'panes:archive', {}, async () => {
+      const normalized = parsePaneArchiveRequest(request);
+      const pane = resolvePane(sessionManager, normalized.paneId);
+
+      if (pane.archived) {
+        throw new Error(`Pane ${normalized.paneId} is already archived`);
+      }
+
+      const worktreeCleanupApplicable = Boolean(pane.projectId) && !pane.isMainRepo;
+      const safetyCheck = worktreeCleanupApplicable
+        ? await computeArchiveSafety(services, pane)
+        : { performed: false };
+
+      if (!normalized.force) {
+        const blockCode = classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable);
+        if (blockCode) {
+          const blocked: RunpanePaneArchiveBlockedResult = {
+            ok: false,
+            paneId: normalized.paneId,
+            blocked: {
+              code: blockCode,
+              message: describeArchiveBlock(blockCode, safetyCheck),
+              safetyCheck: toPublicSafetyCheck(safetyCheck),
+            },
+            nextCommand: `runpane panes archive --pane ${normalized.paneId} --force --yes --json`,
+          };
+          return blocked;
+        }
+      }
+
+      const cleanupWait = worktreeCleanupApplicable && services.archiveProgressManager
+        ? waitForArchiveProgressCompletion(services.archiveProgressManager, normalized.paneId, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
+        : null;
+
+      const deleteResult = await commandRegistry.invoke('sessions:delete', [normalized.paneId]) as
+        { success: boolean; error?: string };
+      if (!deleteResult.success) {
+        throw new Error(deleteResult.error ?? `Failed to archive pane ${normalized.paneId}`);
+      }
+
+      let worktreeCleanup: RunpaneWorktreeCleanupState;
+      if (!worktreeCleanupApplicable) {
+        worktreeCleanup = 'not-applicable';
+      } else if (cleanupWait) {
+        worktreeCleanup = await cleanupWait;
+      } else {
+        worktreeCleanup = await waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
+      }
+
+      const success: RunpanePaneArchiveSuccessResult = {
+        ok: worktreeCleanup === 'completed' || worktreeCleanup === 'not-applicable',
+        paneId: normalized.paneId,
+        archived: true,
+        forced: Boolean(normalized.force),
+        worktreeCleanup,
+        worktreePath: pane.worktreePath,
+        safetyCheck: toPublicSafetyCheck(safetyCheck),
+      };
+      return success;
+    }, result => ({ paneId: result.paneId, ok: result.ok }));
   });
 
   commandRegistry.register('runpane:panels:list', async (request: unknown): Promise<RunpanePanelListResult> => {
@@ -1521,6 +1596,153 @@ function resolvePane(sessionManager: AppServices['sessionManager'], paneId: stri
     throw new Error(`No Pane pane found with id ${paneId}`);
   }
   return session;
+}
+
+interface ArchiveSafetyCheck extends RunpanePaneArchiveSafetyCheck {
+  reasonUnavailable?: 'missing-project-context' | 'git-status-error';
+}
+
+async function computeArchiveSafety(services: AppServices, pane: Session): Promise<ArchiveSafetyCheck> {
+  const ctx = services.sessionManager.getProjectContext(pane.id);
+  if (!ctx) {
+    return { performed: false, reasonUnavailable: 'missing-project-context' };
+  }
+
+  try {
+    // Deliberately bypass gitStatusManager's cache (up to CACHE_TTL_MS stale)
+    // and read git plumbing directly — a safety gate must see the current
+    // state, not a snapshot from moments-ago that predates a recent commit.
+    const workingDirectory = fastCheckWorkingDirectory(pane.worktreePath, ctx.commandRunner.wslContext);
+    const hasUncommittedChanges = workingDirectory.hasModified || workingDirectory.hasStaged || workingDirectory.hasConflicts;
+    const hasUntrackedFiles = workingDirectory.hasUntracked;
+
+    const upstream = await services.worktreeManager.getUpstream(pane.worktreePath, ctx.commandRunner);
+    if (upstream) {
+      const { ahead } = fastGetAheadBehind(pane.worktreePath, upstream, ctx.commandRunner.wslContext);
+      return { performed: true, hasUncommittedChanges, hasUntrackedFiles, hasUpstream: true, unpushedCommits: ahead };
+    }
+
+    // No upstream at all (never pushed, or detached HEAD): the branch's own
+    // commits ahead of its base/comparison branch are the closest proxy for
+    // "unpushed work".
+    const comparisonBranch = await services.worktreeManager.getSessionComparisonBranch(pane, ctx);
+    const { ahead } = fastGetAheadBehind(pane.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
+    return {
+      performed: true,
+      hasUncommittedChanges,
+      hasUntrackedFiles,
+      hasUpstream: false,
+      unpushedCommits: ahead,
+    };
+  } catch {
+    return { performed: false, reasonUnavailable: 'git-status-error' };
+  }
+}
+
+function classifyArchiveBlock(check: ArchiveSafetyCheck, applicable: boolean): RunpanePaneArchiveBlockCode | undefined {
+  if (!applicable) {
+    return undefined;
+  }
+  if (!check.performed) {
+    return 'status-unknown';
+  }
+
+  const dirty = Boolean(check.hasUncommittedChanges || check.hasUntrackedFiles);
+  const unpushed = (check.unpushedCommits ?? 0) > 0;
+  if (dirty && unpushed) return 'uncommitted-and-unpushed';
+  if (dirty) return 'uncommitted-changes';
+  if (unpushed) return 'unpushed-commits';
+  return undefined;
+}
+
+function describeArchiveBlock(code: RunpanePaneArchiveBlockCode, check: ArchiveSafetyCheck): string {
+  const unpushedCount = check.unpushedCommits ?? 0;
+  const unpushedPhrase = unpushedCount === 1 ? '1 commit' : `${unpushedCount} commits`;
+  switch (code) {
+    case 'uncommitted-and-unpushed':
+      return `Pane has uncommitted or untracked changes and ${unpushedPhrase} not pushed to any remote. Archiving would remove the worktree and discard this work. Rerun with --force to archive anyway.`;
+    case 'uncommitted-changes':
+      return 'Pane has uncommitted or untracked changes. Archiving would remove the worktree and discard this work. Rerun with --force to archive anyway.';
+    case 'unpushed-commits':
+      return `Pane has ${unpushedPhrase} not pushed to any remote. Archiving would remove the worktree and discard this work. Rerun with --force to archive anyway.`;
+    case 'status-unknown':
+    default:
+      return 'Could not determine whether the pane has uncommitted or unpushed changes. Refusing to archive without --force.';
+  }
+}
+
+function toPublicSafetyCheck(check: ArchiveSafetyCheck): RunpanePaneArchiveSafetyCheck {
+  return {
+    performed: check.performed,
+    hasUncommittedChanges: check.hasUncommittedChanges,
+    hasUntrackedFiles: check.hasUntrackedFiles,
+    hasUpstream: check.hasUpstream,
+    unpushedCommits: check.unpushedCommits,
+  };
+}
+
+function waitForArchiveProgressCompletion(
+  archiveProgressManager: ArchiveProgressManager,
+  paneId: string,
+  timeoutMs: number,
+): Promise<RunpaneWorktreeCleanupState> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (state: RunpaneWorktreeCleanupState) => {
+      if (settled) return;
+      settled = true;
+      archiveProgressManager.off('archive-progress', onProgress);
+      clearTimeout(timer);
+      resolve(state);
+    };
+
+    const onProgress = (payload: { tasks: SerializedArchiveTask[] }) => {
+      const task = payload.tasks.find(candidate => candidate.sessionId === paneId);
+      if (task?.status === 'completed') {
+        finish('completed');
+      } else if (task?.status === 'failed') {
+        finish('failed');
+      }
+    };
+
+    archiveProgressManager.on('archive-progress', onProgress);
+    const timer = setTimeout(() => finish('timeout'), timeoutMs);
+  });
+}
+
+async function waitForWorktreeRemovalByPolling(
+  worktreePath: string,
+  timeoutMs: number,
+  intervalMs = DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS,
+): Promise<RunpaneWorktreeCleanupState> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!fs.existsSync(worktreePath)) {
+      return 'completed';
+    }
+    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+  }
+  return fs.existsSync(worktreePath) ? 'timeout' : 'completed';
+}
+
+function parsePaneArchiveRequest(value: unknown): RunpanePaneArchiveRequest {
+  if (!isRecord(value)) {
+    throw new Error('Pane archive request must be an object');
+  }
+
+  const paneId = optionalString(value.paneId)?.trim();
+  if (!paneId) {
+    throw new Error('Pane archive request must include a paneId');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Pane archive source must be user or agent');
+  }
+
+  return {
+    paneId,
+    force: typeof value.force === 'boolean' ? value.force : undefined,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+  };
 }
 
 function resolvePanel(panelId: string): ToolPanel {

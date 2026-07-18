@@ -31,6 +31,7 @@ vi.mock('../services/terminalPanelManager', () => ({
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { registerRunpaneHandlers } from './runpane';
 
 const project: Project = {
@@ -132,6 +133,20 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
       hashSessionId: vi.fn((id: string) => `hash-${id}`),
     },
     spotlightManager: {},
+    worktreeManager: {
+      getUpstream: vi.fn(async () => null),
+      getSessionComparisonBranch: vi.fn(async () => 'main'),
+    },
+    gitStatusManager: {
+      getGitStatus: vi.fn(async () => ({
+        state: 'clean',
+        hasUncommittedChanges: false,
+        hasUntrackedFiles: false,
+        ahead: 0,
+        behind: 0,
+        totalCommits: 0,
+      })),
+    },
     ...overrides,
   } as unknown as AppServices;
 }
@@ -151,6 +166,31 @@ function createRegistry(services = createServices()): PaneCommandRegistry {
   const registry = new PaneCommandRegistry();
   registerRunpaneHandlers({} as never, services, registry);
   return registry;
+}
+
+function registerSessionsDeleteStub(
+  registry: PaneCommandRegistry,
+  services: AppServices,
+  options: {
+    onArchive?: () => Promise<void> | void;
+    result?: { success: boolean; error?: string };
+  } = {},
+): ReturnType<typeof vi.fn> {
+  const handler = vi.fn(async (sessionId: string) => {
+    if (options.result) {
+      return options.result;
+    }
+    if (services.archiveProgressManager) {
+      services.archiveProgressManager.addTask(sessionId, 'issue-252', 'issue-252-worktree', 'Pane', async () => {
+        await options.onArchive?.();
+      });
+    } else {
+      setImmediate(() => options.onArchive?.());
+    }
+    return { success: true };
+  });
+  registry.register('sessions:delete', handler);
+  return handler;
 }
 
 describe('runpane IPC handlers', () => {
@@ -1407,6 +1447,330 @@ describe('runpane IPC handlers', () => {
           verifiedSubmitted: false,
         },
       }],
+    });
+  });
+
+  describe('runpane:panes:archive', () => {
+    it('archives a clean pane and waits for worktree cleanup to complete', async () => {
+      const repoPath = createTempGitRepo('clean-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+
+      const cleanSession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => cleanSession),
+        } as never,
+        archiveProgressManager: new ArchiveProgressManager(),
+      } as never);
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+      expect(result).toMatchObject({
+        ok: true,
+        paneId: session.id,
+        archived: true,
+        forced: false,
+        worktreeCleanup: 'completed',
+        worktreePath: repoPath,
+        safetyCheck: {
+          performed: true,
+          hasUncommittedChanges: false,
+          hasUntrackedFiles: false,
+        },
+      });
+    });
+
+    it('rejects archiving a pane that is already archived', async () => {
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => ({ ...session, archived: true })),
+        } as never,
+      });
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services);
+
+      await expect(registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }])).rejects.toThrow(/already archived/);
+    });
+
+    it('rejects archiving an unknown pane id', async () => {
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => undefined),
+        } as never,
+      });
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services);
+
+      await expect(registry.invoke('runpane:panes:archive', [{
+        paneId: 'no-such-pane',
+      }])).rejects.toThrow(/No Pane pane found/);
+    });
+
+    it('refuses to archive a dirty pane without --force', async () => {
+      const repoPath = createTempGitRepo('dirty-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      fs.writeFileSync(path.join(repoPath, 'dirty.txt'), 'uncommitted change');
+
+      const dirtySession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => dirtySession),
+        } as never,
+      });
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(sessionsDelete).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: false,
+        paneId: session.id,
+        blocked: {
+          code: 'uncommitted-changes',
+          safetyCheck: {
+            performed: true,
+            hasUncommittedChanges: false,
+            hasUntrackedFiles: true,
+          },
+        },
+        nextCommand: `runpane panes archive --pane ${session.id} --force --yes --json`,
+      });
+    });
+
+    it('archives a dirty pane when --force is passed', async () => {
+      const repoPath = createTempGitRepo('dirty-force-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      fs.writeFileSync(path.join(repoPath, 'tracked.txt'), 'initial');
+      execFileSync('git', ['add', 'tracked.txt'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'add tracked file'], { cwd: repoPath, stdio: 'ignore' });
+      fs.writeFileSync(path.join(repoPath, 'tracked.txt'), 'modified');
+
+      const dirtySession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => dirtySession),
+        } as never,
+        archiveProgressManager: new ArchiveProgressManager(),
+      } as never);
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+        force: true,
+      }]);
+
+      expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+      expect(result).toMatchObject({
+        ok: true,
+        forced: true,
+        worktreeCleanup: 'completed',
+        safetyCheck: {
+          performed: true,
+          hasUncommittedChanges: true,
+        },
+      });
+    });
+
+    it('refuses to archive a pane with commits unpushed to its remote upstream', async () => {
+      const repoPath = createTempGitRepo('unpushed-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'unpushed change'], { cwd: repoPath, stdio: 'ignore' });
+
+      const unpushedSession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => unpushedSession),
+        } as never,
+        worktreeManager: {
+          getUpstream: vi.fn(async () => 'origin/main'),
+        } as never,
+      });
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(sessionsDelete).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: false,
+        blocked: {
+          code: 'unpushed-commits',
+          safetyCheck: {
+            performed: true,
+            hasUpstream: true,
+            unpushedCommits: 1,
+          },
+        },
+      });
+    });
+
+    it('archives a pane whose branch is merged and fully pushed (0 unpushed commits)', async () => {
+      const repoPath = createTempGitRepo('merged-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repoPath, stdio: 'ignore' });
+
+      const mergedSession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => mergedSession),
+        } as never,
+        worktreeManager: {
+          getUpstream: vi.fn(async () => 'origin/main'),
+        } as never,
+        archiveProgressManager: new ArchiveProgressManager(),
+      } as never);
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+      expect(result).toMatchObject({
+        ok: true,
+        worktreeCleanup: 'completed',
+        safetyCheck: {
+          performed: true,
+          hasUpstream: true,
+          unpushedCommits: 0,
+        },
+      });
+    });
+
+    it('archives a main-repo pane immediately even if it is dirty, skipping the safety gate', async () => {
+      const repoPath = createTempGitRepo('main-repo-dirty');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      fs.writeFileSync(path.join(repoPath, 'dirty.txt'), 'uncommitted change');
+
+      const mainRepoSession: Session = { ...session, worktreePath: repoPath, isMainRepo: true };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => mainRepoSession),
+        } as never,
+      });
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+      expect(result).toMatchObject({
+        ok: true,
+        worktreeCleanup: 'not-applicable',
+        safetyCheck: {
+          performed: false,
+        },
+      });
+    });
+
+    it('fails safe with status-unknown when git status cannot be determined', async () => {
+      const services = createServices({
+        worktreeManager: {
+          getUpstream: vi.fn(async () => {
+            throw new Error('git command failed');
+          }),
+        } as never,
+      });
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(sessionsDelete).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: false,
+        blocked: {
+          code: 'status-unknown',
+          safetyCheck: {
+            performed: false,
+          },
+        },
+      });
+    });
+
+    it('reports failed worktree cleanup when the archive-progress task fails', async () => {
+      const repoPath = createTempGitRepo('cleanup-failure-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+
+      const cleanSession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => cleanSession),
+        } as never,
+        archiveProgressManager: new ArchiveProgressManager(),
+      } as never);
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services, {
+        onArchive: () => {
+          throw new Error('worktree removal failed');
+        },
+      });
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(result).toMatchObject({
+        ok: false,
+        archived: true,
+        worktreeCleanup: 'failed',
+      });
+    });
+
+    it('polls for worktree removal when no archiveProgressManager is configured', async () => {
+      const repoPath = createTempGitRepo('polling-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const pollingSession: Session = { ...session, worktreePath: repoPath };
+      const services = createServices({
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => pollingSession),
+        } as never,
+        archiveProgressManager: undefined,
+      } as never);
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services, {
+        onArchive: () => {
+          fs.rmSync(repoPath, { recursive: true, force: true });
+        },
+      });
+
+      const result = await registry.invoke('runpane:panes:archive', [{
+        paneId: session.id,
+      }]);
+
+      expect(result).toMatchObject({
+        ok: true,
+        worktreeCleanup: 'completed',
+      });
     });
   });
 });

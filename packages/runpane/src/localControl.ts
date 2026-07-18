@@ -116,6 +116,43 @@ interface PaneListResult {
   panes: PaneSummary[];
 }
 
+interface PaneArchiveRequest {
+  paneId: string;
+  force?: boolean;
+  source?: 'user' | 'agent';
+}
+
+interface PaneArchiveSafetyCheck {
+  performed: boolean;
+  hasUncommittedChanges?: boolean;
+  hasUntrackedFiles?: boolean;
+  hasUpstream?: boolean;
+  unpushedCommits?: number;
+}
+
+interface PaneArchiveBlockedResult {
+  ok: false;
+  paneId: string;
+  blocked: {
+    code: 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown';
+    message: string;
+    safetyCheck: PaneArchiveSafetyCheck;
+  };
+  nextCommand: string;
+}
+
+interface PaneArchiveSuccessResult {
+  ok: boolean;
+  paneId: string;
+  archived: true;
+  forced: boolean;
+  worktreeCleanup: 'completed' | 'failed' | 'timeout' | 'not-applicable';
+  worktreePath?: string;
+  safetyCheck: PaneArchiveSafetyCheck;
+}
+
+type PaneArchiveResult = PaneArchiveSuccessResult | PaneArchiveBlockedResult;
+
 interface PanelSummary {
   id: string;
   panelId: string;
@@ -356,6 +393,33 @@ export async function runPanesCreate(parsed: ParsedArgs): Promise<number> {
     printJson(result);
   } else {
     printPaneCreateResult(result);
+  }
+
+  return result.ok ? 0 : 1;
+}
+
+export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.paneId) {
+    throw new Error('runpane panes archive requires --pane.');
+  }
+
+  const request: PaneArchiveRequest = {
+    paneId: parsed.paneId,
+    force: parsed.force || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+  };
+
+  await confirmPaneArchive(parsed, request);
+
+  const result = await invokeDaemon<PaneArchiveResult>('runpane:panes:archive', [request], {
+    paneDir: parsed.paneDir,
+    timeoutMs: 40_000,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    printPaneArchiveResult(result);
   }
 
   return result.ok ? 0 : 1;
@@ -769,6 +833,27 @@ async function confirmPaneCreate(parsed: ParsedArgs, request: PaneCreateRequest)
   }
 }
 
+async function confirmPaneArchive(parsed: ParsedArgs, request: PaneArchiveRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panes archive mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const suffix = request.force ? ' (including any uncommitted or unpushed work)' : '';
+    const answer = (await rl.question(`Archive pane ${request.paneId}${suffix}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function confirmPanelCreate(parsed: ParsedArgs, request: PanelCreateRequest): Promise<void> {
   if (parsed.yes) {
     return;
@@ -932,6 +1017,16 @@ function printPaneCreateResult(result: PaneCreateResult): void {
     }
     console.error(`Failed ${item.name ?? `pane ${item.index}`}: ${item.error?.message ?? 'unknown error'}`);
   }
+}
+
+function printPaneArchiveResult(result: PaneArchiveResult): void {
+  if (!('archived' in result)) {
+    console.error(`Refused to archive pane ${result.paneId}: ${result.blocked.message}`);
+    console.error(`Next: ${result.nextCommand}`);
+    return;
+  }
+
+  console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}.`);
 }
 
 function printPanelCreateResult(result: PanelCreateResult): void {

@@ -183,6 +183,18 @@
       ]
     },
     {
+      "name": "panes archive",
+      "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
+      "usage": [
+        "runpane panes archive --pane <pane-id> [--source user|agent] [--force] --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "paneArchiveRequest",
+        "paneArchiveResult"
+      ]
+    },
+    {
       "name": "panels create",
       "summary": "Create a terminal-backed tool panel inside an existing Pane session.",
       "usage": [
@@ -507,6 +519,10 @@
       {
         "name": "--focus",
         "description": "Explicitly focus the created pane or panel."
+      },
+      {
+        "name": "--force",
+        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
       }
     ]
   },
@@ -526,6 +542,7 @@
         "  runpane repos add --path <path> [--name <name>]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [--source user|agent] [--focus|--no-focus] [--wait-ready]",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] --yes",
         "  runpane panels create --pane <pane-id> --agent <codex|claude> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -670,8 +687,9 @@
         "Commands:",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [options]",
+        "  runpane panes archive --pane <pane-id> [--force] [--source user|agent] --yes [--json]",
         "",
-        "Run \"runpane help panes list\" or \"runpane help panes create\" for command-specific options."
+        "Run \"runpane help panes list\", \"runpane help panes create\", or \"runpane help panes archive\" for command-specific options."
       ],
       "panes list": [
         "Usage:",
@@ -713,6 +731,20 @@
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
+        "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "panes archive": [
+        "Usage:",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] --yes [--json]",
+        "",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refuses to archive a pane with uncommitted, untracked, or unpushed-to-remote changes unless --force is passed. Waits for worktree removal to finish before returning.",
+        "",
+        "Options:",
+        "  --pane <pane-id>               Pane/session id to archive",
+        "  --source <user|agent>          Mark mutation source",
+        "  --force                        Archive even if the pane has uncommitted, untracked, or unpushed changes",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for mutating commands"
       ],
       "panels": [
@@ -890,6 +922,7 @@
         "  runpane repos add --path <path> [--name <name>]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [--source user|agent] [--focus|--no-focus] [--wait-ready]",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] --yes",
         "  python -m runpane panels create --pane <pane-id> --agent <codex|claude> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -1023,8 +1056,9 @@
         "Commands:",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude> [options]",
+        "  runpane panes archive --pane <pane-id> [--force] [--source user|agent] --yes [--json]",
         "",
-        "Run \"runpane help panes list\" or \"runpane help panes create\" for command-specific options."
+        "Run \"runpane help panes list\", \"runpane help panes create\", or \"runpane help panes archive\" for command-specific options."
       ],
       "panes list": [
         "Usage:",
@@ -1067,6 +1101,20 @@
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
         "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "panes archive": [
+        "Usage:",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] --yes [--json]",
+        "",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refuses to archive a pane with uncommitted, untracked, or unpushed-to-remote changes unless --force is passed. Waits for worktree removal to finish before returning.",
+        "",
+        "Options:",
+        "  --pane <pane-id>",
+        "  --source <user|agent>",
+        "  --force",
+        "  --pane-dir <path>",
+        "  --json",
+        "  --yes"
       ],
       "panels": [
         "Terminal-backed panel commands.",
@@ -1299,6 +1347,7 @@
       "runpane panes list --repo active --json",
       "runpane panes create --repo active --name issue-252 --agent <agent> --prompt \"Kick off the discussion skill for issue 252\" --source agent --no-focus --wait-ready --yes --json",
       "runpane panes create --from-json panes.json --yes --json",
+      "runpane panes archive --pane <pane-id> --source agent --yes --json",
       "runpane panels list --pane <pane-id> --json",
       "runpane panels output --panel <panel-id> --limit 200 --json",
       "printf 'Continue\\n' | runpane panels input --panel <panel-id> --input-file - --yes --json",
@@ -1320,6 +1369,7 @@
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed.",
+      "`runpane panes archive` archives a Pane exactly like the UI Archive action, including removal of its Pane-managed git worktree, and refuses (unless `--force`) when the pane's branch has uncommitted, untracked, or unpushed-to-remote changes. It waits for worktree removal to finish before returning and reports the outcome in `worktreeCleanup`.",
       "`runpane panels list` lists tool panels inside one Pane session.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
@@ -1474,6 +1524,17 @@
         "--json"
       ],
       [
+        "panes",
+        "archive",
+        "--pane",
+        "session-1",
+        "--force",
+        "--source",
+        "agent",
+        "--yes",
+        "--json"
+      ],
+      [
         "panels",
         "list",
         "--pane",
@@ -1610,6 +1671,7 @@
       "runpane repos add",
       "runpane panes list",
       "runpane panes create",
+      "runpane panes archive",
       "runpane panels create",
       "runpane panels list",
       "runpane panels output",
@@ -2499,6 +2561,159 @@
         }
       },
       "additionalProperties": false
+    },
+    "paneArchiveRequest": {
+      "type": "object",
+      "required": [
+        "paneId"
+      ],
+      "properties": {
+        "paneId": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "paneArchiveResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "paneId",
+            "archived",
+            "forced",
+            "worktreeCleanup",
+            "safetyCheck"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "archived": {
+              "const": true
+            },
+            "forced": {
+              "type": "boolean"
+            },
+            "worktreeCleanup": {
+              "enum": [
+                "completed",
+                "failed",
+                "timeout",
+                "not-applicable"
+              ]
+            },
+            "worktreePath": {
+              "type": "string"
+            },
+            "safetyCheck": {
+              "type": "object",
+              "required": [
+                "performed"
+              ],
+              "properties": {
+                "performed": {
+                  "type": "boolean"
+                },
+                "hasUncommittedChanges": {
+                  "type": "boolean"
+                },
+                "hasUntrackedFiles": {
+                  "type": "boolean"
+                },
+                "hasUpstream": {
+                  "type": "boolean"
+                },
+                "unpushedCommits": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "paneId",
+            "blocked",
+            "nextCommand"
+          ],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "blocked": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "safetyCheck"
+              ],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "uncommitted-changes",
+                    "unpushed-commits",
+                    "uncommitted-and-unpushed",
+                    "status-unknown"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "safetyCheck": {
+                  "type": "object",
+                  "required": [
+                    "performed"
+                  ],
+                  "properties": {
+                    "performed": {
+                      "type": "boolean"
+                    },
+                    "hasUncommittedChanges": {
+                      "type": "boolean"
+                    },
+                    "hasUntrackedFiles": {
+                      "type": "boolean"
+                    },
+                    "hasUpstream": {
+                      "type": "boolean"
+                    },
+                    "unpushedCommits": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "nextCommand": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "panelListResult": {
       "type": "object",
@@ -3536,6 +3751,17 @@
           ]
         },
         {
+          "name": "panes archive",
+          "summary": "Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
+          "arguments": [
+            "--pane <pane-id>",
+            "--source <user|agent>",
+            "--force",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
           "name": "panels create",
           "summary": "Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.",
           "arguments": [
@@ -4074,6 +4300,55 @@
           "From WSL with Windows Pane, invoke through PowerShell and select the saved WSL repo by name or id, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane panes create --repo \"WSL Pane\" --name issue-123 --agent <agent> --prompt \"Plan this issue\" --source agent --no-focus --wait-ready --yes --json'`.",
           "Use --wait-ready when an agent needs to verify that an agent terminal started instead of only creating a pane.",
           "If readiness returns blocked, inspect blocked.suggestedCommand rather than guessing which prompt to answer."
+        ]
+      },
+      "panes archive": {
+        "name": "panes archive",
+        "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
+        "details": "Use this to close out a Pane once its PR has merged. Refuses to archive (unless --force) when the pane's branch has uncommitted, untracked, or unpushed-to-remote changes, so an agent cannot silently discard work. A merged and pushed branch has no unpushed commits, so it archives cleanly. Waits for worktree removal to finish before returning.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane/session id to archive."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source; does not change archive safety behavior."
+          },
+          {
+            "name": "--force",
+            "required": false,
+            "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panes archive --pane <pane-id> --source agent --yes --json",
+          "runpane panes archive --pane <pane-id> --force --yes --json"
+        ],
+        "jsonSchemas": [
+          "paneArchiveRequest",
+          "paneArchiveResult"
+        ],
+        "notes": [
+          "If the result has ok:false with a blocked field, the pane was NOT archived; inspect blocked.code and rerun with --force if discarding the flagged work is intentional.",
+          "A successful archive waits for the Pane-managed worktree to be removed before returning; check worktreeCleanup in the result for the final outcome.",
+          "Archiving a main-repo Pane (no Pane-managed worktree) always succeeds immediately since nothing is deleted from disk."
         ]
       },
       "panels list": {

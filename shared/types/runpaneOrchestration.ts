@@ -213,6 +213,55 @@ export interface RunpanePaneListResult {
   panes: RunpanePaneSummary[];
 }
 
+export interface RunpanePaneArchiveRequest {
+  paneId: string;
+  force?: boolean;
+  source?: RunpanePanelCreateSource;
+}
+
+export type RunpaneWorktreeCleanupState = 'completed' | 'failed' | 'timeout' | 'not-applicable';
+
+export type RunpanePaneArchiveBlockCode =
+  | 'uncommitted-changes'
+  | 'unpushed-commits'
+  | 'uncommitted-and-unpushed'
+  | 'status-unknown';
+
+export interface RunpanePaneArchiveSafetyCheck {
+  performed: boolean;
+  hasUncommittedChanges?: boolean;
+  hasUntrackedFiles?: boolean;
+  hasUpstream?: boolean;
+  unpushedCommits?: number;
+}
+
+export interface RunpanePaneArchiveBlockReason {
+  code: RunpanePaneArchiveBlockCode;
+  message: string;
+  safetyCheck: RunpanePaneArchiveSafetyCheck;
+}
+
+export interface RunpanePaneArchiveBlockedResult {
+  ok: false;
+  paneId: string;
+  blocked: RunpanePaneArchiveBlockReason;
+  nextCommand: string;
+}
+
+export interface RunpanePaneArchiveSuccessResult {
+  ok: boolean;
+  paneId: string;
+  archived: true;
+  forced: boolean;
+  worktreeCleanup: RunpaneWorktreeCleanupState;
+  worktreePath?: string;
+  safetyCheck: RunpanePaneArchiveSafetyCheck;
+}
+
+export type RunpanePaneArchiveResult =
+  | RunpanePaneArchiveSuccessResult
+  | RunpanePaneArchiveBlockedResult;
+
 export interface RunpanePanelSummary {
   id: string;
   panelId: string;
