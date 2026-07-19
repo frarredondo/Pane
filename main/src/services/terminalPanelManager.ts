@@ -9,7 +9,7 @@ import { getShellPath } from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
-import { GIT_ATTRIBUTION_ENV } from '../utils/attribution';
+import { getGitAttributionEnv } from '../utils/attribution';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -835,7 +835,7 @@ export class TerminalPanelManager {
     }
     const spawnEnv: Record<string, string> = {
       ...baseEnv,
-      ...GIT_ATTRIBUTION_ENV,
+      ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: enhancedPath,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',

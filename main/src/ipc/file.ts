@@ -6,7 +6,7 @@ import { glob } from 'glob';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { Session } from '../types/session';
-import { GIT_ATTRIBUTION_ENV } from '../utils/attribution';
+import { getGitAttributionEnv } from '../utils/attribution';
 import { commandExecutor } from '../utils/commandExecutor';
 import { buildGitCommitCommand } from '../utils/shellEscape';
 import { revealInFileManager } from '../utils/revealInFileManager';
@@ -471,7 +471,7 @@ export function registerFileHandlers(
         await commandExecutor.execAsync(commitCommand, {
           cwd: session.worktreePath,
           timeout: 120_000,
-          env: { ...process.env, ...GIT_ATTRIBUTION_ENV }
+          env: { ...process.env, ...getGitAttributionEnv(config) }
         }, commandRunner.wslContext);
 
         // Refresh git status for this session after commit
@@ -499,7 +499,7 @@ export function registerFileHandlers(
             await commandExecutor.execAsync(retryCommitCommand, {
               cwd: session.worktreePath,
               timeout: 120_000,
-              env: { ...process.env, ...GIT_ATTRIBUTION_ENV }
+              env: { ...process.env, ...getGitAttributionEnv(config) }
             }, commandRunner.wslContext);
 
             // Refresh git status for this session after commit

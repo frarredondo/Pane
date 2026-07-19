@@ -31,6 +31,7 @@ export type SettingsSettingId =
   | 'agent-context'
   | 'claude-executable'
   | 'commit-footer'
+  | 'git-attribution'
   | 'auto-rename-pr'
   | 'worktree-file-sync'
   | 'notification-permission'

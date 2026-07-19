@@ -58,6 +58,18 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
           />
         </SettingRow>
         <SettingRow
+          settingId="git-attribution"
+          label="Attribute commits to Pane"
+          description="Set the git committer to Pane on commits made through Pane, so they show as committed by Pane on GitHub. Turn off to use your own git identity. Applies to newly opened terminals and commands."
+          saveState={persistence.saveStates['git-attribution']}
+        >
+          <ImmediateToggle
+            label="Attribute commits to Pane"
+            value={config.gitAttributionEnabled !== false}
+            onSave={(value) => persistence.saveConfig('git-attribution', { gitAttributionEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="auto-rename-pr"
           label="Auto-rename panes to pull request titles"
           description="When Pane detects a pull request for a pane, use its title as the pane name."

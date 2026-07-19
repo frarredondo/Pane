@@ -9,7 +9,7 @@ import { panelManager } from '../services/panelManager';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
-import { GIT_ATTRIBUTION_ENV } from '../utils/attribution';
+import { getGitAttributionEnv } from '../utils/attribution';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import type { ConfigManager } from '../services/configManager';
@@ -161,7 +161,7 @@ export function registerProjectHandlers(
           commandRunner.exec(`git checkout -b ${branchName}`, actualPath);
           console.log(`[Main] Created and checked out branch: ${branchName}`);
 
-          commandRunner.exec('git commit -m "Initial commit" --allow-empty', actualPath, { env: GIT_ATTRIBUTION_ENV });
+          commandRunner.exec('git commit -m "Initial commit" --allow-empty', actualPath, { env: getGitAttributionEnv(configManager.getConfig()) });
           console.log('[Main] Created initial empty commit');
         } catch (error) {
           console.error('[Main] Failed to initialize git repository:', error);
