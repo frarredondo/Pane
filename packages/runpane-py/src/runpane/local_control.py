@@ -72,6 +72,33 @@ def run_panes_create(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_panes_archive(parsed: Any) -> int:
+    if not parsed.pane_id:
+        raise ValueError("runpane panes archive requires --pane.")
+
+    request: Dict[str, Any] = {
+        "paneId": parsed.pane_id,
+        "force": parsed.force or None,
+        "source": parsed.source if parsed.source in ("user", "agent") else None,
+    }
+
+    confirm_pane_archive(parsed, request)
+
+    result = invoke_daemon(
+        "runpane:panes:archive",
+        [request],
+        pane_dir=parsed.pane_dir,
+        timeout_ms=40_000,
+    )
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print_pane_archive_result(result)
+
+    return 0 if result.get("ok") else 1
+
+
 def run_panels_list(parsed: Any) -> int:
     if not parsed.pane_id:
         raise ValueError("runpane panels list requires --pane.")
@@ -393,6 +420,18 @@ def confirm_pane_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
+def confirm_pane_archive(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panes archive mutates Pane state. Rerun with --yes in non-interactive shells.")
+
+    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
+    answer = input(f"Archive pane {request.get('paneId')}{suffix}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
 def confirm_panel_create(parsed: Any, request: Dict[str, Any]) -> None:
     if parsed.yes:
         return
@@ -511,6 +550,17 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
         else:
             error = item.get("error") or {}
             print(f"Failed {name}: {error.get('message', 'unknown error')}", file=sys.stderr)
+
+
+def print_pane_archive_result(result: Dict[str, Any]) -> None:
+    if "archived" not in result:
+        blocked = result.get("blocked") or {}
+        print(f"Refused to archive pane {result.get('paneId')}: {blocked.get('message')}", file=sys.stderr)
+        print(f"Next: {result.get('nextCommand')}", file=sys.stderr)
+        return
+
+    forced = " (forced)" if result.get("forced") else ""
+    print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}.")
 
 
 def print_panel_create_result(result: Dict[str, Any]) -> None:

@@ -129,6 +129,17 @@
       "--json"
     ],
     [
+      "panes",
+      "archive",
+      "--pane",
+      "session-1",
+      "--force",
+      "--source",
+      "agent",
+      "--yes",
+      "--json"
+    ],
+    [
       "panels",
       "list",
       "--pane",
@@ -266,6 +277,7 @@
       "runpane repos add",
       "runpane panes list",
       "runpane panes create",
+      "runpane panes archive",
       "runpane panels create",
       "runpane panels list",
       "runpane panels output",

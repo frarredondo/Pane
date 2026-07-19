@@ -106,6 +106,7 @@ runpane repos add --path /path/to/repo --name Pane --yes --json
 runpane panes list --repo active --json
 runpane panes create --repo active --name issue-252 --agent <agent> --prompt "Kick off the discussion skill for issue 252" --source agent --no-focus --wait-ready --yes --json
 runpane panes create --from-json panes.json --yes --json
+runpane panes archive --pane <pane-id> --source agent --yes --json
 runpane panels list --pane <pane-id> --json
 runpane panels output --panel <panel-id> --limit 200 --json
 printf 'Continue\n' | runpane panels input --panel <panel-id> --input-file - --yes --json
@@ -140,6 +141,8 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 `runpane panes list` lists Pane sessions, optionally scoped to one saved repository.
 
 `runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed.
+
+`runpane panes archive` archives a Pane exactly like the UI Archive action, including removal of its Pane-managed git worktree, and refuses (unless `--force`) when the pane's branch has uncommitted, untracked, or unpushed-to-remote changes. It waits for worktree removal to finish before returning and reports the outcome in `worktreeCleanup`.
 
 `runpane panels list` lists tool panels inside one Pane session.
 
@@ -183,6 +186,7 @@ Brief tools:
 - `repos add`: Register an existing git repository with the running Pane app.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
+- `panes archive`: Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.
 - `panels create`: Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
@@ -294,6 +298,7 @@ These flags are consumed by local daemon-control commands:
 --wait-ready
 --no-focus
 --focus
+--force
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes list`, `runpane panes create`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22, for example `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.
