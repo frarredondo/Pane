@@ -10,11 +10,6 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function dismissStartupDialogs(page: Page) {
-  const analyticsDecline = page.locator('button:has-text("No thanks")');
-  if (await analyticsDecline.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await analyticsDecline.click();
-    await page.waitForTimeout(500);
-  }
   const getStartedButton = page.locator('button:has-text("Get Started")');
   if (await getStartedButton.isVisible({ timeout: 2000 }).catch(() => false)) {
     await getStartedButton.click();

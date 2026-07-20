@@ -11,7 +11,6 @@ import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
-import AnalyticsConsentDialog from './components/AnalyticsConsentDialog';
 import OnboardingDialog, {
   ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE,
   ONBOARDING_REPO_SETUP_PREFERENCE,
@@ -40,19 +39,8 @@ import { Settings } from './components/Settings';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
 import { useNavigationStore } from './stores/navigationStore';
-import {
-  aliasInstallIdentity,
-  aliasWebVisitor,
-  capture,
-  captureAppFirstOpened,
-  captureUnconditionally,
-  flushPendingEvents,
-  initPostHog,
-  posthog,
-  queuePendingEvent,
-} from './services/posthog';
 import type { VersionUpdateInfo } from './types/session';
-import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
+import type { TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
@@ -79,8 +67,6 @@ interface OnboardingEnvironmentResult {
 
 function App() {
   const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);
-  const [isAnalyticsConsentOpen, setIsAnalyticsConsentOpen] = useState(false);
-  const [hasCheckedAnalyticsConsent, setHasCheckedAnalyticsConsent] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [updateVersionInfo, setUpdateVersionInfo] = useState<VersionUpdateInfo | null>(null);
@@ -92,11 +78,6 @@ function App() {
   const [isSupportPaneOpen, setIsSupportPaneOpen] = useState(false);
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
   const [completedOnboardingThisSession, setCompletedOnboardingThisSession] = useState(false);
-  const [analyticsIdentity, setAnalyticsIdentity] = useState<AnalyticsIdentity | undefined>();
-  const analyticsCheckStarted = useRef(false);
-  const analyticsIdentityPromise = useRef<Promise<AnalyticsIdentity | undefined> | null>(null);
-  const analyticsConsentOpenRef = useRef(false);
-  const appFirstOpenedCaptured = useRef(false);
   const onboardingCheckStarted = useRef(false);
   const supportPromptCheckStarted = useRef(false);
 
@@ -152,10 +133,6 @@ function App() {
 
   useIPCEvents();
   const { showNotification } = useNotifications();
-
-  useEffect(() => {
-    analyticsConsentOpenRef.current = isAnalyticsConsentOpen;
-  }, [isAnalyticsConsentOpen]);
 
   // Global panel activity status listener
   useEffect(() => {
@@ -291,147 +268,6 @@ function App() {
     return projects.find(p => p.active) || projects[0];
   }, [projects, activeProjectId]);
 
-  const resolveAnalyticsIdentity = useCallback(async (): Promise<AnalyticsIdentity | undefined> => {
-    if (!analyticsIdentityPromise.current) {
-      analyticsIdentityPromise.current = (async () => {
-        try {
-          const identityResult = await window.electronAPI?.analytics?.getIdentity?.();
-          if (identityResult?.success && identityResult.data) {
-            setAnalyticsIdentity(identityResult.data);
-            return identityResult.data;
-          }
-        } catch (error) {
-          console.error('[App] Error resolving analytics identity:', error);
-        }
-        return undefined;
-      })();
-    }
-
-    const identity = await analyticsIdentityPromise.current;
-    if (!identity) {
-      analyticsIdentityPromise.current = null;
-    }
-    return identity;
-  }, []);
-
-  const captureFirstOpenOnce = useCallback(async (identity?: AnalyticsIdentity): Promise<void> => {
-    if (!identity || appFirstOpenedCaptured.current) return;
-    appFirstOpenedCaptured.current = true;
-    await captureAppFirstOpened(identity);
-  }, []);
-
-  // Check if analytics consent dialog should be shown (before other dialogs)
-  useEffect(() => {
-    if (!appConfig || hasCheckedAnalyticsConsent || analyticsCheckStarted.current) return;
-    analyticsCheckStarted.current = true;
-
-    const checkAnalyticsConsent = async () => {
-      if (!window.electron?.invoke) {
-        setHasCheckedAnalyticsConsent(true);
-        return;
-      }
-
-      try {
-        const consentResult = await window.electron.invoke('preferences:get', 'analytics_consent_shown') as IPCResponse<string>;
-        const hasShownConsent = consentResult?.data === 'true';
-
-        if (!hasShownConsent) {
-          const identity = await resolveAnalyticsIdentity();
-          initPostHog({
-            enabled: false,
-            posthogApiKey: appConfig.analytics?.posthogApiKey,
-            posthogHost: appConfig.analytics?.posthogHost,
-            identity,
-          }, { flushPendingEvents: false });
-          // Fire consent_dialog_shown BEFORE the user can opt in/out, so we
-          // have a true "saw the dialog" denominator for funnel math instead
-          // of the conservative opted_in + opted_out lower bound. Uses direct
-          // HTTP via captureUnconditionally so it bypasses the opt-in gate.
-          // See docs/analytics-attribution.md in runpane-website repo for
-          // the funnel formula this event enables.
-          await captureUnconditionally('consent_dialog_shown', undefined, identity);
-          await captureFirstOpenOnce(identity);
-          setIsAnalyticsConsentOpen(true);
-        }
-      } catch (error) {
-        console.error('[App] Error checking analytics consent:', error);
-      } finally {
-        setHasCheckedAnalyticsConsent(true);
-      }
-    };
-
-    checkAnalyticsConsent();
-  }, [appConfig, captureFirstOpenOnce, hasCheckedAnalyticsConsent, resolveAnalyticsIdentity]);
-
-  // Initialize PostHog after config loads, then start forwarding main-process events.
-  // Both must live in the same effect so buffered events aren't replayed before init.
-  useEffect(() => {
-    if (!appConfig) return;
-
-    let cleanup: (() => void) | undefined;
-    let cancelled = false;
-
-    const initializeAnalytics = async () => {
-      const analyticsEnabled = appConfig.analytics?.enabled ?? false;
-      let consentDecided = false;
-
-      try {
-        const consentResult = await window.electron?.invoke?.('preferences:get', 'analytics_consent_shown') as IPCResponse<string> | undefined;
-        consentDecided = consentResult?.data === 'true';
-      } catch (error) {
-        console.error('[App] Error resolving analytics consent state:', error);
-      }
-
-      const identity = await resolveAnalyticsIdentity();
-
-      if (cancelled) return;
-
-      initPostHog({
-        enabled: analyticsEnabled,
-        posthogApiKey: appConfig.analytics?.posthogApiKey,
-        posthogHost: appConfig.analytics?.posthogHost,
-        identity,
-      }, { flushPendingEvents: false });
-
-      if (analyticsEnabled && identity) {
-        aliasInstallIdentity(identity);
-        if (identity.webDistinctId) {
-          aliasWebVisitor(identity.webDistinctId, identity.distinctId);
-          void window.electronAPI?.analytics?.redeemAttribution?.();
-        }
-      }
-
-      // Sync distinct ID to main process so shutdown analytics use the same identity
-      const distinctId = identity?.distinctId || posthog.get_distinct_id();
-      if (distinctId) {
-        window.electronAPI?.analytics?.syncDistinctId(distinctId);
-      }
-
-      // Now that PostHog is initialized, register the IPC listener.
-      // The preload buffers any events that arrived before this point and replays them.
-      if (!window.electronAPI?.analytics?.onMainEvent) return;
-      cleanup = window.electronAPI.analytics.onMainEvent((event) => {
-        if (analyticsEnabled) {
-          capture(event.eventName, event.properties);
-        } else if (!consentDecided) {
-          queuePendingEvent(event);
-        }
-      });
-
-      if (analyticsEnabled && !analyticsConsentOpenRef.current) {
-        await captureFirstOpenOnce(identity);
-        flushPendingEvents();
-      }
-    };
-
-    void initializeAnalytics();
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
-    };
-  }, [appConfig, captureFirstOpenOnce, resolveAnalyticsIdentity]);
-
   // CRITICAL PERFORMANCE FIX: Cleanup to prevent V8 array iteration issues
   // Uses visibility-aware interval: 60s when active, 600s when hidden
   useEffect(() => {
@@ -475,10 +311,9 @@ function App() {
     };
   }, []);
 
-  // Check if onboarding should be shown (after analytics consent completes, before welcome)
+  // Check if onboarding should be shown (before welcome)
   useEffect(() => {
-    // Wait until the analytics consent check has finished AND the consent dialog is closed
-    if (hasCheckedOnboarding || onboardingCheckStarted.current || !hasCheckedAnalyticsConsent || isAnalyticsConsentOpen) return;
+    if (hasCheckedOnboarding || onboardingCheckStarted.current) return;
     onboardingCheckStarted.current = true;
 
     const checkOnboarding = async () => {
@@ -505,13 +340,13 @@ function App() {
     };
 
     checkOnboarding();
-  }, [hasCheckedOnboarding, hasCheckedAnalyticsConsent, isAnalyticsConsentOpen]);
+  }, [hasCheckedOnboarding]);
 
   useEffect(() => {
     // Show welcome screen and Discord popup intelligently based on user state
     // This should only run once when the app is loaded, not when sessions change
     // Don't show welcome until onboarding check has completed and its dialog (if any) is closed
-    if (!isLoaded || hasCheckedWelcome || isAnalyticsConsentOpen || !hasCheckedOnboarding || isOnboardingOpen) {
+    if (!isLoaded || hasCheckedWelcome || !hasCheckedOnboarding || isOnboardingOpen) {
       return;
     }
 
@@ -615,14 +450,12 @@ function App() {
     // Set the flag first to prevent re-runs
     setHasCheckedWelcome(true);
     checkInitialState();
-  }, [isLoaded, hasCheckedWelcome, isAnalyticsConsentOpen, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, isDiscordOpen]);
+  }, [isLoaded, hasCheckedWelcome, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, isDiscordOpen]);
 
   useEffect(() => {
     if (
       supportPromptCheckStarted.current ||
       !isLoaded ||
-      !hasCheckedAnalyticsConsent ||
-      isAnalyticsConsentOpen ||
       !hasCheckedOnboarding ||
       isOnboardingOpen ||
       completedOnboardingThisSession ||
@@ -651,10 +484,6 @@ function App() {
         if (!envResult.success || envResult.data?.ghReady !== true) return;
 
         await window.electron.invoke('preferences:set', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
-        capture('onboarding_support_prompt_shown', {
-          source: 'future_launch',
-          gh_status: 'gh_ready',
-        });
         setIsSupportPaneOpen(true);
       } catch (error) {
         console.error('[App] Failed to check deferred onboarding support prompt:', error);
@@ -664,8 +493,6 @@ function App() {
     void checkDeferredSupportPrompt();
   }, [
     isLoaded,
-    hasCheckedAnalyticsConsent,
-    isAnalyticsConsentOpen,
     hasCheckedOnboarding,
     isOnboardingOpen,
     completedOnboardingThisSession,
@@ -678,7 +505,7 @@ function App() {
 
   // Check for resumable sessions on startup (auto-resume feature)
   useEffect(() => {
-    if (!isLoaded || isAnalyticsConsentOpen) return;
+    if (!isLoaded) return;
 
     const checkResumableSessions = async () => {
       try {
@@ -693,7 +520,7 @@ function App() {
     };
 
     checkResumableSessions();
-  }, [isLoaded, isAnalyticsConsentOpen]);
+  }, [isLoaded]);
 
   const loadNextPendingPermission = useCallback(async () => {
     try {
@@ -825,13 +652,6 @@ function App() {
           onCategoryChange={setSettingsCategory}
           openRequest={settingsOpenRequest}
           onOpenRequestHandled={() => setSettingsOpenRequest(undefined)}
-        />
-        <AnalyticsConsentDialog
-          isOpen={isAnalyticsConsentOpen}
-          onClose={() => setIsAnalyticsConsentOpen(false)}
-          analyticsIdentity={analyticsIdentity}
-          onResolveAnalyticsIdentity={resolveAnalyticsIdentity}
-          onCaptureFirstOpen={captureFirstOpenOnce}
         />
         <OnboardingDialog
           isOpen={isOnboardingOpen}

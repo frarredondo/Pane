@@ -6,14 +6,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function dismissStartupDialogs(page: Page) {
-  // Dismiss analytics consent dialog if present (shows before welcome)
-  const analyticsDecline = page.locator('button:has-text("No thanks")');
-  if (await analyticsDecline.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await analyticsDecline.click();
-    await page.waitForTimeout(500);
-  }
-
-  // Dismiss welcome dialog if present (shows after analytics consent)
+  // Dismiss welcome dialog if present
   const getStartedButton = page.locator('button:has-text("Get Started")');
   if (await getStartedButton.isVisible({ timeout: 2000 }).catch(() => false)) {
     await getStartedButton.click();

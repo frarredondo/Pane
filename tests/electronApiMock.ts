@@ -1,13 +1,6 @@
 import type { Page } from '@playwright/test';
 
-type AnalyticsMainEvent = {
-  eventName: string;
-  properties?: Record<string, unknown>;
-};
-
 type ElectronApiMockOptions = {
-  analyticsConsentShown?: boolean;
-  analyticsIdentity?: Record<string, unknown>;
   initialConfig?: Record<string, unknown>;
   initialPreferences?: Record<string, string>;
   platform?: 'darwin' | 'linux' | 'win32';
@@ -15,7 +8,6 @@ type ElectronApiMockOptions = {
   configReadDelayMs?: number;
   configGetFailures?: number;
   notificationsSupported?: boolean;
-  mainAnalyticsEvents?: AnalyticsMainEvent[];
   initialProjects?: Array<Record<string, unknown>>;
   initialSessions?: Array<Record<string, unknown>>;
   initialPanels?: Array<Record<string, unknown>>;
@@ -34,19 +26,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const pendingPermissions: Array<Record<string, unknown>> = [];
     const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
     const preferences: Record<string, string> = {
-      analytics_consent_shown: mockOptions.analyticsConsentShown === false ? 'false' : 'true',
       ...clone(mockOptions.initialPreferences ?? {}),
-    };
-    const defaultAnalyticsIdentity = {
-      distinctId: 'test',
-      installId: 'install_test',
-      identitySource: 'anonymous',
-      appVersion: 'test',
-      platform: 'linux',
-      electronVersion: 'test',
-      webAttributionPresent: false,
-      isFirstLaunch: false,
-      previousVersion: 'test',
     };
     let nextRemoteConnectionId = 1;
     const remoteDaemonConfig = {
@@ -279,18 +259,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       isPackaged: () => Promise.resolve(false),
       checkForUpdates: () => success({ hasUpdate: false }),
       openExternal: () => undefined,
-      analytics: namespace({
-        getIdentity: () => success(clone(mockOptions.analyticsIdentity ?? defaultAnalyticsIdentity)),
-        onMainEvent: (callback: (event: AnalyticsMainEvent) => void) => {
-          const remove = subscribe('analytics:main-event', callback as (...args: unknown[]) => void);
-          for (const event of mockOptions.mainAnalyticsEvents ?? []) {
-            callback(clone(event));
-          }
-          return remove;
-        },
-        syncDistinctId: () => undefined,
-        redeemAttribution: () => success(undefined),
-      }),
       cloud: namespace({
         getState: () => success(clone(cloudState)),
         onStateChanged: (callback: (state: unknown) => void) => subscribe('cloud:state-changed', callback),

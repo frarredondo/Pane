@@ -3,7 +3,6 @@ import { GitFork, AlertCircle, Star, ExternalLink, Loader2 } from 'lucide-react'
 import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
-import { capture } from '../services/posthog';
 
 type DialogStep = 'detecting' | 'ready';
 type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
@@ -118,10 +117,7 @@ export function SupportPaneDialog({ isOpen, onClose }: SupportPaneDialogProps) {
   const handleSupport = async () => {
     setIsSupporting(true);
     try {
-      const supportResult = await window.electronAPI.onboarding.supportProject();
-      if (supportResult?.success) {
-        capture('onboarding_project_supported_after_setup');
-      }
+      await window.electronAPI.onboarding.supportProject();
     } catch {
       // Support failure is non-fatal and should not keep nagging.
     } finally {
@@ -220,9 +216,6 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
       supportPromptRecordedRef.current = false;
       void detectEnvironment().then((nextEnv) => {
         const status = getEnvironmentStatus(nextEnv);
-        capture('onboarding_started', {
-          gh_status_at_first_launch: status,
-        });
         void recordFirstLaunchEnvironmentStatus(status);
       });
     }
@@ -231,10 +224,6 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   useEffect(() => {
     if (!isOpen || !env?.ghReady || supportPromptRecordedRef.current) return;
     supportPromptRecordedRef.current = true;
-    capture('onboarding_support_prompt_shown', {
-      source: 'first_launch',
-      gh_status: getEnvironmentStatus(env),
-    });
     void markSupportPromptShown();
   }, [isOpen, env]);
 
@@ -254,11 +243,6 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   const supportProjectInBackground = () => {
     void window.electronAPI.onboarding.supportProject()
-      .then((supportResult) => {
-        if (supportResult?.success) {
-          capture('onboarding_project_supported_during_setup');
-        }
-      })
       .catch(() => {
         // Support failure is non-fatal.
       });
@@ -280,9 +264,6 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   };
 
   const handleSkip = async () => {
-    capture('onboarding_skipped', {
-      step: step === 'detecting' ? 'detecting' : getEnvironmentStatus(env),
-    });
     await markOnboardingComplete();
     onClose();
   };
