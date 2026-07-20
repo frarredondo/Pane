@@ -8,7 +8,6 @@ export type SettingsCategoryId =
   | 'remote-access'
   | 'integrations'
   | 'shortcuts'
-  | 'privacy'
   | 'advanced';
 
 export type RemoteAccessSubviewId = 'host-setup' | 'connections' | 'advanced-host';
@@ -48,7 +47,6 @@ export type SettingsSettingId =
   | 'cloud-workspace'
   | 'voice-transcription'
   | 'terminal-shortcuts'
-  | 'analytics'
   | 'verbose-logging'
   | 'developer-mode'
   | 'pty-host'

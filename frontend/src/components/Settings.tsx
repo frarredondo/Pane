@@ -13,7 +13,6 @@ import { NotificationSettings } from './NotificationSettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
-import { PrivacySettings } from './settings/categories/PrivacySettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
@@ -142,8 +141,6 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} {...sharedDirtyProps} />;
-      case 'privacy':
-        return <PrivacySettings persistence={persistence} />;
       case 'advanced':
         return <AdvancedSettings persistence={persistence} platform={platform} {...sharedDirtyProps} />;
     }

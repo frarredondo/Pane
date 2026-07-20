@@ -8,7 +8,6 @@ import {
   Link2,
   Monitor,
   Settings,
-  Shield,
   SlidersHorizontal,
   Terminal,
 } from 'lucide-react';
@@ -96,14 +95,6 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Keyboard,
     settingIds: ['terminal-shortcuts'],
     aliases: ['hotkeys', 'keyboard', 'snippets'],
-  },
-  {
-    id: 'privacy',
-    label: 'Privacy',
-    description: 'Analytics and data-sharing choices.',
-    icon: Shield,
-    settingIds: ['analytics'],
-    aliases: ['analytics', 'telemetry', 'tracking'],
   },
   {
     id: 'advanced',

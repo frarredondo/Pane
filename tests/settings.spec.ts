@@ -38,7 +38,6 @@ test.describe('Settings', () => {
       'Remote Access',
       'Integrations',
       'Shortcuts',
-      'Privacy',
       'Advanced',
     ];
     const navigation = page.getByRole('navigation', { name: 'Settings categories' });
