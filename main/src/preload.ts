@@ -26,21 +26,6 @@ interface LogEntry {
   source?: string;
 }
 
-// Buffer analytics events that arrive before the renderer registers its callback.
-// This prevents race conditions where main-process events (e.g. app_opened) are
-// sent before the React useEffect listener is attached.
-type AnalyticsEvent = { eventName: string; properties: Record<string, unknown> };
-const analyticsEventBuffer: AnalyticsEvent[] = [];
-let analyticsForwardCallback: ((event: AnalyticsEvent) => void) | null = null;
-
-ipcRenderer.on('analytics:main-event', (_event: unknown, data: AnalyticsEvent) => {
-  if (analyticsForwardCallback) {
-    analyticsForwardCallback(data);
-  } else {
-    analyticsEventBuffer.push(data);
-  }
-});
-
 interface DialogOptions {
   title?: string;
   defaultPath?: string;
@@ -1040,26 +1025,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   nimbalyst: {
     checkInstalled: (): Promise<IPCResponse> => invokeIpc('nimbalyst:check-installed'),
     openWorktree: (worktreePath: string): Promise<IPCResponse> => invokeIpc('nimbalyst:open-worktree', worktreePath),
-  },
-
-  // Analytics tracking
-  analytics: {
-    getIdentity: () => invokeIpc('analytics:get-identity'),
-    onMainEvent: (callback: (event: { eventName: string; properties: Record<string, unknown> }) => void) => {
-      // Replay any events that arrived before this callback was registered
-      for (const buffered of analyticsEventBuffer) {
-        callback(buffered);
-      }
-      analyticsEventBuffer.length = 0;
-      analyticsForwardCallback = callback;
-      return () => {
-        analyticsForwardCallback = null;
-      };
-    },
-    syncDistinctId: (distinctId: string): void => {
-      ipcRenderer.send('analytics:sync-distinct-id', distinctId);
-    },
-    redeemAttribution: (): Promise<IPCResponse<void>> => invokeIpc('analytics:redeem-attribution'),
   },
 
   // Spotlight

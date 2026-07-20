@@ -442,14 +442,6 @@ interface ElectronAPI {
     }>>;
   };
 
-  // Analytics tracking
-  analytics: {
-    getIdentity: () => Promise<IPCResponse<import('./config').AnalyticsIdentity>>;
-    onMainEvent: (callback: (event: { eventName: string; properties: Record<string, unknown> }) => void) => () => void;
-    syncDistinctId: (distinctId: string) => void;
-    redeemAttribution: () => Promise<IPCResponse<void>>;
-  };
-
   // Onboarding
   onboarding: {
     detectEnvironment: () => Promise<IPCResponse>;
