@@ -7,7 +7,6 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { getShellPath } from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
-import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
 import {
@@ -204,7 +203,6 @@ export class TerminalPanelManager {
   private serializedBuffers = new Map<string, string>();
   private readonly visibleViewersByPanel = new Map<string, Map<string, number>>();
   private readonly MAX_SCROLLBACK_LINES = 10000;
-  private analyticsManager: AnalyticsManager | null = null;
 
   // Spawn concurrency limiter — prevents CPU spikes when many terminals init at once
   private activeSpawns = 0;
@@ -418,10 +416,6 @@ export class TerminalPanelManager {
       console.warn(`[TerminalPanelManager] Failed to persist Codex session id for panel ${terminal.panelId}:`, error);
     });
     console.log(`[TerminalPanelManager] Captured Codex session id for panel ${terminal.panelId}: ${agentSessionId}`);
-  }
-
-  setAnalyticsManager(analyticsManager: AnalyticsManager): void {
-    this.analyticsManager = analyticsManager;
   }
 
   private sendRendererEvent(channel: string, ...args: unknown[]): void {

@@ -260,7 +260,6 @@ function createServicesStub(overrides: Partial<AppServices> = {}): AppServices {
     databaseService: {},
     worktreeManager: {},
     gitDiffManager: {},
-    analyticsManager: {},
     taskQueue: {},
     cliManagerFactory: {},
     claudeCodeManager: {},

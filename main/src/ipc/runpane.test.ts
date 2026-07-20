@@ -128,10 +128,6 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     taskQueue: {
       createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
     },
-    analyticsManager: {
-      track: vi.fn(),
-      hashSessionId: vi.fn((id: string) => `hash-${id}`),
-    },
     spotlightManager: {},
     worktreeManager: {
       getUpstream: vi.fn(async () => null),
@@ -438,15 +434,6 @@ describe('runpane IPC handlers', () => {
       }],
     });
     expect(panelManager.getPanelsForSession).toHaveBeenCalledWith(session.id);
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panes:list',
-        status: 'success',
-        repo_id: project.id,
-        result_count: 1,
-      }),
-    );
   });
 
   it('lists panels for a pane', async () => {
@@ -762,22 +749,6 @@ describe('runpane IPC handlers', () => {
       inputBytes: 8,
       nextCommand: `runpane panels output --panel ${terminalPanel.id} --limit 200 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:input',
-        status: 'success',
-        pane_id_hash: `hash-${session.id}`,
-        panel_id_hash: `hash-${terminalPanel.id}`,
-        input_bytes: 8,
-      }),
-    );
-    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        input: 'echo hi\r',
-      }),
-    );
   });
 
   it('submits text with a terminal Enter and returns validation guidance', async () => {
@@ -798,20 +769,6 @@ describe('runpane IPC handlers', () => {
       enter: 'cr',
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:submit',
-        status: 'success',
-        input_bytes: 11,
-      }),
-    );
-    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        input: 'echo hello\n',
-      }),
-    );
   });
 
   it('submits a Codex composer with the effective Ctrl+Enter sequence and verifies composer cleared', async () => {
@@ -859,14 +816,6 @@ describe('runpane IPC handlers', () => {
       verifiedSubmitted: true,
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:submit-composer',
-        status: 'success',
-        input_bytes: 8,
-      }),
-    );
   });
 
   it('blocks submit-composer when the Codex pasted-content composer remains visible', async () => {

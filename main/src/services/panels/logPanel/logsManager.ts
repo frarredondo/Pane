@@ -5,27 +5,18 @@ import { getPaneEventSink } from '../../../core/runtime';
 import { panelManager } from '../../panelManager';
 import { addSessionLog, cleanupSessionLogs } from '../../../ipc/logs';
 import { getShellPath } from '../../../utils/shellPath';
-import type { AnalyticsManager } from '../../analyticsManager';
 import { WSLContext, buildWSLENV } from '../../../utils/wslUtils';
 
 export class LogsManager {
   private static instance: LogsManager;
   private activeProcesses = new Map<string, ChildProcess>(); // panelId -> process
   private scriptStartTimes = new Map<string, number>(); // panelId -> start timestamp
-  private analyticsManager: AnalyticsManager | null = null;
-  
+
   static getInstance(): LogsManager {
     if (!LogsManager.instance) {
       LogsManager.instance = new LogsManager();
     }
     return LogsManager.instance;
-  }
-
-  /**
-   * Set the analytics manager for tracking script executions
-   */
-  setAnalyticsManager(analyticsManager: AnalyticsManager): void {
-    this.analyticsManager = analyticsManager;
   }
 
   private sendRendererEvent(channel: string, ...args: unknown[]): void {
@@ -451,20 +442,7 @@ export class LogsManager {
     // Remove from active processes
     this.activeProcesses.delete(panelId);
 
-    // Track script execution analytics
-    const startTime = this.scriptStartTimes.get(panelId);
-    if (startTime && this.analyticsManager) {
-      const duration = (Date.now() - startTime) / 1000; // Convert to seconds
-      const success = code === 0;
-
-      this.analyticsManager.track('run_script_executed', {
-        success,
-        duration_seconds: this.analyticsManager.categorizeDuration(duration),
-      });
-
-      // Clean up start time
-      this.scriptStartTimes.delete(panelId);
-    }
+    this.scriptStartTimes.delete(panelId);
 
     // Update panel state
     const panel = await panelManager.getPanel(panelId);

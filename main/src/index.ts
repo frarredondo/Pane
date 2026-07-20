@@ -57,7 +57,6 @@ if (process.platform === 'win32') {
 // Now import the rest of electron
 import { BrowserWindow, Menu, ipcMain, shell, dialog, IpcMainInvokeEvent, session, WebContents, webContents, WebContentsView } from 'electron';
 import * as path from 'path';
-import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
 import type { WorktreeManager } from './services/worktreeManager';
@@ -67,7 +66,6 @@ import type { RunCommandManager } from './services/runCommandManager';
 import type { VersionChecker } from './services/versionChecker';
 import type { Logger } from './utils/logger';
 import type { ArchiveProgressManager } from './services/archiveProgressManager';
-import type { AnalyticsManager } from './services/analyticsManager';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
@@ -179,7 +177,6 @@ let databaseService: DatabaseService;
 let runCommandManager: RunCommandManager;
 let versionChecker: VersionChecker;
 let archiveProgressManager: ArchiveProgressManager;
-let analyticsManager: AnalyticsManager;
 let paneDaemonHost: PaneDaemonHost | null = null;
 let powerSaveManager: PowerSaveManager | null = null;
 
@@ -199,9 +196,6 @@ let ptyHostSupervisor: PtyHostSupervisor | null = null;
 export function getPtyHostSupervisor(): PtyHostSupervisor | null {
   return ptyHostSupervisor;
 }
-
-// Store app start time for session duration tracking
-let appStartTime: number;
 
 // Store original console methods before overriding
 // These must be captured immediately when the module loads
@@ -293,11 +287,6 @@ async function createWindow() {
       trafficLightPosition: { x: 10, y: 10 }
     } : {})
   });
-
-  // Set main window on analytics manager for IPC forwarding
-  if (analyticsManager) {
-    analyticsManager.setMainWindow(mainWindow);
-  }
 
   // Increase max listeners to prevent warning when many panels are active
   // Each panel can register multiple event listeners
@@ -979,7 +968,6 @@ async function initializeServices() {
   versionChecker = services.versionChecker;
   logger = services.logger as Logger;
   archiveProgressManager = services.archiveProgressManager as ArchiveProgressManager;
-  analyticsManager = services.analyticsManager as AnalyticsManager;
   powerSaveManager = new PowerSaveManager(configManager, sessionManager);
   powerSaveManager.sync();
 
@@ -1030,8 +1018,6 @@ if (launchRemoteSetup) {
   startHeadlessPaneProcess();
 } else {
   app.whenReady().then(async () => {
-    appStartTime = Date.now();
-
     console.log('[Main] App is ready, initializing services...');
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
@@ -1343,47 +1329,6 @@ if (launchRemoteSetup) {
       await paneDaemonHost.shutdown();
       paneDaemonHost = null;
       console.log('[Main] Daemon host services stopped');
-    }
-
-    // Track app closed event with session duration.
-    // Send directly via HTTP instead of IPC — the renderer may already be
-    // tearing down, so an IPC-forwarded event would likely be dropped.
-    if (configManager && configManager.isAnalyticsEnabled() && appStartTime) {
-      try {
-        const settings = configManager.getAnalyticsSettings();
-        const apiKey = settings.posthogApiKey || 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
-        const host = settings.posthogHost || 'https://runpane.com/api/c';
-        const distinctId = configManager.getAnalyticsDistinctId() || `anon-${Date.now().toString(36)}`;
-        const sessionDurationSeconds = Math.floor((Date.now() - appStartTime) / 1000);
-
-        const { net } = await import('electron');
-        await net.fetch(`${host}/capture/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            api_key: apiKey,
-            event: 'app_closed',
-            properties: {
-              distinct_id: distinctId,
-              token: apiKey,
-              install_id: settings.installId,
-              session_duration_seconds: sessionDurationSeconds,
-              app_version: app.getVersion(),
-              platform: os.platform(),
-              identity_source: settings.identitySource,
-              github_username: settings.githubUsername,
-              github_email: settings.githubEmail,
-              git_email: settings.gitEmail,
-              git_email_sha256: settings.gitEmailHash,
-              git_user_name: settings.gitUserName,
-              $lib: 'posthog-node',
-            },
-            timestamp: new Date().toISOString(),
-          }),
-        });
-      } catch (error) {
-        console.error('[Analytics] Failed to track app_closed event:', error);
-      }
     }
 
     const totalShutdownTime = Date.now() - shutdownStartTime;

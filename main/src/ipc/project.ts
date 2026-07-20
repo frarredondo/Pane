@@ -77,7 +77,7 @@ export function registerProjectHandlers(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
 ): void {
-  const { databaseService, sessionManager, worktreeManager, analyticsManager, configManager } = services;
+  const { databaseService, sessionManager, worktreeManager, configManager } = services;
 
   commandRegistry.register('projects:get-all', async () => {
     try {
@@ -211,15 +211,6 @@ export function registerProjectHandlers(
         await updateProjectAgentContextBestEffort(project, configManager, 'project create');
       }
 
-      // Track project creation
-      if (analyticsManager && project) {
-        const allProjects = databaseService.getAllProjects();
-        analyticsManager.track('project_created', {
-          was_auto_initialized: !isGitRepo,
-          project_count: allProjects.length
-        });
-      }
-
       const projectWithEnv = project ? {
         ...project,
         environment: new PathResolver(project).environment
@@ -272,16 +263,6 @@ export function registerProjectHandlers(
         }
 
         await updateProjectAgentContextBestEffort(project, configManager, 'project activate');
-
-        // Track project switch
-        if (analyticsManager) {
-          const projectIdNum = parseInt(projectId);
-          const projectSessions = databaseService.getAllSessions(projectIdNum);
-          const hasActiveSessions = projectSessions.some(s => s.status === 'running' || s.status === 'pending');
-          analyticsManager.track('project_switched', {
-            has_active_sessions: hasActiveSessions
-          });
-        }
       }
       return { success: true };
     } catch (error) {
@@ -323,25 +304,6 @@ export function registerProjectHandlers(
       // Emit event to notify frontend about project update
       if (project) {
         sessionManager.emit('project:updated', project);
-      }
-
-      // Track project settings update
-      if (analyticsManager && project) {
-        // Determine which category of setting was updated
-        let settingCategory = 'other';
-        if (updates.system_prompt !== undefined) {
-          settingCategory = 'system_prompt';
-        } else if (updates.run_script !== undefined || updates.build_script !== undefined) {
-          settingCategory = 'scripts';
-        } else if (updates.open_ide_command !== undefined) {
-          settingCategory = 'ide';
-        } else if (updates.name !== undefined) {
-          settingCategory = 'name';
-        }
-
-        analyticsManager.track('project_settings_updated', {
-          setting_category: settingCategory
-        });
       }
 
       return { success: true, data: project };
@@ -400,9 +362,7 @@ export function registerProjectHandlers(
 
           try {
             console.log(`[WorktreeAudit] remove_requested source="project-delete" sessionId=${JSON.stringify(session.id)} projectId=${projectIdNum} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(session.worktree_name)} worktreePath=${JSON.stringify(session.worktree_path || '')}`);
-            // Pass session creation date for analytics tracking
-            const sessionCreatedAt = session.created_at ? new Date(session.created_at) : undefined;
-            await worktreeManager.removeWorktree(project.path, session.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, {
+            await worktreeManager.removeWorktree(project.path, session.worktree_name, project.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner, {
               source: 'project-delete',
               sessionId: session.id,
               projectId: projectIdNum,
@@ -426,15 +386,6 @@ export function registerProjectHandlers(
 
       // Invalidate project context cache before deleting
       sessionManager.invalidateProjectContext(projectIdNum);
-
-      // Track project deletion before actually deleting
-      if (analyticsManager) {
-        const projectAge = Math.floor((Date.now() - new Date(project.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        analyticsManager.track('project_deleted', {
-          session_count: projectSessions.length,
-          project_age_days: projectAge
-        });
-      }
 
       // Now safe to delete the project
       const success = databaseService.deleteProject(projectIdNum);

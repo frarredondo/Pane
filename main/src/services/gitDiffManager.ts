@@ -1,5 +1,4 @@
 import type { Logger } from '../utils/logger';
-import type { AnalyticsManager } from './analyticsManager';
 import { CommandRunner } from '../utils/commandRunner';
 
 export interface GitDiffStats {
@@ -39,8 +38,7 @@ export interface GitGraphCommit {
 
 export class GitDiffManager {
   constructor(
-    private logger?: Logger,
-    private analyticsManager?: AnalyticsManager
+    private logger?: Logger
   ) {}
 
   /**
@@ -386,20 +384,7 @@ export class GitDiffManager {
   }
 
   async getGitDiff(worktreePath: string, commandRunner: CommandRunner): Promise<GitDiffResult> {
-    const result = await this.captureWorkingDirectoryDiff(worktreePath, commandRunner);
-
-    // Track git diff viewed
-    if (this.analyticsManager) {
-      const fileCountCategory = this.analyticsManager.categorizeNumber(result.stats.filesChanged, [1, 5, 10, 25, 50]);
-      const hasUncommitted = this.hasChanges(worktreePath, commandRunner);
-
-      this.analyticsManager.track('git_diff_viewed', {
-        file_count_category: fileCountCategory,
-        has_uncommitted: hasUncommitted
-      });
-    }
-
-    return result;
+    return await this.captureWorkingDirectoryDiff(worktreePath, commandRunner);
   }
 
   private getGitDiffString(worktreePath: string, commandRunner: CommandRunner): string {

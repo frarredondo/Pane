@@ -3,7 +3,6 @@ import { startupRetentionResult } from '../services/database';
 import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
 import { DatabaseService } from '../database/database';
-import { AnalyticsManager } from '../services/analyticsManager';
 import { SessionManager } from '../services/sessionManager';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { SpotlightManager } from '../services/spotlightManager';
@@ -116,8 +115,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const databaseService = new DatabaseService(dbPath);
   databaseService.initialize();
 
-  const analyticsManager = new AnalyticsManager(configManager);
-  const sessionManager = new SessionManager(databaseService, analyticsManager);
+  const sessionManager = new SessionManager(databaseService);
   sessionManager.initializeFromDatabase();
 
   if (process.platform === 'win32') {
@@ -150,7 +148,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     permissionIpcServer = null;
   }
 
-  const worktreeManager = new WorktreeManager(configManager, analyticsManager);
+  const worktreeManager = new WorktreeManager(configManager);
   const activeProject = sessionManager.getActiveProject();
   if (activeProject) {
     const context = sessionManager.getProjectContextByProjectId(activeProject.id);
@@ -167,7 +165,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     additionalOptions: { permissionIpcPath },
     skipValidation: true,
   });
-  const gitDiffManager = new GitDiffManager(logger, analyticsManager);
+  const gitDiffManager = new GitDiffManager(logger);
   const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
@@ -207,7 +205,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     getMainWindow: options.getMainWindow,
     logger,
     archiveProgressManager,
-    analyticsManager,
     spotlightManager,
   };
 
@@ -219,7 +216,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const commandRegistry = registerIpcHandlers(services);
 
   let paneDaemonServer: PaneDaemonServer | null = null;
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
     const endpoint = paneDaemonServer.getEndpoint();
@@ -259,9 +256,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
-
-  const { logsManager } = await import('../services/panels/logPanel/logsManager');
-  logsManager.setAnalyticsManager(analyticsManager);
 
   gitStatusManager.startPolling();
   if (mode === 'desktop') {

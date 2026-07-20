@@ -357,7 +357,7 @@ function isPaneRepo(repoPath: string): boolean {
 }
 
 export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServices): void {
-  const { databaseService, sessionManager, analyticsManager } = services;
+  const { databaseService, sessionManager } = services;
 
   // Detect git/gh environment
   ipcMain.handle('onboarding:detect-environment', async () => {
@@ -629,13 +629,6 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
       databaseService.setActiveProject(project.id);
       sessionManager.setActiveProject(project);
 
-      // Track onboarding
-      if (analyticsManager) {
-        analyticsManager.track('onboarding_completed', {
-          was_already_cloned: alreadyCloned,
-        });
-      }
-
       return {
         success: true,
         data: {
@@ -665,10 +658,6 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
     };
 
     if (results.starred || results.followed) {
-      if (analyticsManager) {
-        analyticsManager.track('onboarding_project_supported', results);
-      }
-
       return { success: true, data: results };
     }
 

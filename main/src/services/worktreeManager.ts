@@ -2,7 +2,6 @@ import { mkdir } from 'fs/promises';
 import { withLock } from '../utils/mutex';
 import { escapeShellArg } from '../utils/shellEscape';
 import type { ConfigManager } from './configManager';
-import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { getGitAttributionEnv } from '../utils/attribution';
@@ -118,8 +117,7 @@ export class WorktreeManager {
   private projectsCache: Map<string, { baseDir: string }> = new Map();
 
   constructor(
-    private configManager?: ConfigManager,
-    private analyticsManager?: AnalyticsManager
+    private configManager?: ConfigManager
   ) {
     // No longer initialized with a single repo path
   }
@@ -286,13 +284,6 @@ export class WorktreeManager {
       
       console.log(`[WorktreeManager] Worktree created successfully at: ${worktreePath}`);
 
-      // Track worktree creation
-      if (this.analyticsManager) {
-        this.analyticsManager.track('git_worktree_created', {
-          branch_existed: branchExists
-        });
-      }
-
       return { worktreePath, baseCommit, baseBranch: actualBaseBranch };
       } catch (error) {
         console.error(`[WorktreeManager] Failed to create worktree:`, error);
@@ -355,7 +346,7 @@ export class WorktreeManager {
     return { worktreePath: projectPath, baseCommit, baseBranch: detectedBranch };
   }
 
-  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<void> {
+  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<void> {
     return await withLock(`worktree-remove-${projectPath}-${name}`, async () => {
       const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
       const worktreePath = pathResolver.join(baseDir, name);
@@ -372,14 +363,6 @@ export class WorktreeManager {
         logWorktreeAudit('remove_started', auditDetails);
         await commandRunner.execAsync(`git worktree remove "${worktreePath}" --force`, projectPath);
         logWorktreeAudit('remove_succeeded', auditDetails);
-
-        // Track worktree cleanup
-        if (this.analyticsManager && sessionCreatedAt) {
-          const sessionAgeDays = Math.floor((Date.now() - sessionCreatedAt.getTime()) / (1000 * 60 * 60 * 24));
-          this.analyticsManager.track('git_worktree_cleaned', {
-            session_age_days: sessionAgeDays
-          });
-        }
       } catch (error: unknown) {
         const err = error as Error & { stderr?: string; stdout?: string };
         const errorMessage = err.stderr || err.stdout || err.message || String(err);
@@ -792,8 +775,6 @@ export class WorktreeManager {
     return await withLock(`git-rebase-${worktreePath}`, async () => {
       const executedCommands: string[] = [];
       let lastOutput = '';
-      const startTime = Date.now();
-      let conflictOccurred = false;
 
       try {
         // Rebase the current worktree branch onto local main branch
@@ -801,40 +782,9 @@ export class WorktreeManager {
         executedCommands.push(`${command} (in ${worktreePath})`);
         const rebaseResult = await commandRunner.execAsync(command, worktreePath, { timeout: 120000 });
         lastOutput = rebaseResult.stdout || rebaseResult.stderr || '';
-
-        // Track successful rebase
-        if (this.analyticsManager) {
-          const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
-          this.analyticsManager.track('git_rebase_executed', {
-            success: true,
-            duration_seconds: durationSeconds,
-            conflict_occurred: false
-          });
-        }
       } catch (error: unknown) {
         const err = error as Error & { stderr?: string; stdout?: string };
         console.error(`[WorktreeManager] Failed to rebase ${mainBranch} into worktree:`, err);
-
-        // Check if conflict occurred
-        const errorOutput = err.stderr || err.stdout || err.message || '';
-        conflictOccurred = errorOutput.includes('CONFLICT');
-
-        // Track failed rebase
-        if (this.analyticsManager) {
-          const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
-          this.analyticsManager.track('git_rebase_executed', {
-            success: false,
-            duration_seconds: durationSeconds,
-            conflict_occurred: conflictOccurred
-          });
-
-          // Track operation failure
-          const errorCategory = conflictOccurred ? 'conflict' : 'unknown';
-          this.analyticsManager.track('git_operation_failed', {
-            operation_type: 'rebase_from_main',
-            error_category: errorCategory
-          });
-        }
 
         // Create detailed error with git command output
         const gitError = new Error(`Failed to rebase ${mainBranch} into worktree`) as Error & {
@@ -877,7 +827,6 @@ export class WorktreeManager {
     return await withLock(`git-squash-merge-${worktreePath}`, async () => {
       const executedCommands: string[] = [];
       let lastOutput = '';
-      const startTime = Date.now();
 
       try {
         console.log(`[WorktreeManager] Squashing and merging worktree to ${mainBranch}: ${worktreePath}`);
@@ -973,43 +922,9 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
         }
 
         console.log(`[WorktreeManager] Successfully squashed and merged worktree to ${mainBranch}`);
-
-        // Track successful squash and merge
-        if (this.analyticsManager) {
-          const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
-          // Get commit count from the commits variable (already fetched earlier)
-          const commitCount = commits.trim().split('\n').filter(Boolean).length;
-          const commitCountCategory = this.analyticsManager.categorizeNumber(commitCount, [1, 3, 5, 10, 25]);
-
-          this.analyticsManager.track('git_squash_executed', {
-            success: true,
-            duration_seconds: durationSeconds,
-            commit_count_category: commitCountCategory
-          });
-        }
       } catch (error: unknown) {
         const err = error as Error & { stderr?: string; stdout?: string };
         console.error(`[WorktreeManager] Failed to squash and merge worktree to ${mainBranch}:`, err);
-
-        // Track failed squash
-        if (this.analyticsManager) {
-          const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
-          const errorOutput = err.stderr || err.stdout || err.message || '';
-          const errorCategory = errorOutput.includes('CONFLICT') ? 'conflict' :
-                                errorOutput.includes('merge') ? 'merge_failed' :
-                                errorOutput.includes('rebase') ? 'rebase_failed' : 'unknown';
-
-          this.analyticsManager.track('git_squash_executed', {
-            success: false,
-            duration_seconds: durationSeconds,
-            commit_count_category: '0-1' // Unknown on failure
-          });
-
-          this.analyticsManager.track('git_operation_failed', {
-            operation_type: 'squash_and_merge',
-            error_category: errorCategory
-          });
-        }
 
         // Create detailed error with git command output
         const gitError = new Error(`Failed to squash and merge worktree to ${mainBranch}`) as Error & {

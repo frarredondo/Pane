@@ -1,12 +1,5 @@
 import type { PaneEventSink } from '../core/eventSink';
 import type { ConfigManager } from '../services/configManager';
-import type { AnalyticsManager } from '../services/analyticsManager';
-import {
-  createRemotePaneAnalyticsSink,
-  getConnectedClientCountBucket,
-  getRemoteFailureCategory,
-  trackRemotePaneEvent,
-} from '../services/remoteAnalytics';
 import { getRemoteDaemonHostConfigValidationError } from '../../../shared/types/remoteDaemon';
 import type { RemoteDaemonHostConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneCommandRegistry } from './commandRegistry';
@@ -40,7 +33,6 @@ export class PaneRemoteTransportController {
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
     private readonly configManager: ConfigManager,
-    private readonly analyticsManager?: Pick<AnalyticsManager, 'track'>,
   ) {}
 
   getEventSink(): PaneEventSink {
@@ -100,33 +92,16 @@ export class PaneRemoteTransportController {
 
       await this.stopRemoteHttpServer();
 
-      const remoteHttpApiServer = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
-        analyticsSink: createRemotePaneAnalyticsSink(this.analyticsManager),
-      });
+      const remoteHttpApiServer = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager);
       try {
         await remoteHttpApiServer.start();
         this.remoteHttpApiServer = remoteHttpApiServer;
         this.activeBindingKey = nextBindingKey;
         activeRemoteHttpApiServer = remoteHttpApiServer;
         remoteHostRuntimeStateStore.setLive(hostConfig, remoteHttpApiServer.getAddress());
-        trackRemotePaneEvent(this.analyticsManager, 'remote_pane_host_transport_started', {
-          surface: 'host_transport',
-          role: 'host',
-          flow: 'setup',
-          result: 'succeeded',
-          connected_client_count_bucket: getConnectedClientCountBucket(0),
-        });
       } catch (error) {
         await remoteHttpApiServer.stop();
         remoteHostRuntimeStateStore.setError(hostConfig, error);
-        trackRemotePaneEvent(this.analyticsManager, 'remote_pane_host_setup_failed', {
-          surface: 'host_transport',
-          role: 'host',
-          flow: 'setup',
-          result: 'failed',
-          failure_stage: 'start_host_transport',
-          failure_category: getRemoteFailureCategory(error),
-        });
         throw error;
       }
     });
@@ -139,13 +114,6 @@ export class PaneRemoteTransportController {
 
     if (remoteHttpApiServer) {
       await remoteHttpApiServer.stop();
-      trackRemotePaneEvent(this.analyticsManager, 'remote_pane_host_transport_stopped', {
-        surface: 'host_transport',
-        role: 'host',
-        flow: 'maintenance',
-        result: 'succeeded',
-        connected_client_count_bucket: getConnectedClientCountBucket(0),
-      });
     }
 
     if (activeRemoteHttpApiServer === remoteHttpApiServer) {

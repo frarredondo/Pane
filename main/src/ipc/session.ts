@@ -141,13 +141,11 @@ export function registerSessionHandlers(
         const project = databaseService.getProject(projectId);
         const ctx = sessionManager.getProjectContextByProjectId(projectId);
         if (project && ctx) {
-          const sessionCreatedAt = dbSession.created_at ? new Date(dbSession.created_at) : undefined;
           console.log(`[WorktreeAudit] remove_requested source="session-delete" permanentDelete=true sessionId=${JSON.stringify(sessionId)} projectId=${projectId} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(worktreeName)} worktreePath=${JSON.stringify(worktreePath)}`);
           await worktreeManager.removeWorktree(
             project.path,
             worktreeName,
             project.worktree_folder || undefined,
-            sessionCreatedAt,
             ctx.pathResolver,
             ctx.commandRunner,
             {
@@ -498,10 +496,8 @@ export function registerSessionHandlers(
                   archiveProgressManager.updateTaskStatus(sessionId, 'removing-worktree');
                 }
 
-                // Pass session creation date for analytics tracking
-                const sessionCreatedAt = dbSession.created_at ? new Date(dbSession.created_at) : undefined;
                 console.log(`[WorktreeAudit] remove_requested source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(dbSession.worktree_name)} worktreePath=${JSON.stringify(dbSession.worktree_path || '')}`);
-                await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, {
+                await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner, {
                   source: 'session-delete',
                   sessionId,
                   projectId: dbSession.project_id,

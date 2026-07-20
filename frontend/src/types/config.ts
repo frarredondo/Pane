@@ -19,38 +19,6 @@ export interface CustomCommand {
 
 export type TerminalPowerMode = 'performance' | 'batterySaver';
 
-export interface AnalyticsIdentity {
-  distinctId: string;
-  identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
-  installId?: string;
-  appVersion?: string;
-  platform?: string;
-  electronVersion?: string;
-  webDistinctId?: string;
-  webAttributionPresent?: boolean;
-  isFirstLaunch?: boolean;
-  previousVersion?: string | null;
-  githubUsername?: string;
-  githubEmail?: string;
-  gitEmail?: string;
-  gitEmailHash?: string;
-  gitUserName?: string;
-}
-
-export interface AnalyticsConfig {
-  enabled: boolean;
-  posthogApiKey?: string;
-  posthogHost?: string;
-  installId?: string;
-  distinctId?: string;
-  identitySource?: AnalyticsIdentity['identitySource'];
-  githubUsername?: string;
-  githubEmail?: string;
-  gitEmail?: string;
-  gitEmailHash?: string;
-  gitUserName?: string;
-}
-
 export interface AppConfig {
   verbose?: boolean;
   anthropicApiKey?: string;
@@ -125,8 +93,6 @@ export interface AppConfig {
   // isolation. Off by default. Requires app restart; the supervisor is forked
   // once at `app.whenReady`.
   usePtyHost?: boolean;
-  // PostHog analytics settings
-  analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
@@ -177,7 +143,6 @@ export interface UpdateConfigRequest {
   agentContext?: AppConfig['agentContext'];
   useInteractiveMode?: boolean;
   usePtyHost?: boolean;
-  analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
   terminalShortcuts?: TerminalShortcut[];
   worktreeFileSync?: WorktreeFileSyncEntry[];

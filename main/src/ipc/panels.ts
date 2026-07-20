@@ -392,16 +392,6 @@ export function registerPanelHandlers(
   
   commandRegistry.register('panels:update', async (panelId: string, updates: Partial<ToolPanel>) => {
     try {
-      // Track panel rename if title is being updated
-      if (updates.title) {
-        const panel = panelManager.getPanel(panelId);
-        if (panel && panel.title !== updates.title && services.analyticsManager) {
-          services.analyticsManager.track('panel_renamed', {
-            panel_type: panel.type
-          });
-        }
-      }
-
       const result = await panelManager.updatePanel(panelId, updates);
       return { success: true, data: result };
     } catch (error) {

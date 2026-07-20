@@ -3,10 +3,6 @@ import type { Duplex } from 'stream';
 import WebSocket, { type RawData, WebSocketServer } from 'ws';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import type { ConfigManager } from '../services/configManager';
-import {
-  getConnectedClientCountBucket,
-  type RemotePaneAnalyticsSink,
-} from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { authenticateRemoteDaemonBearerToken } from './auth';
@@ -149,7 +145,6 @@ const REMOTE_DAEMON_CORS_HEADERS = {
 
 interface PaneRemoteHttpApiServerOptions {
   heartbeatIntervalMs?: number;
-  analyticsSink?: RemotePaneAnalyticsSink;
 }
 
 class RemoteDaemonBadRequestError extends Error {
@@ -171,7 +166,6 @@ export class PaneRemoteHttpApiServer {
   private address: RemoteHttpAddress | null = null;
   private nextClientConnectionId = 1;
   private readonly heartbeatIntervalMs: number;
-  private readonly analyticsSink?: RemotePaneAnalyticsSink;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -179,7 +173,6 @@ export class PaneRemoteHttpApiServer {
     options: PaneRemoteHttpApiServerOptions = {},
   ) {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS;
-    this.analyticsSink = options.analyticsSink;
     this.daemonEventSink = createFanoutEventSink([
       {
         send: (channel, ...args) => {
@@ -599,7 +592,6 @@ export class PaneRemoteHttpApiServer {
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     this.publishConnectedClients();
-    this.trackRemoteClientConnection(connectedClient, 'connected');
     this.sendHeartbeat(clientConnectionId);
 
     const cleanup = () => {
@@ -726,7 +718,6 @@ export class PaneRemoteHttpApiServer {
       client.response.end();
     }
     this.publishConnectedClients();
-    this.trackRemoteClientConnection(client, 'disconnected');
   }
 
   private sendHeartbeat(clientConnectionId: string): void {
@@ -802,44 +793,6 @@ export class PaneRemoteHttpApiServer {
     return this.configManager.getConfig().remoteDaemon ?? createDefaultRemoteDaemonConfig();
   }
 
-  private trackRemoteClientConnection(
-    client: ConnectedRemoteEventClient,
-    status: 'connected' | 'disconnected',
-  ): void {
-    const clientKind = getRemoteClientKind(client);
-    let eventName: 'remote_pane_pwa_client_connected'
-      | 'remote_pane_pwa_client_disconnected'
-      | 'remote_pane_client_connected'
-      | 'remote_pane_client_disconnected';
-    if (clientKind === 'browser_pwa') {
-      eventName = status === 'connected'
-        ? 'remote_pane_pwa_client_connected'
-        : 'remote_pane_pwa_client_disconnected';
-    } else {
-      eventName = status === 'connected'
-        ? 'remote_pane_client_connected'
-        : 'remote_pane_client_disconnected';
-    }
-
-    this.analyticsSink?.track(eventName, {
-      surface: 'host_transport',
-      role: 'host',
-      flow: 'connect',
-      result: 'succeeded',
-      client_kind: clientKind,
-      connected_client_count_bucket: getConnectedClientCountBucket(this.eventClients.size),
-    });
-  }
-}
-
-function getRemoteClientKind(client: ConnectedRemoteEventClient): 'desktop' | 'browser_pwa' | 'unknown' {
-  if (client.deviceLabel) {
-    return 'desktop';
-  }
-  if (client.remoteRuntimeId || client.label) {
-    return 'browser_pwa';
-  }
-  return 'unknown';
 }
 
 async function readRequestBody(request: IncomingMessage, maxBodyBytes: number): Promise<string> {

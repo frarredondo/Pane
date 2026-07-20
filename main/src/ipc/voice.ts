@@ -15,10 +15,10 @@ const DAEMON_VOICE_CHANNELS = [
 
 export function registerVoiceHandlers(
   ipcMain: IpcMain,
-  { analyticsManager, configManager }: AppServices,
+  { configManager }: AppServices,
   commandRegistry: PaneCommandRegistry,
 ): void {
-  const voiceTranscriptionService = new VoiceTranscriptionService(configManager, analyticsManager);
+  const voiceTranscriptionService = new VoiceTranscriptionService(configManager);
 
   commandRegistry.register('voice:transcribe', async (request: VoiceTranscriptionRequest) => (
     voiceTranscriptionService.transcribe(request)

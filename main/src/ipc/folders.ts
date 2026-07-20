@@ -19,7 +19,7 @@ const DAEMON_FOLDER_CHANNELS = [
 ] as const;
 
 export function registerFolderHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry) {
-  const { databaseService, analyticsManager } = services;
+  const { databaseService } = services;
 
   // Get all folders for a project
   commandRegistry.register('folders:get-by-project', async (projectId: number) => {
@@ -39,14 +39,6 @@ export function registerFolderHandlers(ipcMain: IpcMain, services: AppServices, 
       const folder = databaseService.createFolder(name, projectId, parentFolderId);
       const convertedFolder = convertDbFolderToRendererFolder(folder);
 
-      // Track folder creation
-      if (analyticsManager) {
-        const nestingLevel = parentFolderId ? databaseService.getFolderDepth(folder.id) : 0;
-        analyticsManager.track('folder_created', {
-          nesting_level: nestingLevel
-        });
-      }
-
       emitFolderCreatedEvent(folder);
       return { success: true, data: convertedFolder };
     } catch (error: unknown) {
@@ -61,11 +53,6 @@ export function registerFolderHandlers(ipcMain: IpcMain, services: AppServices, 
     updates: { name?: string; display_order?: number; parent_folder_id?: string | null },
   ) => {
     try {
-      // Track folder rename if name is being updated
-      if (analyticsManager && updates.name !== undefined) {
-        analyticsManager.track('folder_renamed', {});
-      }
-
       databaseService.updateFolder(folderId, updates);
 
       // Get the updated folder to emit the event
@@ -84,20 +71,6 @@ export function registerFolderHandlers(ipcMain: IpcMain, services: AppServices, 
   // Delete a folder
   commandRegistry.register('folders:delete', async (folderId: string) => {
     try {
-      // Count sessions in the folder before deletion for analytics
-      if (analyticsManager) {
-        const folder = databaseService.getFolder(folderId);
-        if (folder) {
-          // Count sessions in this folder (including all nested folders)
-          const allSessions = databaseService.getAllSessions(folder.project_id);
-          const sessionsInFolder = allSessions.filter(s => s.folder_id === folderId);
-
-          analyticsManager.track('folder_deleted', {
-            contained_session_count: sessionsInFolder.length
-          });
-        }
-      }
-
       databaseService.deleteFolder(folderId);
 
       emitFolderDeletedEvent(folderId);

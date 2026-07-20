@@ -4,7 +4,6 @@ import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
 import { panelEventBus } from './panelEventBus';
 import { withLock } from '../utils/mutex';
-import type { AnalyticsManager } from './analyticsManager';
 
 export class PanelManager {
   private panels = new Map<string, ToolPanel>();
@@ -15,11 +14,6 @@ export class PanelManager {
   // calls getPanel(archivedPanelId) would re-populate the cache and
   // silently undo the L3 cleanup.
   private archivedSessionIds = new Set<string>();
-  private analyticsManager: AnalyticsManager | null = null;
-
-  setAnalyticsManager(analyticsManager: AnalyticsManager): void {
-    this.analyticsManager = analyticsManager;
-  }
 
   private sendRendererEvent(channel: string, ...args: unknown[]): void {
     getPaneEventSink().send(channel, ...args);
@@ -146,15 +140,6 @@ export class PanelManager {
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:created', panel);
 
-      // Track terminal panel creation analytics (only for new panels, not restoration)
-      if (request.type === 'terminal' && this.analyticsManager) {
-        const terminalCount = this.getPanelsBySessionAndType(request.sessionId, 'terminal').length;
-        this.analyticsManager.track('terminal_panel_created', {
-          session_id_hash: this.analyticsManager.hashSessionId(request.sessionId),
-          terminal_count: terminalCount
-        });
-      }
-
       console.log(`[PanelManager] Created panel ${panelId} of type ${request.type} for session ${request.sessionId}`);
 
       return panel;
@@ -220,11 +205,6 @@ export class PanelManager {
         return;
       }
 
-      // Calculate panel lifetime for analytics
-      const createdAt = new Date(panel.metadata.createdAt);
-      const now = new Date();
-      const lifetimeSeconds = Math.floor((now.getTime() - createdAt.getTime()) / 1000);
-
       // Clean up event subscriptions
       panelEventBus.unsubscribePanel(panelId);
 
@@ -251,14 +231,6 @@ export class PanelManager {
 
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:deleted', { panelId, sessionId: panel.sessionId });
-
-      // Track panel closure
-      if (this.analyticsManager) {
-        this.analyticsManager.track('panel_closed', {
-          panel_type: panel.type,
-          panel_lifetime_seconds: lifetimeSeconds
-        });
-      }
 
       console.log(`[PanelManager] Deleted panel ${panelId} and marked ${panel.type} as closed for session`);
     });
@@ -293,16 +265,8 @@ export class PanelManager {
   
   async setActivePanel(sessionId: string, panelId: string | null): Promise<void> {
     return await withLock(`panel-active-${sessionId}`, async () => {
-      // Get current active panel for analytics
-      const currentActivePanel = databaseService.getActivePanel(sessionId);
-      const fromPanelType = currentActivePanel?.type;
-
       // Update database
       databaseService.setActivePanel(sessionId, panelId);
-
-      // Get new active panel for analytics
-      const newActivePanel = panelId ? this.getPanel(panelId) : null;
-      const toPanelType = newActivePanel?.type;
 
       // Update panel states
       const panels = this.getPanelsForSession(sessionId);
@@ -327,14 +291,6 @@ export class PanelManager {
 
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:activeChanged', { sessionId, panelId });
-
-      // Track panel switching (only if both from and to panels exist)
-      if (this.analyticsManager && fromPanelType && toPanelType && fromPanelType !== toPanelType) {
-        this.analyticsManager.track('panel_switched', {
-          from_panel_type: fromPanelType,
-          to_panel_type: toPanelType
-        });
-      }
 
       console.log(`[PanelManager] Set active panel for session ${sessionId} to ${panelId}`);
     });

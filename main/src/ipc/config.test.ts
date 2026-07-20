@@ -73,7 +73,6 @@ function createServicesStub(projects: Project[]): AppServices {
     },
     worktreeManager: {},
     gitDiffManager: {},
-    analyticsManager: {},
     taskQueue: {},
     cliManagerFactory: {},
     claudeCodeManager: {

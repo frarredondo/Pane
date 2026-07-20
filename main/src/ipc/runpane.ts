@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { IpcMain } from 'electron';
@@ -104,7 +105,7 @@ export function registerRunpaneHandlers(
   const { databaseService, sessionManager, taskQueue, configManager } = services;
 
   commandRegistry.register('runpane:doctor', async (): Promise<RunpaneDoctorResult> => {
-    return withRunpaneAction(services, 'doctor', {}, () => {
+    return withRunpaneAction('doctor', {}, () => {
       const repos = databaseService.getAllProjects().map((project) =>
         projectToRepoSummary(project, sessionManager.getSessionsForProject(project.id).length)
       );
@@ -136,7 +137,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:repos:list', async (): Promise<RunpaneRepoListResult> => {
-    return withRunpaneAction(services, 'repos:list', {}, () => {
+    return withRunpaneAction('repos:list', {}, () => {
       const repos = databaseService.getAllProjects().map((project) =>
         projectToRepoSummary(project, sessionManager.getSessionsForProject(project.id).length)
       );
@@ -145,7 +146,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:repos:add', async (request: unknown): Promise<RunpaneRepoAddResult> => {
-    return withRunpaneAction(services, 'repos:add', {}, async () => {
+    return withRunpaneAction('repos:add', {}, async () => {
       const normalized = parseRepoAddRequest(request);
       const existing = resolveProjectByPath(databaseService.getAllProjects(), normalized.path);
 
@@ -210,7 +211,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panes:list', async (request: unknown = {}): Promise<RunpanePaneListResult> => {
-    return withRunpaneAction(services, 'panes:list', {}, () => {
+    return withRunpaneAction('panes:list', {}, () => {
       const normalized = parsePaneListRequest(request);
       const projects = databaseService.getAllProjects();
       const scopedProject = normalized.repo ? resolveRepoSelector(projects, normalized.repo) : undefined;
@@ -234,7 +235,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panes:create', async (request: unknown): Promise<RunpanePaneCreateResult> => {
-    return withRunpaneAction(services, 'panes:create', {}, async () => {
+    return withRunpaneAction('panes:create', {}, async () => {
       const normalized = parsePaneCreateRequest(request);
       const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
       const repoSummary = projectToRepoSummary(repo, sessionManager.getSessionsForProject(repo.id).length);
@@ -275,7 +276,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panes:archive', async (request: unknown): Promise<RunpanePaneArchiveResult> => {
-    return withRunpaneAction(services, 'panes:archive', {}, async () => {
+    return withRunpaneAction('panes:archive', {}, async () => {
       const normalized = parsePaneArchiveRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
 
@@ -338,7 +339,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:list', async (request: unknown): Promise<RunpanePanelListResult> => {
-    return withRunpaneAction(services, 'panels:list', {}, () => {
+    return withRunpaneAction('panels:list', {}, () => {
       const normalized = parsePanelListRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
       const panels = panelManager.getPanelsForSession(pane.id).map(panelToSummary);
@@ -352,7 +353,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:create', async (request: unknown): Promise<RunpanePanelCreateResult> => {
-    return withRunpaneAction(services, 'panels:create', {}, async () => {
+    return withRunpaneAction('panels:create', {}, async () => {
       const normalized = parsePanelCreateRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
       const tool = resolveToolSpec(normalized.tool);
@@ -383,7 +384,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:output', async (request: unknown): Promise<RunpanePanelOutputResult> => {
-    return withRunpaneAction(services, 'panels:output', {}, () => {
+    return withRunpaneAction('panels:output', {}, () => {
       const normalized = parsePanelOutputRequest(request);
       const panel = resolvePanel(normalized.panelId);
       const limit = normalized.limit ?? DEFAULT_PANEL_OUTPUT_LIMIT;
@@ -432,7 +433,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:input', async (request: unknown): Promise<RunpanePanelInputResult> => {
-    return withRunpaneAction(services, 'panels:input', {}, () => {
+    return withRunpaneAction('panels:input', {}, () => {
       const normalized = parsePanelInputRequest(request);
       const panel = resolvePanel(normalized.panelId);
 
@@ -461,7 +462,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:screen', async (request: unknown): Promise<RunpanePanelScreenResult> => {
-    return withRunpaneAction(services, 'panels:screen', {}, async () => {
+    return withRunpaneAction('panels:screen', {}, async () => {
       const normalized = parsePanelScreenRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
       return await buildPanelScreenResult(panel, normalized.limit ?? DEFAULT_PANEL_SCREEN_LIMIT);
@@ -474,7 +475,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:submit', async (request: unknown): Promise<RunpanePanelSubmitResult> => {
-    return withRunpaneAction(services, 'panels:submit', {}, () => {
+    return withRunpaneAction('panels:submit', {}, () => {
       const normalized = parsePanelSubmitRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
@@ -501,7 +502,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:submit-composer', async (request: unknown): Promise<RunpanePanelSubmitComposerResult> => {
-    return withRunpaneAction(services, 'panels:submit-composer', {}, async () => {
+    return withRunpaneAction('panels:submit-composer', {}, async () => {
       const normalized = parsePanelSubmitComposerRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
@@ -518,7 +519,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:wait', async (request: unknown): Promise<RunpanePanelWaitResult> => {
-    return withRunpaneAction(services, 'panels:wait', {}, async () => {
+    return withRunpaneAction('panels:wait', {}, async () => {
       const normalized = parsePanelWaitRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
       return waitForPanel(panel, normalized);
@@ -533,7 +534,7 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:agents:doctor', async (request: unknown): Promise<RunpaneAgentDoctorResult> => {
-    return withRunpaneAction(services, 'agents:doctor', {}, async () => {
+    return withRunpaneAction('agents:doctor', {}, async () => {
       const normalized = parseAgentDoctorRequest(request);
       const repo = normalized.repo
         ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
@@ -2004,7 +2005,6 @@ interface RunpaneActionMetadata {
 }
 
 async function withRunpaneAction<T>(
-  services: AppServices,
   action: string,
   metadata: RunpaneActionMetadata,
   handler: () => Promise<T> | T,
@@ -2014,14 +2014,14 @@ async function withRunpaneAction<T>(
   try {
     const result = await handler();
     const commandOk = isRecord(result) && typeof result.ok === 'boolean' ? result.ok : true;
-    trackRunpaneAction(services, action, 'success', Date.now() - startedAt, {
+    logRunpaneAction(action, 'success', Date.now() - startedAt, {
       ...metadata,
       ok: commandOk,
       ...(resultMetadata ? resultMetadata(result) : {}),
     });
     return result;
   } catch (error) {
-    trackRunpaneAction(services, action, 'failure', Date.now() - startedAt, {
+    logRunpaneAction(action, 'failure', Date.now() - startedAt, {
       ...metadata,
       ok: false,
     }, error);
@@ -2029,37 +2029,20 @@ async function withRunpaneAction<T>(
   }
 }
 
-function trackRunpaneAction(
-  services: AppServices,
+function hashRunpaneId(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex').substring(0, 16);
+}
+
+function logRunpaneAction(
   action: string,
   status: 'success' | 'failure',
   durationMs: number,
   metadata: RunpaneActionMetadata,
   error?: unknown,
 ): void {
-  const analyticsManager = services.analyticsManager;
-  const paneIdHash = metadata.paneId && analyticsManager?.hashSessionId(metadata.paneId);
-  const panelIdHash = metadata.panelId && analyticsManager?.hashSessionId(metadata.panelId);
+  const paneIdHash = metadata.paneId && hashRunpaneId(metadata.paneId);
+  const panelIdHash = metadata.panelId && hashRunpaneId(metadata.panelId);
   const errorMessage = error instanceof Error ? error.message : error ? String(error) : undefined;
-  const errorType = error instanceof Error ? error.name : error ? 'Error' : undefined;
-
-  analyticsManager?.track('runpane_local_control', {
-    action,
-    status,
-    command_ok: metadata.ok,
-    duration_ms: durationMs,
-    repo_id: metadata.repoId,
-    pane_id_hash: paneIdHash,
-    panel_id_hash: panelIdHash,
-    result_count: metadata.resultCount,
-    input_bytes: metadata.inputBytes,
-    limit: metadata.limit,
-    condition: metadata.condition,
-    timed_out: metadata.timedOut,
-    available: metadata.available,
-    environment: metadata.environment,
-    error_type: errorType,
-  });
 
   const logPayload = {
     action,

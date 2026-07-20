@@ -1,5 +1,4 @@
 import type { ConfigManager } from './configManager';
-import type { AnalyticsManager } from './analyticsManager';
 import type {
   VoiceDeepgramTokenResult,
   VoiceDeepgramStreamingMetadata,
@@ -130,7 +129,6 @@ type ProviderUsage = VoiceTranscriptionUsage;
 export class VoiceTranscriptionService {
   constructor(
     private readonly configManager: ConfigManager,
-    private readonly analyticsManager?: AnalyticsManager,
   ) {}
 
   async transcribe(request: VoiceTranscriptionRequest): Promise<VoiceTranscriptionResult> {
@@ -172,13 +170,6 @@ export class VoiceTranscriptionService {
       providerUsage: raw.usage,
       cleanupUsage: cleanText.usage,
     };
-    this.trackVoiceTranscriptionUsed({
-      input,
-      requestedDurationMs: request.durationMs,
-      result,
-      rawUsage: raw.usage,
-      cleanupUsage: cleanText.usage,
-    });
     if (this.configManager.isVerbose()) {
       console.log('[VoiceTranscription] Recorded pipeline completed', result.timings);
     }
@@ -253,13 +244,6 @@ export class VoiceTranscriptionService {
       cleanupUsage: cleanText.usage,
     };
 
-    this.trackVoiceTranscriptionUsed({
-      requestedDurationMs: input.durationMs,
-      result,
-      rawUsage: providerUsage,
-      cleanupUsage: cleanText.usage,
-      deepgramMetadata: input.metadata,
-    });
     if (this.configManager.isVerbose()) {
       console.log('[VoiceTranscription] Streaming pipeline completed', result.timings);
     }
@@ -388,81 +372,6 @@ export class VoiceTranscriptionService {
     };
   }
 
-  private trackVoiceTranscriptionUsed({
-    input,
-    requestedDurationMs,
-    result,
-    rawUsage,
-    cleanupUsage,
-    deepgramMetadata,
-  }: {
-    input?: ValidatedAudioInput;
-    requestedDurationMs?: number;
-    result: VoiceTranscriptionResult;
-    rawUsage?: ProviderUsage;
-    cleanupUsage?: ProviderUsage;
-    deepgramMetadata?: VoiceDeepgramStreamingMetadata;
-  }): void {
-    if (!this.analyticsManager) {
-      return;
-    }
-
-    try {
-      const totalCost = sumDefinedNumbers(rawUsage?.cost, cleanupUsage?.cost);
-      const audioDurationMs = typeof requestedDurationMs === 'number' ? Math.max(0, Math.round(requestedDurationMs)) : undefined;
-      const audioSeconds = audioDurationMs !== undefined ? Math.round(audioDurationMs / 100) / 10 : undefined;
-      this.analyticsManager.track('voice_transcription_used', {
-        mode: result.mode,
-        provider: result.provider,
-        asr_provider: result.provider,
-        cleanup_model: result.cleanupModel,
-        language: result.languages?.[0] ?? 'en',
-        mime_type: input?.mimeType,
-        audio_duration_ms: audioDurationMs,
-        audio_seconds: audioSeconds,
-        audio_duration_bucket: audioSeconds !== undefined
-          ? this.analyticsManager.categorizeDuration(audioSeconds)
-          : undefined,
-        audio_bytes: input?.byteLength,
-        audio_bytes_bucket: input
-          ? this.analyticsManager.categorizeNumber(input.byteLength, [
-            100 * 1024,
-            500 * 1024,
-            1024 * 1024,
-            5 * 1024 * 1024,
-            10 * 1024 * 1024,
-          ])
-          : undefined,
-        raw_transcript_chars: result.rawText.length,
-        clean_transcript_chars: result.text.length,
-        chunk_count: result.chunks?.length,
-        asr_ms: result.timings.asrMs,
-        fal_ms: result.timings.falMs,
-        deepgram_ms: result.provider === 'deepgram/nova-3' ? result.timings.asrMs : undefined,
-        time_to_first_transcript_ms: result.timings.firstTranscriptMs,
-        cleanup_ms: result.timings.cleanupMs,
-        total_ms: result.timings.totalMs,
-        provider_cost: rawUsage?.cost,
-        provider_cost_source: rawUsage?.costSource,
-        fal_cost: result.provider === 'fal-ai/wizper' ? rawUsage?.cost : undefined,
-        deepgram_cost: result.provider === 'deepgram/nova-3' ? rawUsage?.cost : undefined,
-        deepgram_cost_source: result.provider === 'deepgram/nova-3' ? rawUsage?.costSource : undefined,
-        deepgram_request_id: deepgramMetadata?.requestId,
-        deepgram_duration_seconds: deepgramMetadata?.duration,
-        deepgram_model_name: deepgramMetadata?.modelName,
-        deepgram_model_version: deepgramMetadata?.modelVersion,
-        openrouter_cost: cleanupUsage?.cost,
-        total_cost: totalCost,
-        openrouter_prompt_tokens: cleanupUsage?.inputTokens,
-        openrouter_completion_tokens: cleanupUsage?.outputTokens,
-        openrouter_total_tokens: cleanupUsage?.totalTokens,
-      });
-    } catch (error) {
-      if (this.configManager.isVerbose()) {
-        console.warn('[VoiceTranscription] Failed to track analytics event:', error);
-      }
-    }
-  }
 }
 
 function validateVoiceTranscriptionRequest(request: VoiceTranscriptionRequest): ValidatedAudioInput {
@@ -749,14 +658,6 @@ function collectUsageNumbers(value: unknown): Record<string, number> {
 
 function firstDefinedNumber(...values: Array<number | undefined>): number | undefined {
   return values.find((value): value is number => typeof value === 'number' && Number.isFinite(value));
-}
-
-function sumDefinedNumbers(...values: Array<number | undefined>): number | undefined {
-  const numbers = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-  if (numbers.length === 0) {
-    return undefined;
-  }
-  return Number(numbers.reduce((sum, value) => sum + value, 0).toFixed(8));
 }
 
 function calculateCleanupMaxTokens(rawTranscript: string): number {

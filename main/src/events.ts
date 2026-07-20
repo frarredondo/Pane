@@ -4,7 +4,6 @@ import type { AppServices } from './ipc/types';
 import type { VersionInfo } from './services/versionChecker';
 import { addSessionLog } from './ipc/logs';
 import { panelManager } from './services/panelManager';
-import { terminalPanelManager } from './services/terminalPanelManager';
 import {
   validateEventContext,
   validatePanelEventContext,
@@ -40,14 +39,7 @@ export function setupEventListeners(services: AppServices): void {
     gitStatusManager,
     worktreeManager,
     archiveProgressManager,
-    analyticsManager
   } = services;
-
-  // Wire up analytics manager to panel managers
-  if (analyticsManager) {
-    panelManager.setAnalyticsManager(analyticsManager);
-    terminalPanelManager.setAnalyticsManager(analyticsManager);
-  }
 
   // Bridge resource monitor events to renderer
   resourceMonitorService.on('resource-update', (snapshot: unknown) => {

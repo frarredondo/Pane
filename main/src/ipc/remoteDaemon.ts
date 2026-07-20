@@ -37,14 +37,6 @@ import { readConfiguredTailscaleServeAccess, setupRemoteHost } from '../daemon/s
 import { getAppDirectory } from '../utils/appDirectory';
 import { ShellDetector } from '../utils/shellDetector';
 import { disconnectActiveRemoteHostClients } from '../daemon/remoteTransportController';
-import {
-  getConnectedClientCountBucket,
-  getRemoteFailureCategory,
-  getRemoteImportProperties,
-  getRemoteSetupProperties,
-  getRemoteSetupResultProperties,
-  trackRemotePaneEvent,
-} from '../services/remoteAnalytics';
 
 interface IpcMainHandleLike {
   handle(channel: string, listener: (_event: unknown, ...args: unknown[]) => Promise<unknown>): void;
@@ -53,7 +45,6 @@ interface IpcMainHandleLike {
 interface RemoteDaemonHandlerServices {
   app?: Pick<AppServices['app'], 'isPackaged'>;
   getMainWindow?: AppServices['getMainWindow'];
-  analyticsManager?: AppServices['analyticsManager'];
   configManager: Pick<AppServices['configManager'], 'getConfig' | 'updateConfig'> & {
     getPreferredShell?: () => string;
   };
@@ -65,7 +56,7 @@ let remoteHostStateForwarder:
 
 export function registerRemoteDaemonHandlers(
   ipcMain: IpcMainHandleLike,
-  { configManager, app, getMainWindow, analyticsManager }: RemoteDaemonHandlerServices,
+  { configManager, app, getMainWindow }: RemoteDaemonHandlerServices,
 ): void {
   attachRemoteHostStateForwarder(getMainWindow);
 
@@ -128,10 +119,6 @@ export function registerRemoteDaemonHandlers(
         ? ShellDetector.getDefaultShell(configManager.getPreferredShell?.()).name
         : undefined;
       const command = buildInteractiveSetupCommand(request, app?.isPackaged === true, shellName);
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_setup_terminal_opened', {
-        ...getRemoteSetupProperties(request),
-        result: 'succeeded',
-      });
       return {
         success: true,
         data: { command } satisfies RemoteHostSetupTerminalCommandResult,
@@ -161,10 +148,6 @@ export function registerRemoteDaemonHandlers(
     let request: RemoteHostSetupRequest | null = null;
     try {
       request = parseRemoteHostSetupRequest(input);
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_setup_started', {
-        ...getRemoteSetupProperties(request),
-        result: 'started',
-      });
       const dataDirectoryMode = request.dataDirectoryMode ?? 'current';
       const useCurrentDataDirectory = dataDirectoryMode === 'current';
       const result = await setupRemoteHost({
@@ -187,14 +170,6 @@ export function registerRemoteDaemonHandlers(
             }
           : undefined,
       });
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_setup_succeeded', {
-        ...getRemoteSetupProperties(request),
-        ...getRemoteSetupResultProperties({
-          ...result,
-          dataDirectoryMode,
-        }),
-        result: 'succeeded',
-      });
 
       return {
         success: true,
@@ -204,12 +179,6 @@ export function registerRemoteDaemonHandlers(
         } satisfies RemoteHostSetupResult,
       };
     } catch (error) {
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_setup_failed', {
-        ...(request ? getRemoteSetupProperties(request) : { surface: 'desktop', role: 'host', flow: 'setup' }),
-        result: 'failed',
-        failure_stage: 'setup_host',
-        failure_category: getRemoteFailureCategory(error),
-      });
       return { success: false, error: getErrorMessage(error, 'Failed to set up remote daemon host') };
     }
   });
@@ -248,12 +217,6 @@ export function registerRemoteDaemonHandlers(
       });
 
       await configManager.updateConfig({ remoteDaemon: next });
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_connection_pair_created', {
-        surface: 'desktop',
-        role: 'host',
-        flow: 'setup',
-        result: 'succeeded',
-      });
       return {
         success: true,
         data: pair satisfies RemoteDaemonConnectionPair,
@@ -295,14 +258,6 @@ export function registerRemoteDaemonHandlers(
       if (!hasPersistedRemoteHostClient(persisted, pair.client)) {
         throw new Error('Created remote connection code was not saved. Try again before sharing this code.');
       }
-
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_connection_code_created', {
-        surface: 'desktop',
-        role: 'host',
-        flow: 'setup',
-        result: 'succeeded',
-        tunnel_kind: access.tunnel?.kind ?? 'unknown',
-      });
 
       return {
         success: true,
@@ -363,18 +318,6 @@ export function registerRemoteDaemonHandlers(
         };
       });
 
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_connection_code_imported', {
-        ...getRemoteImportProperties(payload),
-        result: connectionError ? 'failed' : 'succeeded',
-        connected,
-        ...(connectionError
-          ? {
-              failure_stage: 'connect_imported_profile',
-              failure_category: getRemoteFailureCategory(connectionError),
-            }
-          : {}),
-      });
-
       return {
         success: true,
         data: {
@@ -384,12 +327,6 @@ export function registerRemoteDaemonHandlers(
         } satisfies RemoteDaemonImportResult,
       };
     } catch (error) {
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_connection_code_import_failed', {
-        ...(payload ? getRemoteImportProperties(payload) : { surface: 'desktop', role: 'client', flow: 'connect' }),
-        result: 'failed',
-        failure_stage: 'import_connection_code',
-        failure_category: getRemoteFailureCategory(error),
-      });
       return { success: false, error: getErrorMessage(error, 'Failed to import remote daemon connection code') };
     }
   });
@@ -437,12 +374,6 @@ export function registerRemoteDaemonHandlers(
 
       await configManager.updateConfig({ remoteDaemon: next });
       disconnectActiveRemoteHostClients();
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_access_cleared', {
-        surface: 'desktop',
-        role: 'host',
-        flow: 'maintenance',
-        result: 'succeeded',
-      });
       return { success: true, data: next.host };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to clear remote host access') };
@@ -453,13 +384,6 @@ export function registerRemoteDaemonHandlers(
     try {
       const parsedClientIds = parseOptionalClientIds(clientIds);
       const disconnectedCount = disconnectActiveRemoteHostClients(parsedClientIds);
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_clients_disconnected', {
-        surface: 'desktop',
-        role: 'host',
-        flow: 'maintenance',
-        result: 'succeeded',
-        connected_client_count_bucket: getConnectedClientCountBucket(disconnectedCount),
-      });
       return { success: true, data: { disconnectedCount } };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to disconnect remote daemon clients') };
@@ -565,12 +489,6 @@ export function registerRemoteDaemonHandlers(
           resyncRenderer: isActiveRemoteProfile,
         };
       });
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_profile_deleted', {
-        surface: 'desktop',
-        role: 'client',
-        flow: 'maintenance',
-        result: 'succeeded',
-      });
       return { success: true, data: next.client };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to delete remote daemon connection profile') };
@@ -611,15 +529,6 @@ export function registerRemoteDaemonHandlers(
       });
       return { success: true, data: next.client };
     } catch (error) {
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_client_connection_failed', {
-        surface: 'desktop',
-        role: 'client',
-        flow: 'connect',
-        result: 'failed',
-        failure_stage: 'update_client_state',
-        failure_category: getRemoteFailureCategory(error),
-        client_kind: 'desktop',
-      });
       return { success: false, error: getErrorMessage(error, 'Failed to update remote daemon client state') };
     }
   });

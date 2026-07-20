@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import type { AnalyticsIdentity, AppConfig } from '../types/config';
+import type { AppConfig } from '../types/config';
 import { normalizeCloudVmConfig } from '../../../shared/types/cloud';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
@@ -9,21 +9,8 @@ import fs from 'fs/promises';
 import { watch, type FSWatcher } from 'fs';
 import path from 'path';
 import os from 'os';
-import { randomUUID } from 'crypto';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
-
-const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
-const LEGACY_POSTHOG_HOST = 'https://us.i.posthog.com';
-const DEFAULT_POSTHOG_HOST = 'https://runpane.com/api/c';
-
-function defaultAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
-  return {
-    enabled: false,
-    posthogApiKey: DEFAULT_POSTHOG_API_KEY,
-    posthogHost: DEFAULT_POSTHOG_HOST
-  };
-}
 
 export class ConfigManager extends EventEmitter {
   private config: AppConfig;
@@ -75,7 +62,6 @@ export class ConfigManager extends EventEmitter {
         },
         showAdvanced: false
       },
-      analytics: defaultAnalyticsConfig(),
       agentContext: {
         managedAgentsMd: true
       },
@@ -121,7 +107,10 @@ export class ConfigManager extends EventEmitter {
     try {
       const data = await fs.readFile(this.configPath, 'utf-8');
       const loadedConfig = JSON.parse(data);
-      
+      // Legacy installs may still have a persisted analytics identity block;
+      // drop it so it stops being read back and re-saved.
+      delete loadedConfig.analytics;
+
       // Migrate legacy notification fields from older config files.
       // notifyWhenBackgrounded -> enabled (if enabled is not explicitly set)
       // notifyWhenViewingOtherPanel is dropped silently.
@@ -153,10 +142,6 @@ export class ConfigManager extends EventEmitter {
             ...loadedConfig.sessionCreationPreferences?.claudeConfig
           }
         },
-        analytics: {
-          ...this.config.analytics,
-          ...loadedConfig.analytics
-        },
         agentContext: {
           ...this.config.agentContext,
           ...loadedConfig.agentContext
@@ -174,11 +159,6 @@ export class ConfigManager extends EventEmitter {
           ? loadedConfig.worktreeFileSync
           : DEFAULT_WORKTREE_FILE_SYNC_ENTRIES
       };
-
-      if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
-        this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
-        await this.saveConfig();
-      }
     } catch (error: unknown) {
       const isNotFound = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
       if (isNotFound) {
@@ -296,14 +276,6 @@ export class ConfigManager extends EventEmitter {
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
-    const analytics =
-      updates.analytics !== undefined
-        ? {
-            ...defaultAnalyticsConfig(),
-            ...this.config.analytics,
-            ...updates.analytics
-          }
-        : this.config.analytics;
     const agentContext =
       updates.agentContext !== undefined
         ? {
@@ -315,7 +287,6 @@ export class ConfigManager extends EventEmitter {
     this.config = {
       ...this.config,
       ...updates,
-      analytics,
       agentContext,
       defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
         ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
@@ -400,53 +371,6 @@ export class ConfigManager extends EventEmitter {
       showAdvanced: false,
       startPinned: false
     };
-  }
-
-  getAnalyticsSettings() {
-    return this.config.analytics || defaultAnalyticsConfig();
-  }
-
-  isAnalyticsEnabled(): boolean {
-    return this.config.analytics?.enabled ?? false; // Opt-in: default to false
-  }
-
-  getAnalyticsDistinctId(): string | undefined {
-    return this.config.analytics?.distinctId;
-  }
-
-  private ensureAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
-    if (!this.config.analytics) {
-      this.config.analytics = defaultAnalyticsConfig();
-    }
-    return this.config.analytics;
-  }
-
-  async getOrCreateAnalyticsInstallId(): Promise<string> {
-    const analytics = this.ensureAnalyticsConfig();
-    if (!analytics.installId) {
-      analytics.installId = `install_${randomUUID()}`;
-      await this.saveConfig();
-    }
-    return analytics.installId;
-  }
-
-  async setAnalyticsDistinctId(distinctId: string): Promise<void> {
-    const analytics = this.ensureAnalyticsConfig();
-    analytics.distinctId = distinctId;
-    await this.saveConfig();
-  }
-
-  async setAnalyticsIdentity(identity: AnalyticsIdentity): Promise<void> {
-    const analytics = this.ensureAnalyticsConfig();
-    analytics.distinctId = identity.distinctId;
-    analytics.identitySource = identity.identitySource;
-    analytics.installId = identity.installId ?? analytics.installId;
-    analytics.githubUsername = identity.githubUsername;
-    analytics.githubEmail = identity.githubEmail;
-    analytics.gitEmail = identity.gitEmail;
-    analytics.gitEmailHash = identity.gitEmailHash;
-    analytics.gitUserName = identity.gitUserName;
-    await this.saveConfig();
   }
 
   /**
