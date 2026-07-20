@@ -68,7 +68,6 @@ import type { VersionChecker } from './services/versionChecker';
 import type { Logger } from './utils/logger';
 import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
-import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
@@ -105,11 +104,6 @@ const registeredPartitions = new Set<string>();
 
 // Module-level shutdown guard to prevent multiple shutdown attempts
 let shutdownInProgress = false;
-let analyticsLaunchContext: {
-  appVersion?: string;
-  previousVersion?: string | null;
-  isFirstLaunch?: boolean;
-} = {};
 
 type RendererDiagnosticPayload = {
   kind?: string;
@@ -989,57 +983,6 @@ async function initializeServices() {
   powerSaveManager = new PowerSaveManager(configManager, sessionManager);
   powerSaveManager.sync();
 
-  ipcMain.handle('analytics:get-identity', async () => {
-    try {
-      const installId = await configManager.getOrCreateAnalyticsInstallId();
-      const currentVersion = analyticsLaunchContext.appVersion || app.getVersion();
-      const previousVersion =
-        analyticsLaunchContext.previousVersion !== undefined
-          ? analyticsLaunchContext.previousVersion
-          : databaseService.getLastAppVersion();
-      const isFirstLaunch = analyticsLaunchContext.isFirstLaunch ?? previousVersion === null;
-      const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId(), installId);
-      const webDistinctId = readWebAttribution(getAppDirectory());
-      if (webDistinctId) {
-        identity.webDistinctId = webDistinctId;
-      }
-      identity.appVersion = currentVersion;
-      identity.platform = os.platform();
-      identity.electronVersion = process.versions.electron;
-      identity.webAttributionPresent = webDistinctId !== undefined;
-      identity.isFirstLaunch = isFirstLaunch;
-      identity.previousVersion = previousVersion;
-      await configManager.setAnalyticsIdentity(identity);
-      return { success: true, data: identity };
-    } catch (error) {
-      console.error('[Analytics] Failed to resolve identity:', error);
-      return { success: false, error: 'Failed to resolve analytics identity' };
-    }
-  });
-
-  ipcMain.handle('analytics:redeem-attribution', async () => {
-    try {
-      await fs.promises.unlink(path.join(getAppDirectory(), 'attribution_ref')).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') {
-          throw error;
-        }
-      });
-      return { success: true };
-    } catch (error) {
-      console.error('[Analytics] Failed to redeem attribution:', error);
-      return { success: false, error: 'Failed to redeem analytics attribution' };
-    }
-  });
-
-  // Receive the renderer's PostHog distinct ID so shutdown analytics use the same identity
-  ipcMain.on('analytics:sync-distinct-id', async (_event: Electron.IpcMainEvent, distinctId: string) => {
-    try {
-      await configManager.setAnalyticsDistinctId(distinctId);
-    } catch (error) {
-      console.error('[Analytics] Failed to persist distinct ID:', error);
-    }
-  });
-
   // Console log IPC handler. The preload console wrapper (dev-only) forwards
   // every renderer console call here for frontend-debug.log capture. Renderer
   // callers can also invoke this directly and set `toMainLog: true` to also
@@ -1168,47 +1111,12 @@ if (launchRemoteSetup) {
     console.warn('[Main] Failed to manage crash sentinel:', err);
   }
 
-  // Track app lifecycle events
+  // Record this app open (backs the welcome dialog / Discord promo banner state)
   try {
     const currentVersion = app.getVersion();
-    const lastVersion = databaseService.getLastAppVersion();
-    const isFirstLaunch = lastVersion === null;
-    analyticsLaunchContext = {
-      appVersion: currentVersion,
-      previousVersion: lastVersion,
-      isFirstLaunch,
-    };
-
-    if (lastVersion && lastVersion !== currentVersion) {
-      analyticsManager.track('app_updated', {
-        previous_version: lastVersion,
-        new_version: currentVersion,
-      });
-    }
-
-    // Reactivation detection — fire BEFORE recording this open so the
-    // previous open is the one we compute the gap from. Distinct events
-    // for 7d and 30d so dashboards can filter by intent (light churn vs
-    // deep churn). PostHog distinct_id dedupes naturally for "how many
-    // users came back" counts.
-    const lastOpen = databaseService.getLastAppOpen();
-    if (lastOpen?.opened_at) {
-      const gapMs = Date.now() - new Date(lastOpen.opened_at).getTime();
-      const gapDays = Math.floor(gapMs / (1000 * 60 * 60 * 24));
-      if (gapDays >= 30) {
-        analyticsManager.track('app_reactivated_after_30d', { gap_days: gapDays });
-      } else if (gapDays >= 7) {
-        analyticsManager.track('app_reactivated_after_7d', { gap_days: gapDays });
-      }
-    }
-
-    analyticsManager.track('app_opened', {
-      is_first_launch: isFirstLaunch,
-    });
-
     databaseService.recordAppOpen(false, false, currentVersion);
   } catch (error) {
-    console.error('[Main] Failed to track app lifecycle events:', error);
+    console.error('[Main] Failed to record app open:', error);
   }
 
   // Configure auto-updater
