@@ -27,6 +27,7 @@ from .local_control import (
     run_panels_submit,
     run_panels_submit_composer,
     run_panels_wait,
+    run_panes_archive,
     run_panes_create,
     run_panes_list,
     run_repos_add,
@@ -114,6 +115,7 @@ class ParsedArgs:
     no_focus: bool = False
     focus: bool = False
     composer_strategy: Optional[str] = None
+    force: bool = False
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -169,6 +171,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panes_list(parsed)
     if parsed.command == "panes create":
         return run_panes_create(parsed)
+    if parsed.command == "panes archive":
+        return run_panes_archive(parsed)
     if parsed.command == "panels list":
         return run_panels_list(parsed)
     if parsed.command == "panels create":
@@ -461,6 +465,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--focus":
         parsed.focus = True
         return
+    if flag == "--force":
+        parsed.force = True
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -588,6 +595,7 @@ def is_runpane_local_command(command: str) -> bool:
         "repos add",
         "panes list",
         "panes create",
+        "panes archive",
         "panels create",
         "panels list",
         "panels output",

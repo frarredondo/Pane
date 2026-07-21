@@ -51,6 +51,7 @@ export interface ParsedArgs {
   noFocus?: boolean;
   focus?: boolean;
   composerStrategy?: string;
+  force?: boolean;
   remoteSetupArgs: string[];
 }
 
@@ -261,6 +262,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.focus = true;
     return;
   }
+  if (flag === '--force') {
+    parsed.force = true;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -408,6 +413,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'repos add'
     || command === 'panes list'
     || command === 'panes create'
+    || command === 'panes archive'
     || command === 'panels create'
     || command === 'panels list'
     || command === 'panels output'

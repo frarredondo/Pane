@@ -349,6 +349,7 @@
         "panes",
         "panes list",
         "panes create",
+        "panes archive",
         "panels",
         "panels create",
         "panels list",
@@ -395,6 +396,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panes create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes archive": {
           "$ref": "#/$defs/helpLines"
         },
         "panels": {
