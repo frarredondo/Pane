@@ -10,7 +10,7 @@ import type { ConfigManager } from '../../configManager';
 import type { ConversationMessage } from '../../../database/models';
 import { getShellPath, findExecutableInPath } from '../../../utils/shellPath';
 import { findNodeExecutable } from '../../../utils/nodeFinder';
-import { GIT_ATTRIBUTION_ENV } from '../../../utils/attribution';
+import { getGitAttributionEnv } from '../../../utils/attribution';
 
 const LAST_OUTPUT_TAIL_BYTES = 16 * 1024;
 
@@ -645,7 +645,7 @@ export abstract class AbstractCliManager extends EventEmitter {
 
     return {
       ...process.env,
-      ...GIT_ATTRIBUTION_ENV,
+      ...getGitAttributionEnv(this.configManager?.getConfig()),
       PATH: pathWithNode
     } as { [key: string]: string };
   }

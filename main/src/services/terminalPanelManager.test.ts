@@ -31,6 +31,7 @@ vi.mock('../utils/wslUtils', () => ({
 
 vi.mock('../utils/attribution', () => ({
   GIT_ATTRIBUTION_ENV: {},
+  getGitAttributionEnv: vi.fn(() => ({})),
 }));
 
 import { TerminalPanelManager } from './terminalPanelManager';

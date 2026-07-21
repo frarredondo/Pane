@@ -111,6 +111,10 @@ export interface AppConfig {
   };
   // Pane commit footer setting (enabled by default)
   enableCommitFooter?: boolean;
+  // Inject Pane's git committer identity (GIT_COMMITTER_NAME/EMAIL) into commits
+  // made through Pane (enabled by default). Applies to newly spawned terminals
+  // and commands only — already-running processes keep their launch-time env.
+  gitAttributionEnabled?: boolean;
   // Agent-facing Pane context in repository instructions files
   agentContext?: {
     managedAgentsMd: boolean;
@@ -169,6 +173,7 @@ export interface UpdateConfigRequest {
   additionalPaths?: string[];
   sessionCreationPreferences?: AppConfig['sessionCreationPreferences'];
   enableCommitFooter?: boolean;
+  gitAttributionEnabled?: boolean;
   agentContext?: AppConfig['agentContext'];
   useInteractiveMode?: boolean;
   usePtyHost?: boolean;

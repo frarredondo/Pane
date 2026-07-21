@@ -62,8 +62,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Worktrees & Git',
     description: 'Defaults for commits, pull requests, and new worktrees.',
     icon: GitBranch,
-    settingIds: ['commit-footer', 'auto-rename-pr', 'worktree-file-sync'],
-    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr'],
+    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync'],
+    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author'],
   },
   {
     id: 'notifications',

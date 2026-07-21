@@ -5,7 +5,7 @@ import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
-import { GIT_ATTRIBUTION_ENV } from '../utils/attribution';
+import { getGitAttributionEnv } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 
 export type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
@@ -221,7 +221,7 @@ export class WorktreeManager {
         } catch {
           // Ignore add errors (no files to add)
         }
-        await commandRunner.execAsync('git commit -m "Initial commit" --allow-empty', projectPath, { env: GIT_ATTRIBUTION_ENV });
+        await commandRunner.execAsync('git commit -m "Initial commit" --allow-empty', projectPath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
         hasCommits = true;
       }
 
@@ -945,7 +945,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
         const escapedMessage = fullMessage.replace(/"/g, '\\"');
         command = `git commit -m "${escapedMessage}"`;
         executedCommands.push(`git commit -m "..." (in ${worktreePath})`);
-        const commitResult = await commandRunner.execAsync(command, worktreePath, { env: GIT_ATTRIBUTION_ENV });
+        const commitResult = await commandRunner.execAsync(command, worktreePath, { env: getGitAttributionEnv(config) });
         lastOutput = commitResult.stdout || commitResult.stderr || '';
 
         // Switch to main branch in the main repository
@@ -1348,7 +1348,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
 
       // Commit with message
       const escapedMessage = message.replace(/"/g, '\\"');
-      const { stdout, stderr } = await commandRunner.execAsync(`git commit -m "${escapedMessage}"`, worktreePath, { env: GIT_ATTRIBUTION_ENV });
+      const { stdout, stderr } = await commandRunner.execAsync(`git commit -m "${escapedMessage}"`, worktreePath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
       const output = stdout || stderr || 'Committed successfully';
 
       return { output };

@@ -1,3 +1,5 @@
+import type { AppConfig } from '../types/config';
+
 /**
  * Git attribution environment variables.
  *
@@ -11,3 +13,12 @@ export const GIT_ATTRIBUTION_ENV = {
   GIT_COMMITTER_NAME: 'Pane',
   GIT_COMMITTER_EMAIL: 'runpane@users.noreply.github.com',
 };
+
+/**
+ * Returns GIT_ATTRIBUTION_ENV to inject into a spawned process/git command,
+ * or {} when the user has turned the `gitAttributionEnabled` setting off.
+ * Enabled by default (absent/undefined config is treated as enabled).
+ */
+export function getGitAttributionEnv(config: AppConfig | null | undefined): Record<string, string> {
+  return config?.gitAttributionEnabled === false ? {} : GIT_ATTRIBUTION_ENV;
+}
