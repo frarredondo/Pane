@@ -36,8 +36,14 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       // Try to read build info if in packaged app
       if (app.isPackaged) {
         try {
-          const buildInfoPath = path.join(process.resourcesPath, 'app', 'main', 'dist', 'buildInfo.json');
-          if (fs.existsSync(buildInfoPath)) {
+          // Packaged builds are asar-archived by default (Resources/app.asar), but
+          // asar can be disabled (Resources/app); check both so this works either way.
+          const buildInfoCandidates = [
+            path.join(process.resourcesPath, 'app.asar', 'main', 'dist', 'buildInfo.json'),
+            path.join(process.resourcesPath, 'app', 'main', 'dist', 'buildInfo.json'),
+          ];
+          const buildInfoPath = buildInfoCandidates.find((candidate) => fs.existsSync(candidate));
+          if (buildInfoPath) {
             const buildInfo = JSON.parse(fs.readFileSync(buildInfoPath, 'utf8'));
             buildDate = buildInfo.buildDate;
             gitCommit = buildInfo.gitCommit;
