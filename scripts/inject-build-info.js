@@ -17,15 +17,7 @@ const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 let gitCommit = 'unknown';
 try {
   const gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
-  
-  // Check if the working directory is clean (no uncommitted changes)
-  try {
-    execSync('git diff-index --quiet HEAD --', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-    gitCommit = gitHash;
-  } catch {
-    // Working directory has uncommitted changes
-    gitCommit = `${gitHash} (modified)`;
-  }
+  gitCommit = `${gitHash} (modified)`;
 } catch (err) {
   console.warn('Could not get git commit information:', err.message);
   gitCommit = 'unknown';

@@ -52,28 +52,12 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       if (!app.isPackaged) {
         console.log('[Version Debug] Development mode detected, getting git info...');
         try {
-          const gitHash = commandExecutor.execSync('git rev-parse --short HEAD', { 
+          const gitHash = commandExecutor.execSync('git rev-parse --short HEAD', {
             encoding: 'utf8',
             cwd: process.cwd()
           }).trim();
-          
-          // Check if the working directory is clean (no uncommitted changes)
-          try {
-            interface ExtendedExecOptions {
-              encoding: 'utf8';
-              cwd: string;
-              silent?: boolean;
-            }
-            commandExecutor.execSync('git diff-index --quiet HEAD --', { 
-              encoding: 'utf8',
-              cwd: process.cwd(),
-              silent: true
-            } as ExtendedExecOptions);
-            gitCommit = gitHash;
-          } catch {
-            // Working directory has uncommitted changes
-            gitCommit = `${gitHash} (modified)`;
-          }
+
+          gitCommit = `${gitHash} (modified)`;
           console.log('[Version Debug] Git commit:', gitCommit);
         } catch (err) {
           console.log('Could not get git commit:', err);
