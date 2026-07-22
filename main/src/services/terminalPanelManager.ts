@@ -169,6 +169,8 @@ interface TerminalProcess {
   commandHistory: string[];
   currentCommand: string;
   lastActivity: Date;
+  lastOutputAt?: Date;
+  outputGeneration: number;
   isWSL?: boolean;
   /**
    * WSL context captured at spawn time. Stored so `respawnAll` can re-inject
@@ -218,7 +220,7 @@ export class TerminalPanelManager {
   }
 
   private quoteCommandArgument(value: string): string {
-    return `"${value.replace(/(["$`])/g, '\\$1')}"`;
+    return `"${value.replace(/([\\"$`])/g, '\\$1')}"`;
   }
 
   private resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState): {
@@ -361,6 +363,19 @@ export class TerminalPanelManager {
       console.warn(`[TerminalPanelManager] Failed to send initial input for panel ${panelId}:`, error);
       this.markInitialInputError(panelId, error).catch(() => {});
     });
+  }
+
+  deliverPendingInitialInput(panelId: string): void {
+    if (!this.terminals.has(panelId)) {
+      return;
+    }
+    const currentPanel = panelManager.getPanel(panelId);
+    const customState = (currentPanel?.state.customState || {}) as TerminalPanelState;
+    if (customState.isCliReady !== true) {
+      return;
+    }
+
+    this.sendInitialInputOnce(panelId);
   }
 
   private writeInitialInput(
@@ -910,6 +925,7 @@ export class TerminalPanelManager {
       commandHistory: [],
       currentCommand: '',
       lastActivity: new Date(),
+      outputGeneration: 0,
       isWSL: !!(wslContext && process.platform === 'win32'),
       // Capture wslContext so `respawnAll` can re-inject the same WSLENV /
       // distro / user settings after a ptyHost supervisor restart without
@@ -1106,7 +1122,10 @@ export class TerminalPanelManager {
     // Handle terminal output
     terminal.pty.onData((data: string) => {
       // Update last activity
-      terminal.lastActivity = new Date();
+      const outputAt = new Date();
+      terminal.lastActivity = outputAt;
+      terminal.lastOutputAt = outputAt;
+      terminal.outputGeneration += 1;
 
       // Activity status transition: mark active on first byte after idle
       if (terminal.activityStatus !== 'active') {
@@ -1270,6 +1289,14 @@ export class TerminalPanelManager {
   
   isTerminalInitialized(panelId: string): boolean {
     return this.terminals.has(panelId);
+  }
+
+  getLastOutputAt(panelId: string): string | undefined {
+    return this.terminals.get(panelId)?.lastOutputAt?.toISOString();
+  }
+
+  getOutputGeneration(panelId: string): number {
+    return this.terminals.get(panelId)?.outputGeneration ?? 0;
   }
   
   writeToTerminal(panelId: string, data: string): void {
