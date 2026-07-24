@@ -174,6 +174,14 @@ function App() {
     return () => unsubscribe?.();
   }, []);
 
+  // Global agent status listener (blocked / working / done) for AI/CLI panels.
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.events?.onPanelAgentStatus?.((data) => {
+      usePanelStore.getState().setAgentStatus(data.panelId, data.sessionId, data.state);
+    });
+    return () => unsubscribe?.();
+  }, []);
+
   useEffect(() => {
     const clearViewedCompletedActivity = (event: Event) => {
       const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;

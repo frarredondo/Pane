@@ -15,6 +15,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { Kbd } from '../ui/Kbd';
 import { usePanelStore } from '../../stores/panelStore';
 import { ClaudeIcon, OpenAIIcon } from '../ui/BrandIcons';
+import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
 // ---------------------------------------------------------------------------
@@ -130,7 +131,6 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   const [stripDropIndex, setStripDropIndex] = useState<number | null>(null);
   const [rovingPanelId, setRovingPanelId] = useState<string | null>(activePanelId ?? panels[0]?.id ?? null);
   const previousActivePanelIdRef = useRef(activePanelId);
-  const getPanelActivityStatus = usePanelStore(s => s.getPanelActivityStatus);
 
   useEffect(() => {
     const activePanelChanged = previousActivePanelIdRef.current !== activePanelId;
@@ -445,12 +445,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 compact ? "gap-1" : "gap-2",
               )}>
                 {panel.type === 'terminal' && (
-                  <span className={cn(
-                    "w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all",
-                    getPanelActivityStatus(panel.id) === 'active'
-                      ? 'bg-status-info opacity-100 duration-150'
-                      : 'bg-text-muted/20 opacity-40 duration-[3s]'
-                  )} />
+                  <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />
                 )}
                 {getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5' : 'w-4 h-4')}
                 {/* Bold marks the primary group's strip: the group the top

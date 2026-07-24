@@ -8,7 +8,11 @@ import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
+import { StatusAccentBar } from './ui/StatusAccentBar';
+import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
+import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
+import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
@@ -69,6 +73,7 @@ export function ProjectSessionList({
   const activeView = useNavigationStore(s => s.activeView);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
+  const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
   // Expansion state lives in the navigation store so the always-mounted
@@ -322,6 +327,7 @@ export function ProjectSessionList({
         >
           <MessageSquare className="w-4 h-4" />
           <span>Pane Chat</span>
+          <AgentStatusDot status={paneChatStatus} size="sm" className="ml-auto" />
         </button>
 
         {showRemoteDesktopLink && onRemoteDesktopClick && (
@@ -664,6 +670,7 @@ function SessionRow({
     return sessionPanels.some(p => s.activityStatus[p.id] === 'active') ? 'active' : 'idle';
   });
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
+  const agentDisplayStatus = useSessionAgentDisplayStatus(session.id);
 
   // Queue the initial refresh even when cached status is available, so cached
   // PR state is corrected by the background git/PR refresh path.
@@ -727,13 +734,13 @@ function SessionRow({
   return (
     <div
       className={cn(
-        'group/session relative w-full text-left pl-2 pr-2 transition-colors flex items-center gap-1',
+        'group/session relative w-full text-left pl-3 pr-2 transition-colors flex items-center gap-1',
         rowLayout === 'single' ? 'py-1.5' : 'py-2',
-        isActive
-          ? 'bg-interactive/30 border-l-4 border-interactive'
-          : 'hover:bg-surface-hover border-l-4 border-transparent'
+        isActive ? 'bg-interactive/30' : 'hover:bg-surface-hover'
       )}
     >
+      {/* Always-present left accent bar reflecting the agent status. */}
+      <StatusAccentBar status={agentDisplayStatus} isActive={isActive} />
       <Tooltip
         content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName={false} showDiffStats={false} globalIndex={globalIndex} />}
         side="right"
