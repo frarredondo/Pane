@@ -505,6 +505,10 @@ activity makes an older report stale. Keep findings in this conversation.
 | Share how a session went | \`session-trace\` |
 | The user's own work | \`pane-work\` |
 
+The rows from \`quick-verify\` through \`refactor\` are implementation work:
+they run in the implementation Pane, so name them in its prompt rather than
+running them here.
+
 ## Pane conventions
 
 These hold for this Session and for everything it delegates; \`runpane\` lists

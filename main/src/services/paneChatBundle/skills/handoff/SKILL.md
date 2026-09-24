@@ -29,7 +29,7 @@ You are the outgoing collaborator. Give the next person or agent the verified co
 - Make essential text directly readable to both humans and agents. Link existing artifacts and retain one authoritative brief.
 - For cross-device delivery, prefer a public-safe Grain share when public sharing is authorized by the request or an established user preference. Otherwise use an appropriately restricted destination or ask before publishing.
 - Inspect the full shared content for its intended audience. Use access-controlled GitHub when the brief requires private source or sensitive context. Return the verified share URL supplied by the service.
-- If Grain is unavailable or unsuitable, update a clearly labeled handoff/status section on the existing PR, or the issue if there is no PR. Preserve the original intent, acceptance criteria, and other contributors' content; use a timestamped comment when editing the body would be disruptive.
+- If Grain is unavailable or unsuitable, save the handoff in the work's page bundle (see [page](../page/SKILL.md)). With a posting grant, also update a clearly labeled handoff/status section on the existing PR, or the issue if there is no PR. Preserve the original intent, acceptance criteria, and other contributors' content; use a timestamped comment when editing the body would be disruptive.
 - If both destinations are unavailable, return a self-contained, copyable brief in chat with its save status. Create a new issue or PR when the user requests one.
 - Keep necessary local working files and verify that required material also has a remotely accessible copy. Report connected save failures and the outcome of any fallback.
 

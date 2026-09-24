@@ -73,7 +73,7 @@ While one workstream waits, continue the others.
   fix commit, rebase, push, and PR update.
 - Review and QA run on every new head, in fresh panels or through the
   `reviewer` and `qa-and-verify` subagents. They return findings and post
-  nothing. QA may run authorized tests and publish authorized evidence, and it
+  nothing. QA may run authorized tests and upload evidence under a grant, and it
   returns code defects to the implementation authority.
 - Only the implementation authority posts to GitHub (review replies, thread
   resolutions, PR updates), under a recorded grant. A grant to finish work
@@ -106,8 +106,10 @@ in every implementation prompt:
   question, and it arrives here as BLOCKED.
 - Save pages and records to Grain when connected, otherwise as `page`
   describes.
-- No merges. Release-asset uploads need a grant; without one, prepare the
-  Markdown and report.
+- Review and QA return findings and post nothing.
+- No merges, unless the prompt names the exact merge the user authorized.
+  Release-asset uploads need a grant; without one, prepare the Markdown and
+  report.
 - The `reviewer` and `qa-and-verify` subagents exist only in Pane Chat. In
   another repository, run `review` or `pr-test-automation` directly.
 

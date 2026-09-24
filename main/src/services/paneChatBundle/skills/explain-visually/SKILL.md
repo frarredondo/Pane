@@ -30,14 +30,14 @@ Place visuals beside the explanation they support. Introduce technical terms whe
 ## Create the HTML
 
 - Make a focused, self-contained HTML companion with inline CSS/SVG, real labels, and source links where they support claims. Do not invent measurements or evidence to fill a layout.
-- Reuse suitable existing visual styles or `html-explainer` when available, but do not require another skill. Otherwise use calm typography, generous spacing, clear headings, and readable light/dark and narrow-screen layouts.
+- Render with the [page](../page/SKILL.md) standard: calm typography, generous spacing, clear headings, and readable light/dark and narrow-screen layouts.
 - Use navigation or expandable detail when depth warrants it. Keep the main explanation understandable without opening every detail or running JavaScript; avoid unnecessary app frameworks and dependencies.
 - Keep the user's requested style and destination. The subject determines the layout, not a mandatory collection of diagrams, panels, or sections.
 
 ## Save, verify, and return
 
 - When Grain is connected, read its installed skill and reuse the supplied task workspace or matching explanation workspace. Otherwise create a clearly named workspace in the requested folder, defaulting to `Development Artifacts`. Keep its ID for follow-up updates and retain local working files when needed.
-- Without Grain, save a local HTML file in the requested location or task-specific `tmp/` and continue without setup ceremony. If a connected save fails, keep the local artifact and report it as unsynced.
+- Without Grain, save it under `explainers/` in the work's page bundle (see [page](../page/SKILL.md)), or the requested location, and continue without setup ceremony. If a connected save fails, keep the local artifact and report it as unsynced.
 - Keep secrets and private source material out of uploads; do not create public shares or change audience permissions without authorization. Honor local-only requests.
 - Check the explanation against its sources. Inspect the saved page with available browser tools for clipping, readable labels, light/dark and mobile layout, navigation, and links; fix observed problems. If visual inspection is unavailable, report that limit rather than claiming it passed.
 - Answer the question briefly in chat and link the verified companion; the essential answer must not require opening it. Open the page when supported and welcome in the current workflow, without stealing focus from ongoing work.

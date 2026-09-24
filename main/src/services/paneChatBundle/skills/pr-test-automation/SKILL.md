@@ -219,7 +219,7 @@ When testing an open PR, preserve the result where reviewers will look first:
   - key screenshot previews when UI review is central and the set is small enough to skim;
   - a link to the detailed QA comment or local artifacts when the full evidence is long;
   - what remains for human review and what was intentionally skipped.
-- Post or update one PR comment whose owned content is bounded by `<!-- pr-test-automation-detail:start -->` and `<!-- pr-test-automation-detail:end -->` when detailed evidence, logs, or screenshot galleries are too large for the PR description. Recognize the legacy `<!-- codex-pr-test-automation -->` marker so reruns update rather than duplicate an older comment. Include:
+- With a posting grant (otherwise return the content as findings), post or update one PR comment whose owned content is bounded by `<!-- pr-test-automation-detail:start -->` and `<!-- pr-test-automation-detail:end -->` when detailed evidence, logs, or screenshot galleries are too large for the PR description. Recognize the legacy `<!-- codex-pr-test-automation -->` marker so reruns update rather than duplicate an older comment. Include:
   - summary of automated manual QA outcome;
   - test account/org/marker identifiers;
   - user journeys and surface areas tested;

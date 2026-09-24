@@ -1,6 +1,6 @@
 ---
 name: brief
-description: Use when a problem, idea, or change of intent is worth capturing, or the person asks to write it up or file an issue. Never chooses a solution.
+description: Use when a problem, idea, or change of intent is worth capturing as a long-form page, or the person asks to write it up. Never chooses a solution; the tracker issue belongs to create-ticket.
 ---
 
 # Brief
