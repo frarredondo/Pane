@@ -412,7 +412,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(variant).toContain('runpane panels submit-composer --panel <panel-id> --yes --json');
       expect(variant).toContain('runpane panels submit --panel <panel-id> --text "<message>" --yes --json');
       expect(variant).toContain('`verifiedSubmitted: true` means the agent took the message');
-      expect(variant).toContain('earliest incomplete gate');
+      expect(variant).toContain('continue from where the work stopped');
       expect(variant).toContain('Never auto-resume a pane that is BLOCKED');
       expect(variant).toContain('at most 3 times in any rolling hour');
       expect(variant).toContain('Resume only panes you dispatched, unless the user asked you to keep all panes moving');
@@ -518,27 +518,48 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(rule).toContain(canonicalSkill.split('---\n').slice(2).join('---\n').trim().slice(0, 120));
   });
 
-  it('replaces the project skill folders with the bundled skills on every start', async () => {
+  it('installs the bundle and removes only what Pane put there before', async () => {
     const manager = new SkillCacheManager();
-    const staleOrchestrator = path.join(manager.claudeProjectSkillsRoot, 'runpane', 'SKILL.md');
-    const leftoverSkill = path.join(manager.codexProjectSkillsRoot, 'old-synced-skill', 'SKILL.md');
-    for (const [file, contents] of [[staleOrchestrator, STALE_CACHED_ORCHESTRATOR], [leftoverSkill, '# old\n']]) {
+    const write = async (file: string, contents = '# old\n') => {
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, contents, 'utf8');
-    }
+    };
+    const staleOrchestrator = path.join(manager.claudeProjectSkillsRoot, 'runpane', 'SKILL.md');
+    const legacySynced = path.join(manager.codexProjectSkillsRoot, 'astra-ticket', 'SKILL.md');
+    const retired = path.join(manager.claudeProjectSkillsRoot, 'retired-skill', 'SKILL.md');
+    const usersSkill = path.join(manager.claudeProjectSkillsRoot, 'my-own-skill', 'SKILL.md');
+    const usersAgent = path.join(manager.claudeProjectAgentsRoot, 'my-agent.md');
+    await write(staleOrchestrator, STALE_CACHED_ORCHESTRATOR);
+    await write(legacySynced);
+    await write(path.join(manager.skillsRoot, 'dcouple', 'parsa', '.codex', 'skills', 'astra-ticket', 'SKILL.md'));
+    await write(retired);
+    await write(path.join(manager.paneChatRoot, 'installed.json'), JSON.stringify({ skills: ['retired-skill'], agents: [] }));
+    await write(usersSkill);
+    await write(usersAgent);
 
     await manager.start();
 
     const bundleRoot = path.join(__dirname, 'paneChatBundle', 'skills');
     const bundledSkills = (await fs.readdir(bundleRoot)).sort();
-    const bundledOrchestrator = await fs.readFile(path.join(bundleRoot, 'runpane', 'SKILL.md'), 'utf8');
-    for (const root of [manager.paneChatSkillsRoot, manager.codexProjectSkillsRoot, manager.claudeProjectSkillsRoot]) {
-      const installed = (await fs.readdir(root)).filter(name => name !== 'pane-orchestrator').sort();
-      expect(installed).toEqual(bundledSkills);
-      await expect(fs.readFile(path.join(root, 'runpane', 'SKILL.md'), 'utf8')).resolves.toBe(bundledOrchestrator);
+    const bundledRunpane = await fs.readFile(path.join(bundleRoot, 'runpane', 'SKILL.md'), 'utf8');
+    expect((await fs.readdir(manager.paneChatSkillsRoot)).sort()).toEqual(bundledSkills);
+    for (const root of [manager.codexProjectSkillsRoot, manager.claudeProjectSkillsRoot]) {
+      const installed = await fs.readdir(root);
+      expect(installed).toEqual(expect.arrayContaining([...bundledSkills, 'pane-orchestrator']));
+      await expect(fs.readFile(path.join(root, 'runpane', 'SKILL.md'), 'utf8')).resolves.toBe(bundledRunpane);
     }
-    await expect(fs.access(leftoverSkill)).rejects.toThrow();
-    await expect(fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8')).resolves.toContain('name: pane-orchestrator');
+    await expect(fs.access(legacySynced)).rejects.toThrow();
+    await expect(fs.access(retired)).rejects.toThrow();
+    await expect(fs.readFile(usersSkill, 'utf8')).resolves.toBe('# old\n');
+    await expect(fs.readFile(usersAgent, 'utf8')).resolves.toBe('# old\n');
+  });
+
+  it('lets concurrent openers share one install', async () => {
+    const manager = new SkillCacheManager();
+
+    await Promise.all([manager.ensurePaneChatGuide(), manager.ensurePaneChatGuide(), manager.start()]);
+
+    await expect(fs.access(path.join(manager.claudeProjectSkillsRoot, 'runpane', 'SKILL.md'))).resolves.toBeUndefined();
   });
 
   it('installs the helper subagents for Claude and Codex, each pointing at an installed skill', async () => {
@@ -563,7 +584,8 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(JSON.parse(encodedInstructions!)).toContain(skillPath!);
     }
     if (process.platform !== 'win32') {
-      expect(manager.codexLaunchArgs()).toContain(`agents.explorer.config_file=${JSON.stringify(path.join(manager.codexProjectAgentsRoot, 'explorer.toml'))}`);
+      expect(manager.launchCommand('codex')).toContain(`agents.explorer.config_file=${JSON.stringify(path.join(manager.codexProjectAgentsRoot, 'explorer.toml'))}`);
+      expect(manager.launchCommand('claude')).toBe('claude --dangerously-skip-permissions');
     }
   });
 

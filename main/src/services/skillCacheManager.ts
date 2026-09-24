@@ -1,6 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 // Every skill Pane installs for its agents ships with Pane.
 const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
@@ -151,10 +153,10 @@ Auto-resume:
     - retry attempts exhausted
 - Submit a resume message with
   \`runpane panels submit --panel <panel-id> --text "<message>" --yes --json\`.
-  Name the failure and tell the agent to inspect its durable state and
-  continue from the earliest incomplete gate of the runpane-orchestrator
-  lifecycle, for example: "Your previous turn died: \`<signature>\`. Inspect
-  your durable state and continue from the earliest incomplete gate."
+  Name the failure and tell the agent to inspect its durable state (the
+  branch, its plan or ticket, and its notes) and continue from where the work
+  stopped, for example: "Your previous turn died: \`<signature>\`. Inspect
+  your durable state and continue from where the work stopped."
 - Check the result. \`verifiedSubmitted: true\` means the agent took the
   message. Otherwise read \`runpane panels screen\`: if the message is still in
   the composer, run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
@@ -204,6 +206,7 @@ export class SkillCacheManager {
   readonly paneWatchScriptPath: string;
   readonly paneIdleWatchScriptPath: string;
   private codexSubagentArgs = '';
+  private installation: Promise<void> | null = null;
 
   constructor() {
     this.skillsRoot = path.join(getAppDirectory(), 'skills');
@@ -225,18 +228,63 @@ export class SkillCacheManager {
   }
 
   async start(): Promise<void> {
-    // Older versions synced skills into these folders; nothing reads them now.
-    await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
-    await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
-    await fs.rm(path.join(this.paneChatRoot, 'runpane-orchestrator.md'), { force: true });
-    await fs.rm(path.join(this.paneChatRoot, 'work-questions.md'), { force: true });
     await this.ensurePaneChatGuide();
   }
 
   async ensurePaneChatGuide(): Promise<string> {
+    await this.installOnce();
     await fs.mkdir(this.paneChatRoot, { recursive: true });
     await this.writePaneChatGuide();
     return this.paneChatGuidePath;
+  }
+
+  /** Installs the bundle once per run; concurrent callers share the same work. */
+  private installOnce(): Promise<void> {
+    this.installation ??= this.install().catch(error => {
+      this.installation = null;
+      throw error;
+    });
+    return this.installation;
+  }
+
+  /**
+   * Replaces what Pane installed last time with the bundle. The project skill
+   * and agent folders can hold the user's own entries, so only names Pane
+   * installed (recorded in the manifest) or older versions synced are removed.
+   */
+  private async install(): Promise<void> {
+    const manifestPath = path.join(this.paneChatRoot, 'installed.json');
+    const previous = await readInstalledManifest(manifestPath);
+    const legacyCache = path.join(this.skillsRoot, 'dcouple', 'parsa');
+    const legacySynced = {
+      claude: await listEntries(path.join(legacyCache, '.claude', 'skills')),
+      codex: await listEntries(path.join(legacyCache, '.codex', 'skills')),
+    };
+    const bundledSkills = await listEntries(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills'));
+    const skills = [...bundledSkills, 'pane-orchestrator'];
+
+    await fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true });
+    for (const [root, legacy] of [
+      [this.claudeProjectSkillsRoot, legacySynced.claude],
+      [this.codexProjectSkillsRoot, legacySynced.codex],
+    ] as const) {
+      for (const name of new Set([...previous.skills, ...legacy, ...skills])) {
+        await fs.rm(path.join(root, name), { recursive: true, force: true });
+      }
+    }
+    for (const skill of bundledSkills) {
+      for (const root of [this.paneChatSkillsRoot, this.claudeProjectSkillsRoot, this.codexProjectSkillsRoot]) {
+        await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill));
+      }
+    }
+    const agents = await this.installSubagents(previous.agents);
+
+    await this.writeTextFile(manifestPath, `${JSON.stringify({ skills, agents }, null, 2)}\n`);
+    // Older versions synced skills into these folders and wrote these files.
+    await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
+    await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
+    await fs.rm(path.join(this.paneChatRoot, 'runpane-orchestrator.md'), { force: true });
+    await fs.rm(path.join(this.paneChatRoot, 'work-questions.md'), { force: true });
   }
 
   private async writePaneChatGuide(): Promise<void> {
@@ -245,8 +293,6 @@ export class SkillCacheManager {
     await fs.mkdir(this.paneChatRoot, { recursive: true });
     await fs.writeFile(this.paneChatRuntimeContextPath, runtimeContext, 'utf8');
     await this.writeTextFile(this.paneChatOrchestratorSkillPath, orchestratorSkill);
-    await this.installBundledSkills();
-    await this.installSubagents();
     await this.writeTextFile(this.codexPaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.claudePaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.cursorPaneOrchestratorRulePath, this.toCursorRule(orchestratorSkill));
@@ -264,25 +310,17 @@ export class SkillCacheManager {
     return `---\ndescription: Pane Chat orchestrator contract\nalwaysApply: true\n---\n\n${body}\n`;
   }
 
-  /** Pane owns these skill folders: each start replaces them with the bundle. */
-  private async installBundledSkills(): Promise<void> {
-    const bundledSkills = path.join(PANE_CHAT_BUNDLE_ROOT, 'skills');
-    for (const root of [this.paneChatSkillsRoot, this.codexProjectSkillsRoot, this.claudeProjectSkillsRoot]) {
-      await fs.rm(root, { recursive: true, force: true });
-      await copyBundledPath(bundledSkills, root);
-    }
-  }
-
   /**
    * Helper roles Pane Chat can delegate to, generated for Claude
    * (.claude/agents) and Codex (.codex/agents plus launch flags) from the
    * bundle's agents/ folder. Each one follows one bundled skill.
    */
-  private async installSubagents(): Promise<void> {
+  private async installSubagents(previouslyInstalled: string[]): Promise<string[]> {
     const definitions = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
     const codexArgs: string[] = [];
-    for (const root of [this.claudeProjectAgentsRoot, this.codexProjectAgentsRoot]) {
-      await fs.rm(root, { recursive: true, force: true });
+    for (const name of new Set([...previouslyInstalled, ...definitions.map(agent => agent.name)])) {
+      await fs.rm(path.join(this.claudeProjectAgentsRoot, `${name}.md`), { force: true });
+      await fs.rm(path.join(this.codexProjectAgentsRoot, `${name}.toml`), { force: true });
     }
     for (const agent of definitions) {
       const skillPath = path.join(this.paneChatSkillsRoot, agent.skill, 'SKILL.md');
@@ -305,11 +343,18 @@ export class SkillCacheManager {
       );
     }
     this.codexSubagentArgs = codexArgs.join(' ');
+    return definitions.map(agent => agent.name);
   }
 
-  /** Launch flags that register the helper roles with a Codex Session (empty until installed, and on Windows). */
-  codexLaunchArgs(): string {
-    return process.platform === 'win32' ? '' : this.codexSubagentArgs;
+  /**
+   * The command a Pane Chat or Session terminal launches. Codex also gets
+   * flags that register the helper subagents (skipped on Windows, whose
+   * shells quote differently).
+   */
+  launchCommand(agent: keyof typeof RUNPANE_CONTRACT.agentTemplates): string {
+    const base = RUNPANE_CONTRACT.agentTemplates[agent].command;
+    const extra = agent === 'codex' && process.platform !== 'win32' ? this.codexSubagentArgs : '';
+    return extra ? `${base} ${extra}` : base;
   }
 
   private buildPaneOrchestratorSkill(): string {
@@ -913,6 +958,28 @@ async function exists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function listEntries(directory: string): Promise<string[]> {
+  try {
+    return (await fs.readdir(directory)).sort();
+  } catch {
+    return [];
+  }
+}
+
+async function readInstalledManifest(manifestPath: string): Promise<{ skills: string[]; agents: string[] }> {
+  try {
+    const manifest = decodeBoundary(JSON.parse(await fs.readFile(manifestPath, 'utf8')), boundary.object({
+      skills: boundary.array(boundary.string),
+      agents: boundary.array(boundary.string),
+    }));
+    // Names become path segments, so keep only plain folder and file names.
+    const safe = (names: string[]) => names.filter(name => /^[\w-][\w.-]*$/.test(name));
+    return { skills: safe(manifest.skills), agents: safe(manifest.agents) };
+  } catch {
+    return { skills: [], agents: [] };
   }
 }
 

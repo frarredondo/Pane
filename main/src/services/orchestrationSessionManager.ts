@@ -702,11 +702,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       'Keep the Session overview, evidence, decisions, blockers, next action, and output links current.',
     ];
     const prompt = lines.filter(Boolean).join('\n').slice(0, MAX_ORCHESTRATION_TEXT_LENGTH);
-    const baseCommand = RUNPANE_CONTRACT.agentTemplates[record.agent].command;
-    // Codex registers Pane Chat's helper subagents through launch flags.
-    const codexArgs = record.agent === 'codex' ? this.skillCacheManager?.codexLaunchArgs() ?? '' : '';
     return {
-      initialCommand: codexArgs ? `${baseCommand} ${codexArgs}` : baseCommand,
+      initialCommand: this.skillCacheManager?.launchCommand(record.agent) ?? RUNPANE_CONTRACT.agentTemplates[record.agent].command,
       initialInput: prompt,
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',

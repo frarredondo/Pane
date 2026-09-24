@@ -911,6 +911,22 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
   });
 
+  it('keeps Codex launch options when resuming an interrupted panel', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const initialCommand = `codex --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"'`;
+
+    const result = manager.resolveCliLaunchCommand('panel-1', initialCommand, {
+      agentType: 'codex',
+      wasInterrupted: true,
+      agentSessionId: 'thread-1',
+    });
+
+    expect(result).toMatchObject({
+      commandToRun: `codex resume --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' thread-1`,
+      isCliCommand: true,
+    });
+  });
+
   it('keeps Enter as the default initial input submit strategy', async () => {
     const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
     const terminal = createTerminal();
