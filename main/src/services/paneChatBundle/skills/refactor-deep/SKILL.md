@@ -41,15 +41,28 @@ Diff against the merge-base with the remote default branch. A stale local
 `main` pulls unrelated commits into the review, and every finding in them is a
 false positive.
 
+First resolve the relevant remote from the PR or current branch, and that
+remote's default branch. If either is ambiguous or unavailable, report the
+comparison as blocked; an unresolved base must not pass as an empty diff.
+Record the resolved remote, base ref, and merge-base.
+
 ```bash
-BASE=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|refs/remotes/||')
-[ -n "$BASE" ] || BASE=origin/$(git remote show origin | sed -n 's/.*HEAD branch: //p')
-git fetch origin "${BASE#origin/}"
+# Resolve the relevant remote from the PR/current branch configuration first.
+# Set REFACTOR_REMOTE to that verified name; do not assume origin.
+git remote show "$REFACTOR_REMOTE"
+# Resolve its actual default branch and set BASE to the verified remote ref.
+# Fetch that branch explicitly if the ref is missing/stale, then verify it.
+git rev-parse --verify "$BASE^{commit}"
 MB=$(git merge-base "$BASE" HEAD)
 git diff "$MB" --name-status
 git diff "$MB" --numstat
 git diff "$MB" --stat
 ```
+
+Plain `git diff` omits untracked files, so also list them with
+`git ls-files --others --exclude-standard -z`. Treat them as added files:
+count and analyze their full contents, with the same lockfile, generated, and
+vendored exclusions. Leave the index alone while inspecting.
 
 `$BASE` is the remote's real default branch (`main`, `master`, `develop`).
 Diffing from the merge-base to the working tree (one revision) covers
@@ -81,9 +94,9 @@ in:
    already do the thing. If the codebase does it everywhere, it is the
    convention.
 
-For example, Doozy's `CLAUDE.md` states "zero relative imports" and a grep
-finds none, so a `../` there is Critical. Pane has hundreds of `../` imports
-and no alias, so the same line in Pane is fine. The repository decides.
+An import style is a finding only when the target repository's guidance and
+existing code establish that convention. Explain the actual impact; a
+preference remembered from another project sets no severity.
 
 Show the classification:
 
@@ -120,16 +133,10 @@ typical dimensions from the repository:
 - **Tests**: what the repo tests and how; whether new surface has the test
   neighbouring code would have
 
-As an illustration only, here is a filled-in checklist for Doozy's monorepo.
-Derive your own for the repo you are in:
-
-- controllers use `authenticatedHandler` and hold no business logic
-- services extend `BaseService`, throw `ApiError`, and own all business logic
-- validators are Zod schemas outside controllers
-- pages are thin JSX with all logic in an orchestration hook
-- hooks return no JSX and use TanStack Query with full dependency keys and
-  mutation invalidation
-- `_components/`, `_hooks/`, and `_types/` mean local-only
+For each row, record the local rule, its source file and line, a nearby
+example, and the changed code being evaluated. When the repository has no
+clear rule for a row, mark it unestablished. Invent no framework, service
+superclass, error type, validation library, or directory convention.
 
 ### Phase 2: Correctness defects in new paths
 

@@ -25,13 +25,16 @@ automatically as you can.
 - `business-context` and `business-research-adversary` are context steps that
   ran before discussion. If either output is missing or stale, send the
   workflow back to that stage to rebuild it.
-- After drafting the spec, run or request `business-spec-reviewer`.
+- After drafting the spec, run or request `business-spec-reviewer` in a
+  fresh context.
 - If review returns "revise spec" or "build more context", patch the spec or
   send the workflow back to the right support stage.
 
 ## Read
 
-- `.business/context/*.md`
+Supplied paths win. The defaults:
+
+- `.business/context/*.md`, including stakeholder research
 - `.business/discussion/brief.md`
 - [spec_base.md](spec_base.md), the structure for the spec
 
@@ -45,3 +48,12 @@ automatically as you can.
 - the ready spec, if approved
 - otherwise a short blocker report naming the exact missing context or human
   decision
+
+## Grain handoff
+
+- With Grain connected, read and update these artifacts in the task's Grain
+  folder. Standalone work goes to `Development Artifacts/YYYY-MM-DD-<task>`.
+- Pass the folder ID and storage rule to support agents, and sync their outputs
+  yourself if they lack access.
+- Keep the local copies you need and respect privacy limits. Without Grain,
+  work locally without comment.

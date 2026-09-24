@@ -21,6 +21,13 @@ what should change, why it matters, and what success looks like.
   work.
 - For a UI change, offer a best-effort `ui-mockup` to clarify the design, and
   include the approved result in the ticket or brief.
+- Gather independent evidence in parallel when it helps: repository behavior,
+  external constraints, and related issues and briefs, through tools or
+  read-only helpers. Follow the active workflow's model and role
+  requirements, tell helpers to leave threads unarchived, and merge the
+  results into one brief. Dependent decisions, mockup approval, Socrates
+  review, and publication confirmation keep their order, and helpers leave
+  publishing to you.
 
 ## Shape the handoff
 

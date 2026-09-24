@@ -262,5 +262,5 @@ Large PR (<N> files, <M> lines): run `refactor` for a blind simple + deep
 pass? It merges once and stops before applying anything.
 ```
 
-For smaller PRs, add nothing. Only offer `refactor`: running it is the user's
-call, and it edits the head that review and QA are about to see.
+For smaller PRs, add nothing. Only offer `refactor`, and run it only when the
+user asks: it edits the head that review and QA are about to see.

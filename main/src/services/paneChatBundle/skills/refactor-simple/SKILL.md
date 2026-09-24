@@ -37,15 +37,28 @@ Diff against the merge-base with the remote default branch. A stale local
 `main` pulls unrelated commits into the review, and every finding in them is a
 false positive.
 
+First resolve the relevant remote from the PR or current branch, and that
+remote's default branch. If either is ambiguous or unavailable, report the
+comparison as blocked; an unresolved base must not pass as an empty diff.
+Record the resolved remote, base ref, and merge-base.
+
 ```bash
-BASE=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|refs/remotes/||')
-[ -n "$BASE" ] || BASE=origin/$(git remote show origin | sed -n 's/.*HEAD branch: //p')
-git fetch origin "${BASE#origin/}"
+# Resolve the relevant remote from the PR/current branch configuration first.
+# Set REFACTOR_REMOTE to that verified name; do not assume origin.
+git remote show "$REFACTOR_REMOTE"
+# Resolve its actual default branch and set BASE to the verified remote ref.
+# Fetch that branch explicitly if the ref is missing/stale, then verify it.
+git rev-parse --verify "$BASE^{commit}"
 MB=$(git merge-base "$BASE" HEAD)
 git diff "$MB" --name-status
 git diff "$MB" --numstat
 git diff "$MB" --stat
 ```
+
+Plain `git diff` omits untracked files, so also list them with
+`git ls-files --others --exclude-standard -z`. Treat them as added files:
+count and analyze their full contents, with the same lockfile, generated, and
+vendored exclusions. Leave the index alone while inspecting.
 
 `$BASE` is the remote's real default branch (`main`, `master`, `develop`).
 Diffing from the merge-base to the working tree (one revision) covers
@@ -77,10 +90,9 @@ Take conventions only from the repository you are in:
    already do the thing. If the codebase does it everywhere, it is the
    convention.
 
-For example, Doozy's `CLAUDE.md` states "zero relative imports" and a grep
-finds no `../` imports, so a `../` there is a real Critical. Pane has hundreds
-of `../` imports and no alias, so the same line in Pane is fine. The
-repository decides.
+An import style is a finding only when the target repository's guidance and
+existing code establish that convention. Explain the actual impact; a
+preference remembered from another project sets no severity.
 
 Pattern matrix:
 
@@ -106,7 +118,7 @@ Use whatever steps 1-3 surfaced, citing the file that states each rule.
 
 ### 3. Analyze files
 
-Read the changed files:
+Read the changed files and the untracked files listed in step 1:
 
 ```bash
 git diff "$MB" --name-only

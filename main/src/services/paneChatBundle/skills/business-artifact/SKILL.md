@@ -15,15 +15,18 @@ Once the spec is ready, do as much as you can automatically.
   numbers, dates, pricing, commitments, or legal or compliance statements.
 - Keep a claim/evidence ledger.
 - Shape the draft for its artifact type.
-- After the draft and the ledger, run or request `business-artifact-reviewer`.
+- After the draft and the ledger, run or request `business-artifact-reviewer`
+  in a fresh context.
 - Apply the required patches when review names concrete fixes.
 - Stop for human input only when review requires a human gate or the available
   context is too thin to finish the artifact safely.
 
 ## Read
 
+Supplied input and output paths win. The defaults:
+
 - `.business/specs/ready/spec.md`
-- `.business/context/*.md`
+- `.business/context/*.md`, including stakeholder research
 - `.business/reviews/spec-review.md`
 
 ## Write
@@ -42,3 +45,12 @@ Once the spec is ready, do as much as you can automatically.
 Claim ledger format:
 | Claim | Evidence | Status | Risk | Fix |
 |---|---|---|---|---|
+
+## Grain handoff
+
+- With Grain connected, read and update these artifacts in the task's Grain
+  folder. Standalone work goes to `Development Artifacts/YYYY-MM-DD-<task>`.
+- Pass the folder ID and storage rule to reviewers, and sync their outputs
+  yourself if they lack access.
+- Keep the local copies you need and respect privacy limits. Without Grain,
+  work locally without comment.

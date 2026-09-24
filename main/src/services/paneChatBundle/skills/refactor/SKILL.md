@@ -23,15 +23,28 @@ from only one of them. Run each analysis once per diff.
 
 ### 1. Size the change
 
+First resolve the relevant remote from the PR or current branch, and that
+remote's default branch. If either is ambiguous or unavailable, report the
+comparison as blocked; an unresolved base must not pass as an empty diff.
+Record the resolved remote, base ref, and merge-base for the subagents.
+
 ```bash
-BASE=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|refs/remotes/||')
-[ -n "$BASE" ] || BASE=origin/$(git remote show origin | sed -n 's/.*HEAD branch: //p')
-git fetch origin "${BASE#origin/}"
+# Resolve the relevant remote from the PR/current branch configuration first.
+# Set REFACTOR_REMOTE to that verified name; do not assume origin.
+git remote show "$REFACTOR_REMOTE"
+# Resolve its actual default branch and set BASE to the verified remote ref.
+# Fetch that branch explicitly if the ref is missing/stale, then verify it.
+git rev-parse --verify "$BASE^{commit}"
 git diff "$(git merge-base "$BASE" HEAD)" --numstat
 ```
 
 This diffs the merge-base with the remote's real default branch against the
 working tree, so uncommitted work counts.
+
+Plain `git diff` omits untracked files, so also list them with
+`git ls-files --others --exclude-standard -z`. Treat them as added files:
+count and analyze their full contents, with the same exclusions below. Pass
+this inventory to every analysis. Leave the index alone while inspecting.
 
 Leave lockfiles, generated files, and vendored directories out of the count.
 Under about 10 hand-written files and 500 lines is **small**; anything above
@@ -40,13 +53,30 @@ fanning out.
 
 ### 2. Fan out independently
 
+`refactor-simple`, `refactor-deep`, and `refactor-apply` are skills that one
+kind of subagent runs; they need no separate agent types. You do all the
+dispatching: a subagent spawns no helpers and returns to you at each gate.
+Reuse one apply subagent for authorized edits and fixes, and give every
+independent review a fresh one.
+
 Run each analysis as its own fresh-context subagent, all launched together so
-they run concurrently (Claude: one Agent tool call per analysis, in the same
-message). The prompt names the skill and the worktree and nothing else. Each
+they run concurrently when capacity allows (Claude: one Agent tool call per
+analysis, in the same message). The prompt names the skill, the worktree, the
+resolved base and untracked inventory from step 1, and your model, effort, and
+no-archive requirements. It carries no other reviewer's findings. Each
 subagent invokes its skill and returns the absolute path of its plan.
 
 - **small**: `refactor-simple` only.
 - **large**: `refactor-simple` and `refactor-deep`, concurrently.
+
+For a comprehensive review, or a large change that needs specialist coverage,
+use [the specialist lenses](references/specialist-review.md):
+
+- The selected scoped deep reviews replace the broad `refactor-deep` pass.
+  Keep the `refactor-simple` pass.
+- Run the applicable lenses in waves within capacity.
+- Give each subagent an explicit read-only scope override and its own output
+  path. Reviewers neither publish nor edit code.
 
 Each writes its own file under `./tmp/` and reads only its own.
 
@@ -61,7 +91,8 @@ Read every plan and write one merged report to
    is Critical. A reproduced defect keeps its reproduction.
 3. **Keep sole-source findings.** Corroboration isn't required; disagreement
    between independent runs is signal.
-4. **Tag every item** `[S]`, `[D]`, or `[S+D]` to show who found it.
+4. **Tag every item** with its source to show who found it: `[S]`, `[D]`, a
+   named specialist lens, or a combination such as `[S+D]`.
 5. **Carry each plan's quality score as reported**, plus the merged Critical,
    Warning, and Info counts. The merged report has no combined score.
 6. Items marked pre-existing, not against this PR, stay in Info unchanged.

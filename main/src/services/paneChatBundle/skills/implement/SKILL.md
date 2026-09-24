@@ -135,6 +135,10 @@ After the primary stream completes, always run a full review against the
 `implementation-reviewer` standards. Add a fresh, skeptical second opinion in a
 separate context when one is available.
 
+Review runs once. Dispatch both lanes together, in parallel, and run each lane
+once. The second opinion is a second reviewer reading the same diff at the
+same time, not a second round.
+
 **Claude:** run an `implementation-reviewer` subagent. If the Codex plugin is
 available, run the Codex review lane in parallel.
 
@@ -179,18 +183,27 @@ Then, for every agent:
    - **Auto-fixable**: apply the fix.
    - **Needs user input**: surface it clearly.
 3. Present one combined set of questions or decisions after all lanes finish.
-4. After applying fixes, rerun the review gate: `implementation-reviewer`,
-   `/codex:review` when the plugin is available, and
-   `/codex:adversarial-review` when the fixes touch architecture, flow control,
-   auth, async work, or finish-line wiring. Wait for every lane again.
+4. After applying fixes, rerun the project's own checks (tests, lint,
+   typecheck, or build) to confirm the fixes hold. Checks confirm fixes;
+   reviewers don't. If a fix is large enough to need fresh review, stop, say
+   so in your report, and let the user decide.
 
 ## Step 5.5: Generate dev migration SQL (if the schema changed)
 
 After the review gates pass and auto-fixable issues are fixed, check whether
 `schema.ts` changed:
 
+1. Resolve the comparison base from the current PR or repository
+   configuration: find the relevant remote and its default branch (it may not
+   be `origin/main`). Fetch that ref if it's missing locally, and verify it.
+2. If the base is ambiguous or unavailable, report the comparison as blocked.
+   A missing base doesn't mean the schema is unchanged.
+3. Diff from the merge base, so upstream-only schema changes stay out, and
+   include staged, unstaged, and relevant untracked files:
+
 ```bash
-git diff origin/main --name-only | grep schema.ts
+git diff "$(git merge-base <verified-base-ref> HEAD)" --name-only | grep schema.ts
+git ls-files --others --exclude-standard | grep schema.ts
 ```
 
 If it changed:
