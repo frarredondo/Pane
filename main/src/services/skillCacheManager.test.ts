@@ -558,11 +558,12 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
       const codexConfig = await fs.readFile(path.join(manager.codexProjectAgentsRoot, `${name}.toml`), 'utf8');
       expect(codexConfig).toContain(`name = "${name}"`);
-      expect(codexConfig).toContain('developer_instructions = ');
-      expect(codexConfig).toContain(skillPath!);
+      const encodedInstructions = /^developer_instructions = (".*")$/m.exec(codexConfig)?.[1];
+      expect(encodedInstructions).toBeDefined();
+      expect(JSON.parse(encodedInstructions!)).toContain(skillPath!);
     }
     if (process.platform !== 'win32') {
-      expect(manager.codexLaunchArgs()).toContain(`agents.explorer.config_file="${path.join(manager.codexProjectAgentsRoot, 'explorer.toml')}"`);
+      expect(manager.codexLaunchArgs()).toContain(`agents.explorer.config_file=${JSON.stringify(path.join(manager.codexProjectAgentsRoot, 'explorer.toml'))}`);
     }
   });
 
