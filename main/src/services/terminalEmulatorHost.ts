@@ -27,17 +27,21 @@ export interface RestoreSnapshot extends ScreenState {
   serialized: string;
 }
 
-type EmulatorQuery = 'state' | 'restore' | 'dispose';
+/** A request the host answers; the connection tags each with a `req` id. */
+export type EmulatorQuery =
+  | { op: 'state' | 'restore' | 'dispose'; id: number }
+  | { op: 'scrollback'; id: number; maxLines: number };
 
 export type EmulatorRequest =
   | { op: 'create'; id: number; cols: number; rows: number }
   | { op: 'write'; id: number; data: string }
   | { op: 'resize'; id: number; cols: number; rows: number }
   | { op: 'clear'; id: number }
-  | { op: EmulatorQuery; id: number; req: number };
+  | (EmulatorQuery & { req: number });
 
 export type EmulatorReply =
   | { op: 'reply'; req: number; state: ScreenState | RestoreSnapshot | null }
+  | { op: 'scrollbackReply'; req: number; text: string | null }
   /** Unsolicited: the screen changed. Throttled to STATE_PUSH_MS per terminal. */
   | { op: 'screen'; id: number; state: ScreenState };
 
@@ -118,6 +122,17 @@ export function serveTerminalEmulators(port: HostPort): void {
       case 'clear':
         emulator?.clearScrollback();
         return;
+      case 'scrollback': {
+        const { req, maxLines } = message;
+        if (!emulator) {
+          port.postMessage({ op: 'scrollbackReply', req, text: null });
+          return;
+        }
+        void emulator.waitForIdle().then(() => {
+          port.postMessage({ op: 'scrollbackReply', req, text: emulator.getScrollbackText(maxLines) });
+        });
+        return;
+      }
       case 'state':
       case 'restore':
       case 'dispose': {

@@ -1,13 +1,14 @@
 import {
   startTerminalEmulatorHost,
   type EmulatorHost,
+  type EmulatorQuery,
   type EmulatorReply,
   type EmulatorRequest,
   type RestoreSnapshot,
   type ScreenState,
 } from './terminalEmulatorHost';
 
-type Reply = ScreenState | RestoreSnapshot | null;
+type Reply = ScreenState | RestoreSnapshot | string | null;
 
 const EMPTY_STATE: ScreenState = { screenText: '', inputScreenText: '', isAlternateScreen: false, oscTitle: '', oscProgress: '' };
 
@@ -50,27 +51,34 @@ export class TerminalEmulatorHostConnection {
 
   /** Screen state once every write sent so far has been parsed. */
   readState(id: number): Promise<ScreenState | null> {
-    return this.request('state', id);
+    // SAFETY: the host answers 'state' with a ScreenState (or null).
+    return this.request({ op: 'state', id }) as Promise<ScreenState | null>;
   }
 
   readRestore(id: number): Promise<RestoreSnapshot | null> {
     // SAFETY: the host answers 'restore' with a RestoreSnapshot (or null).
-    return this.request('restore', id) as Promise<RestoreSnapshot | null>;
+    return this.request({ op: 'restore', id }) as Promise<RestoreSnapshot | null>;
+  }
+
+  /** Rendered plain-text scrollback plus viewport, once every write sent so far has been parsed. */
+  readScrollback(id: number, maxLines: number): Promise<string | null> {
+    // SAFETY: the host answers 'scrollback' with a string (or null).
+    return this.request({ op: 'scrollback', id, maxLines }) as Promise<string | null>;
   }
 
   /** Drop the model; resolves to its final capture, scrollback included. */
   release(id: number): Promise<RestoreSnapshot | null> {
     this.stateListeners.delete(id);
     // SAFETY: the host answers 'dispose' with a RestoreSnapshot (or null).
-    return this.request('dispose', id) as Promise<RestoreSnapshot | null>;
+    return this.request({ op: 'dispose', id }) as Promise<RestoreSnapshot | null>;
   }
 
-  private request(op: 'state' | 'restore' | 'dispose', id: number): Promise<Reply> {
+  private request(query: EmulatorQuery): Promise<Reply> {
     if (this.closed) return Promise.resolve(null);
     const req = this.nextReq++;
     return new Promise((resolve) => {
       this.pending.set(req, resolve);
-      this.host.postMessage({ op, id, req });
+      this.host.postMessage({ ...query, req });
     });
   }
 
@@ -79,7 +87,7 @@ export class TerminalEmulatorHostConnection {
       this.stateListeners.get(message.id)?.(message.state);
       return;
     }
-    this.pending.get(message.req)?.(message.state);
+    this.pending.get(message.req)?.(message.op === 'scrollbackReply' ? message.text : message.state);
     this.pending.delete(message.req);
   }
 
@@ -146,6 +154,11 @@ export class RemoteTerminalEmulator {
     const snapshot = await (this.final ?? this.host.readRestore(this.id));
     if (snapshot) this.cached = snapshot;
     return snapshot;
+  }
+
+  /** Null once disposed, so callers fall back to persisted scrollback. */
+  readScrollback(maxLines: number): Promise<string | null> {
+    return this.final ? Promise.resolve(null) : this.host.readScrollback(this.id, maxLines);
   }
 
   /** Stop the model; later reads return its final capture, scrollback included. */

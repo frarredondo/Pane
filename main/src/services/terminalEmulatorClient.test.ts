@@ -31,6 +31,17 @@ describe('RemoteTerminalEmulator', () => {
     expect((await emulator.refresh()).screenText).toBe('line 5\nline 6\nline 7');
   });
 
+  it('reads rendered scrollback across the thread and returns null once disposed', async () => {
+    const emulator = inProcessEmulatorHost().createEmulator(20, 3);
+    emulator.write('working 10%\rworking 99%\r\ndone\r\n' + Array.from({ length: 5 }, (_, index) => `line ${index}`).join('\r\n'));
+
+    await expect(emulator.readScrollback(100)).resolves.toBe('working 99%\ndone\nline 0\nline 1\nline 2\nline 3\nline 4');
+    await expect(emulator.readScrollback(2)).resolves.toBe('line 3\nline 4');
+
+    emulator.dispose();
+    await expect(emulator.readScrollback(2)).resolves.toBeNull();
+  });
+
   it('settles reads instead of hanging when the emulator thread dies', async () => {
     const thread = Object.assign(new EventEmitter(), { postMessage: vi.fn(), unref: vi.fn() });
     const emulator = new TerminalEmulatorHostConnection(thread).createEmulator(20, 3);
