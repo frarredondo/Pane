@@ -5,52 +5,24 @@ description: Create three UI mockup options per round from product screenshots, 
 
 # UI mockup
 
-Match the product's visual language. You collect screenshots and pick the
-image tool.
+Match the product’s visual language; handle screenshot collection and image-tool selection.
 
 ## Start from the current UI
 
-- Reuse screenshots or capture your own. When no specific user state is
-  needed, launch dev or open accessible production and capture screens with
-  Playwright or app and browser tools, per the repository's setup guidance.
-  Study a small reference set for layout, theme, typography, and components.
-  Ask for screenshots when the needed screen or state is out of reach.
-- Establish the screen, state, change, and elements to keep; clarify material
-  gaps. For a new product, agree on references or a concept labeled as a new
-  generated image. Route prototypes and source changes through the
-  implementation workflow.
+- Reuse screenshots or capture them yourself. When specific user state is unnecessary, launch dev or open accessible production and capture screens with Playwright or app/browser tools, following repository setup guidance. Inspect a small reference set for layout, theme, typography, and components. Ask for screenshots when the required screen or state is inaccessible.
+- Establish the screen, state, change, and elements to preserve; clarify material gaps. For new products, agree on references or a concept labeled as new-image generation. Route prototypes and source changes through the implementation workflow.
 
 ## Edit and iterate
 
-- Read the available image tool's prompting guidance, and its docs for
-  capability or setup questions. Edit with the actual screenshots as inputs,
-  or generate new concepts from agreed references. Use an HTML and CSS
-  reconstruction when asked.
-- If image editing is unavailable, say so and offer setup or a handoff. Get
-  agreement before a paid API fallback.
-- Spell out changes and exact labels. Preserve layout, dimensions, theme,
-  typography, density, icons, and unaffected regions. Label each input as an
-  edit target or a style reference.
-- Generate three distinct options per round through separate image calls:
-  first design directions, then refinements of the favorite. Label them 1 to
-  3, check text and unintended changes, and open all three automatically. If
-  opening fails, show them inline with file links. Explain fidelity limits.
-- Ask for a favorite and apply feedback with it as the next edit target. Keep
-  original screenshots, prior options, and preservation constraints. A
-  favorite guides iteration; explicit approval selects the final design.
+- Read the available `imagegen` skill and prompting reference; consult `openai-docs` for capability/setup questions. Use the image-editing tool with actual screenshot inputs, or generate new concepts from agreed references. Use HTML/CSS reconstruction when requested.
+- If image editing is unavailable, explain and offer setup or handoff. Get agreement for paid API fallbacks.
+- Specify changes and exact labels. Preserve layout, dimensions, theme, typography, density, icons, and unaffected regions. Label inputs as edit targets or style references.
+- Generate three distinct options per round through separate image calls: initial design directions, then refinements of the favorite. Label 1–3, inspect text and unintended changes, and automatically open all three. If opening fails, display inline with file links; explain fidelity limits.
+- Ask for a favorite, then apply feedback using it as the next edit target. Retain original screenshots, prior options, and preservation constraints. A favorite guides iteration; explicit approval selects the final design to save.
 
 ## Save the approved result
 
-- Follow the destination's storage skill, and reuse the linked Grain
-  workspace or tracker artifact. Honor local-only and draft-only requests;
-  standalone mockups stay local. Keep the audience, get authorization for
-  public sharing, and link private Grain briefs.
-- Save and display the approved image with caption, version, and approval
-  status. Keep prompts and source references; mark drafts and rejected
-  versions.
-- Reconcile authorized decisions into the ticket or brief, keeping its
-  identity and history. Align scope and acceptance criteria. Treat incidental
-  generated details as illustrations.
-- Verify rendering and links, then return image and artifact links. If an
-  upload fails, keep local files and report paths, outstanding saves, or
-  access limits.
+- Follow the destination’s storage skill; reuse the linked Grain workspace or tracker artifact. Honor local-only and draft-only requests; standalone mockups stay local. Preserve the audience and obtain authorization for public sharing. Link private Grain briefs.
+- Save and display approved image bytes with caption, version, and approval status. Retain prompts and source references; identify drafts and rejected versions.
+- Reconcile authorized decisions into the ticket/brief, preserving identity and history. Align scope and acceptance criteria; treat incidental generated details as illustrations.
+- Verify rendering and links, then return image and artifact links. If uploads fail, retain local files and report paths, outstanding saves, or access limits.

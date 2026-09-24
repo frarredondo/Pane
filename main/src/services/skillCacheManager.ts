@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
 
 // Every skill Pane installs for its agents ships with Pane.
@@ -195,7 +194,8 @@ export class SkillCacheManager {
   readonly paneChatRuntimeContextPath: string;
   readonly paneChatOrchestratorSkillPath: string;
   readonly paneChatSkillsRoot: string;
-  readonly paneChatWorkQuestionsPath: string;
+  readonly claudeProjectAgentsRoot: string;
+  readonly codexProjectAgentsRoot: string;
   readonly codexProjectSkillsRoot: string;
   readonly claudeProjectSkillsRoot: string;
   readonly codexPaneOrchestratorSkillPath: string;
@@ -203,17 +203,20 @@ export class SkillCacheManager {
   readonly cursorPaneOrchestratorRulePath: string;
   readonly paneWatchScriptPath: string;
   readonly paneIdleWatchScriptPath: string;
+  private codexSubagentArgs = '';
 
   constructor() {
     this.skillsRoot = path.join(getAppDirectory(), 'skills');
     this.paneChatRoot = path.join(this.skillsRoot, 'pane-chat');
-    this.paneChatGuidePath = path.join(this.paneChatRoot, 'runpane-orchestrator.md');
     this.paneChatRuntimeContextPath = path.join(this.paneChatRoot, 'runtime-context.md');
     this.paneChatOrchestratorSkillPath = path.join(this.paneChatRoot, 'pane-orchestrator', 'SKILL.md');
+    // The orchestrator skill is also the entry point a Session is told to read.
+    this.paneChatGuidePath = this.paneChatOrchestratorSkillPath;
     this.paneChatSkillsRoot = path.join(this.paneChatRoot, 'skills');
-    this.paneChatWorkQuestionsPath = path.join(this.paneChatRoot, 'work-questions.md');
     this.codexProjectSkillsRoot = path.join(getAppDirectory(), '.codex', 'skills');
     this.claudeProjectSkillsRoot = path.join(getAppDirectory(), '.claude', 'skills');
+    this.claudeProjectAgentsRoot = path.join(getAppDirectory(), '.claude', 'agents');
+    this.codexProjectAgentsRoot = path.join(getAppDirectory(), '.codex', 'agents');
     this.codexPaneOrchestratorSkillPath = path.join(this.codexProjectSkillsRoot, 'pane-orchestrator', 'SKILL.md');
     this.claudePaneOrchestratorSkillPath = path.join(this.claudeProjectSkillsRoot, 'pane-orchestrator', 'SKILL.md');
     this.cursorPaneOrchestratorRulePath = path.join(getAppDirectory(), '.cursor', 'rules', 'pane-orchestrator.mdc');
@@ -225,6 +228,8 @@ export class SkillCacheManager {
     // Older versions synced skills into these folders; nothing reads them now.
     await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
     await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
+    await fs.rm(path.join(this.paneChatRoot, 'runpane-orchestrator.md'), { force: true });
+    await fs.rm(path.join(this.paneChatRoot, 'work-questions.md'), { force: true });
     await this.ensurePaneChatGuide();
   }
 
@@ -235,14 +240,13 @@ export class SkillCacheManager {
   }
 
   private async writePaneChatGuide(): Promise<void> {
-    const guide = this.buildPaneChatGuide();
     const runtimeContext = await this.buildPaneChatRuntimeContext();
     const orchestratorSkill = this.buildPaneOrchestratorSkill();
-    await fs.mkdir(path.dirname(this.paneChatGuidePath), { recursive: true });
+    await fs.mkdir(this.paneChatRoot, { recursive: true });
     await fs.writeFile(this.paneChatRuntimeContextPath, runtimeContext, 'utf8');
-    await fs.writeFile(this.paneChatGuidePath, guide, 'utf8');
     await this.writeTextFile(this.paneChatOrchestratorSkillPath, orchestratorSkill);
     await this.installBundledSkills();
+    await this.installSubagents();
     await this.writeTextFile(this.codexPaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.claudePaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.cursorPaneOrchestratorRulePath, this.toCursorRule(orchestratorSkill));
@@ -263,73 +267,59 @@ export class SkillCacheManager {
   /** Pane owns these skill folders: each start replaces them with the bundle. */
   private async installBundledSkills(): Promise<void> {
     const bundledSkills = path.join(PANE_CHAT_BUNDLE_ROOT, 'skills');
-    await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'work-questions.md'), this.paneChatWorkQuestionsPath);
     for (const root of [this.paneChatSkillsRoot, this.codexProjectSkillsRoot, this.claudeProjectSkillsRoot]) {
       await fs.rm(root, { recursive: true, force: true });
       await copyBundledPath(bundledSkills, root);
     }
   }
 
-  private paneChatReferencePaths() {
-    return {
-      runpaneOrchestrator: path.join(this.paneChatSkillsRoot, 'runpane-orchestrator', 'SKILL.md'),
-      createTicket: path.join(this.paneChatSkillsRoot, 'create-ticket', 'SKILL.md'),
-      astraTicket: path.join(this.paneChatSkillsRoot, 'astra-ticket', 'SKILL.md'),
-      workQuestions: this.paneChatWorkQuestionsPath,
-    };
+  /**
+   * Helper roles Pane Chat can delegate to, generated for Claude
+   * (.claude/agents) and Codex (.codex/agents plus launch flags) from the
+   * bundle's agents/ folder. Each one follows one bundled skill.
+   */
+  private async installSubagents(): Promise<void> {
+    const definitions = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
+    const codexArgs: string[] = [];
+    for (const root of [this.claudeProjectAgentsRoot, this.codexProjectAgentsRoot]) {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+    for (const agent of definitions) {
+      const skillPath = path.join(this.paneChatSkillsRoot, agent.skill, 'SKILL.md');
+      const instructions = `${agent.body}\n\nBefore the assigned work, read and follow \`${skillPath}\`; resolve its links relative to that folder.\n`;
+      const claudeHeader = [`name: ${agent.name}`, `description: ${agent.description}`, ...(agent.claudeModel ? [`model: ${agent.claudeModel}`] : [])];
+      await this.writeTextFile(
+        path.join(this.claudeProjectAgentsRoot, `${agent.name}.md`),
+        `---\n${claudeHeader.join('\n')}\n---\n\n${instructions}`,
+      );
+      const codexConfigPath = path.join(this.codexProjectAgentsRoot, `${agent.name}.toml`);
+      await this.writeTextFile(codexConfigPath, [
+        `name = ${JSON.stringify(agent.name)}`,
+        `description = ${JSON.stringify(agent.description)}`,
+        `developer_instructions = ${JSON.stringify(instructions)}`,
+        '',
+      ].join('\n'));
+      codexArgs.push(
+        '-c', quoteForDisplayedShellArg(`agents.${agent.name}.description=${JSON.stringify(agent.description)}`),
+        '-c', quoteForDisplayedShellArg(`agents.${agent.name}.config_file=${JSON.stringify(codexConfigPath)}`),
+      );
+    }
+    this.codexSubagentArgs = codexArgs.join(' ');
   }
 
-  private buildPaneChatGuide(): string {
-    const { runpaneOrchestrator, createTicket, astraTicket, workQuestions } = this.paneChatReferencePaths();
-    const managedBlock = RUNPANE_CONTRACT.agentContext.managedBlock.join('\n');
-
-    return `# Pane Chat Orchestrator (Sessions)
-
-You are the user's Session orchestrator for this Pane workspace. The Session
-is the named, ongoing conversation where intent lives. Its associated Panes
-and tabs are where the focused work happens.
-
-## Initialize quietly
-
-Do these first, and keep the setup and its output to yourself:
-
-1. Read the runtime context: \`${this.paneChatRuntimeContextPath}\`. It
-   describes this Pane install and wins over any other document.
-2. Read the Pane Chat orchestrator skill: \`${this.paneChatOrchestratorSkillPath}\`.
-   It is the contract for this Session: startup, Session identity, Pane
-   association, the workflow, liveness, unattended resilience, and hard stops.
-3. Read the skills it relies on:
-   - RunPane orchestrator: \`${runpaneOrchestrator}\` (dispatch, delivery,
-     evidence, readiness)
-   - Session tickets: \`${createTicket}\`
-   - Delegated implementation: \`${astraTicket}\` (applies once implementation
-     is authorized)
-   - Work questions: \`${workQuestions}\`
-4. Run the doctor command from the runtime context.
-5. If the Session has associated Panes, arm liveness with the two commands in
-   the skill's Liveness Contract: \`runpane watch --self-test\`, then the
-   flagged follow command.
-
-Pane writes these files from its own bundle on every start, so they are
-current; initialize from them without fetching anything. Every skill is also
-in \`${this.claudeProjectSkillsRoot}\`, where launched agents find it by name.
-
-## Generated RunPane Context
-
-${managedBlock}
-`;
+  /** Launch flags that register the helper roles with a Codex Session (empty until installed, and on Windows). */
+  codexLaunchArgs(): string {
+    return process.platform === 'win32' ? '' : this.codexSubagentArgs;
   }
 
   private buildPaneOrchestratorSkill(): string {
     const runtimeContext = this.paneChatRuntimeContextPath;
-    const guidePath = this.paneChatGuidePath;
-    const { runpaneOrchestrator, createTicket, astraTicket, workQuestions } = this.paneChatReferencePaths();
-    const codexProjectSkillsRoot = this.codexProjectSkillsRoot;
-    const claudeProjectSkillsRoot = this.claudeProjectSkillsRoot;
+    const skills = this.paneChatSkillsRoot;
+    const skill = (name: string) => path.join(skills, name, 'SKILL.md');
 
     return `---
 name: pane-orchestrator
-description: Use when operating as Pane Chat, the global Pane workspace Session orchestrator. Delegates authorized implementation to Pane agents through RunPane.
+description: Use when operating as Pane Chat, the Pane workspace Session orchestrator. The entry point: Session identity, Pane association, the workflow, liveness, and hard stops. Delegates authorized implementation to agents in Panes through RunPane.
 ---
 
 # Pane Orchestrator (Sessions)
@@ -342,12 +332,14 @@ and tabs are where the focused work happens.
 
 Read all of these in parallel:
 
-- \`${runtimeContext}\` (runtime context, has the doctor command)
-- \`${guidePath}\` (Pane Chat guide)
-- RunPane orchestrator skill: \`${runpaneOrchestrator}\`
-- Session ticket skill: \`${createTicket}\`
-- Delegated implementation skill: \`${astraTicket}\`
-- Work-question guide: \`${workQuestions}\`
+- \`${runtimeContext}\`: this Pane install; it wins over any other document
+- \`${skill('runpane')}\`: driving panes through the runpane CLI
+- \`${skill('orchestrate-sessions')}\`: routing work to planning,
+  implementation, and bug-report sessions
+
+Every other skill is in \`${skills}\`. Load one when the work calls for it.
+Helper subagents are installed for you: \`explorer\`, \`cold-reader\`,
+\`qa-and-verify\`, and \`reviewer\`.
 
 Then, as quiet setup:
 
@@ -395,8 +387,8 @@ Project implementation files are edited in an associated Pane or tab.
 Context is the scarce resource. Weigh the claims panes report and spend your
 context on cross-pane work, the part only you can do.
 
-Answer read-only work questions in this Session with \`pane-work-recap\` or
-\`pane-work-prioritizer\` and \`${workQuestions}\`.
+Answer questions about the user's own work ("what did I do?", "what next?")
+in this Session with \`pane-work\`.
 
 When a discussion or investigation converges, send this probe before
 accepting the design: "is this addressing the root cause or a symptom?
@@ -411,14 +403,16 @@ When a pane finishes something a human will read, have it run the
 2. Dispatch read-only exploration when repository facts are needed, then bring
    the findings back to this Session.
 3. Use \`create-ticket\` to capture the current what, why, scope, decisions,
-   and acceptance criteria. Revise the same ticket and brief as intent changes.
+   and acceptance criteria (\`options\` for trade-offs, \`brief\` for a
+   write-up). Revise the same ticket and brief as intent changes.
 4. After the ticket is ready and the user explicitly authorizes implementation,
-   dispatch \`astra-ticket\` in an appropriate existing Pane or tab, or create
-   one when needed. Pass the stable Session ID, persisted overview, and
-   associated Pane and tab IDs so progress returns to this conversation.
-5. Keep the Session's selected agent, profile, and tool configuration as they
-   are. The delegated \`astra-ticket\` workflow brings its own model, planning,
-   implementation, review, QA, and CI.
+   dispatch an implementation session in an appropriate existing Pane or tab,
+   or create one when needed. Choose the agent and the skills that fit the
+   work, usually \`tdd\`, \`quick-verify\`, \`prepare-pr\`, and
+   \`babysit-pr\`, and name them by absolute path (see \`runpane\`). Pass the
+   ticket, the stable Session ID, and the associated Pane and tab IDs so
+   progress returns to this conversation.
+5. Keep the Session's own agent, profile, and tool configuration as they are.
 
 Never edit project implementation files from the Session. A Session can stay
 discussion-only, coordinate one Pane, or coordinate several. Tabs share their
@@ -441,11 +435,10 @@ activity makes an older report stale. Keep findings in this conversation.
 
 Use RunPane control-plane operations to configure CLI tools, prompts, and
 agents; create, inspect, and coordinate Panes and tabs; monitor progress; and
-keep context across work. The \`runpane-orchestrator\` skill covers dispatch,
-confirming delivery, handling external text, PR readiness, and reporting.
+keep context across work. The \`runpane\` skill covers dispatch, confirming
+delivery, handling external text, PR readiness, and reporting.
 
-When delegating, name the stage and the relevant artifact; the \`astra-ticket\`
-pipeline carries the rest.
+When delegating, name the stage, the relevant artifact, and the skills to use.
 
 Before dispatching, state your assumptions so the user can correct them, and
 ask about gaps no sweep reaches.
@@ -503,11 +496,6 @@ it dies again, save the last 20 output lines to a file, run
 and tell the human.
 
 ${UNATTENDED_RESILIENCE_SECTION}
-
-## Local references
-
-- Skills Pane Chat depends on: \`${this.paneChatSkillsRoot}\`
-- Every skill, as agents discover it: \`${claudeProjectSkillsRoot}\`, \`${codexProjectSkillsRoot}\`
 
 ## Hard stops
 
@@ -926,6 +914,38 @@ async function exists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+interface SubagentDefinition {
+  name: string;
+  description: string;
+  skill: string;
+  claudeModel?: string;
+  body: string;
+}
+
+async function readSubagentDefinitions(directory: string): Promise<SubagentDefinition[]> {
+  const definitions: SubagentDefinition[] = [];
+  for (const file of (await fs.readdir(directory)).filter(entry => entry.endsWith('.md')).sort()) {
+    const text = await fs.readFile(path.join(directory, file), 'utf8');
+    const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
+    if (!match) throw new Error(`Subagent definition ${file} has no frontmatter`);
+    const fields = Object.fromEntries(match[1].split('\n').map(line => {
+      const separator = line.indexOf(':');
+      return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+    }));
+    if (!fields.name || !fields.description || !fields.skill) {
+      throw new Error(`Subagent definition ${file} needs name, description, and skill`);
+    }
+    definitions.push({
+      name: fields.name,
+      description: fields.description,
+      skill: fields.skill,
+      claudeModel: fields['claude-model'] || undefined,
+      body: match[2].trim(),
+    });
+  }
+  return definitions;
 }
 
 // Plain reads and writes, which also work inside Electron's asar archive.

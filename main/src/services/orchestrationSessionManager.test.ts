@@ -160,6 +160,7 @@ function createFixture(
   });
   const skillCacheManager = serviceStub<SkillCacheManager>({
     ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'),
+    codexLaunchArgs: vi.fn(() => ''),
   });
   const store = createStore();
   if (initialData) store.write(initialData);
@@ -295,7 +296,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       first.configManager,
       first.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md') }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), codexLaunchArgs: vi.fn(() => '') }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('legacy migration must run once'); }) }),
       undefined,
       secondStore,
@@ -434,7 +435,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       fixture.configManager,
       fixture.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md') }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), codexLaunchArgs: vi.fn(() => '') }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('rerun migration must not create Pane Chat state'); }) }),
       undefined,
       fixture.store,
@@ -482,7 +483,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       fixture.configManager,
       fixture.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md') }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), codexLaunchArgs: vi.fn(() => '') }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('restart must preserve migrated ownership'); }) }),
       undefined,
       fixture.store,

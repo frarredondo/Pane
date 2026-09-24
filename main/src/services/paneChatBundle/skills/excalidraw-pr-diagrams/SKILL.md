@@ -3,246 +3,189 @@ name: excalidraw-pr-diagrams
 description: Create Excalidraw diagram JSON files and PR visual overviews that make visual arguments. Use when the user wants to visualize workflows, architectures, concepts, pull request changes, before/after behavior, or a shareable explainer image for reviewers.
 ---
 
-# Excalidraw diagram creator
+# Excalidraw Diagram Creator
 
-Generate `.excalidraw` JSON files that **argue visually**: the structure itself
-shows relationships, causality, and flow.
+Generate `.excalidraw` JSON files that **argue visually**, not just display information.
 
-To set up the renderer, follow [First-time setup](#first-time-setup).
+**Setup:** If the user asks you to set up this skill (renderer, dependencies, etc.), see `README.md` for instructions.
 
-## PR diagram workflow
+## Local Codex or Claude PR Workflow
 
-- Create and edit diagram working files in a temporary directory outside the
-  target repo, preferably `/tmp/codex-pr-diagrams/<repo-or-pr>/` or
-  `C:\tmp\codex-pr-diagrams\<repo-or-pr>\`. Keep the matching `.excalidraw`
-  sources there for iteration and reuse.
-- Keep generated `.excalidraw`, `.png`, and temporary render files out of the
-  repository unless the user asks for tracked diagram assets.
-- In PR descriptions, the rendered Excalidraw image is the primary visual. Add
-  a Mermaid diagram only when the user asks for a text-rendered fallback.
-- Every PR visual overview has explicit `Before` and `After` diagrams, so
-  reviewers see the old and new behavior without inferring the diff from
-  prose.
-- Keep each PR diagram on the change boundary: before, after, and why the new
-  flow is safer.
-- After generating diagrams, add a dedicated `## Visual Overview` section to
-  the PR description.
+When using this skill for pull request diagrams in Codex or Claude:
 
-### PR asset publishing
+- Always create and edit diagram working files in a temporary working directory outside the target repo, preferably `/tmp/codex-pr-diagrams/<repo-or-pr>/` or `C:\tmp\codex-pr-diagrams\<repo-or-pr>\`.
+- Do not create generated `.excalidraw`, `.png`, or temporary render files inside the repository unless the user explicitly asks for tracked diagram assets.
+- For PR descriptions, use the rendered Excalidraw image as the primary visual. Do not add Mermaid diagrams by default; they are usually redundant once the Excalidraw image includes before/after flow and reviewer explainers. Add Mermaid only if the user explicitly asks for a durable text-rendered fallback.
+- Save matching `.excalidraw` source files under `/tmp` for local iteration and future reuse.
+- PR visual overviews must include explicit `Before` and `After` diagrams so reviewers can see both the old behavior and the new behavior without inferring the diff from prose.
+- Keep each PR diagram focused on the change boundary: before, after, and why the new flow is safer.
+- After generating diagrams, update the PR description with a dedicated `## Visual Overview` section.
 
-PR images are **hosted, not committed**, by default. Use a repository-owned
-durable asset surface. For GitHub PRs, find and reuse a published, mutable,
+### PR Asset Publishing
+
+Default: PR images are **hosted, not committed**. Prefer a repository-owned
+durable asset surface. For GitHub PRs, discover and reuse a published, mutable,
 long-lived release such as `pr-assets`; inspect it with `gh release list` and
 `gh release view <tag> --json tagName,isDraft,isPrerelease,isImmutable,url,assets`.
-One release serves every PR, and a suitable repository release always takes
-precedence over an arbitrary temporary host.
+Do not create a new release per PR, and do not use an arbitrary temporary host
+when a suitable repository release exists.
 
-If no suitable release exists, creating one long-lived `pr-assets` release is
-a separate hard stop. It needs an exact grant such as
-`{"action":"create_release","repo":"owner/name","tag":"pr-assets"}`; general
-GitHub, PR, comment, or upload authorization does not cover it. Target the
-default branch, use `--latest=false`, and say in its notes that it stores
-long-lived PR and QA images.
+If no suitable release exists, creating one dedicated long-lived `pr-assets`
+release is a separate hard stop requiring an exact grant such as
+`{"action":"create_release","repo":"owner/name","tag":"pr-assets"}`. Generic
+GitHub, PR, comment, or asset-upload authorization does not grant creation.
+Target the default branch, use `--latest=false`, and explain in its notes that it
+stores long-lived PR/QA images. If creation or
+upload is not authorized, keep the render local and prepare the exact release
+creation/upload commands, manifest, and marked PR Markdown; report durable
+publication as blocked instead of falling back to a temporary host.
 
-If creation or upload is not authorized, keep the render local, prepare the
-exact release creation and upload commands, the manifest, and the marked PR
-Markdown, and report durable publication as blocked. Skip temporary hosts in
-this case too.
+Before upload, calculate the PNG SHA-256 and use a portable name such as
+`pr-<number>-<head-short-sha>-<content-sha12>-visual-overview.png`; use a branch
+slug before a PR number exists. Make publishing idempotent by inspecting
+existing assets first. Reuse an exact
+name only when its GitHub digest, or a downloaded hash when the digest is
+absent, matches. On different content, extend the digest or add a deterministic
+suffix and upload a new name. Never use `--clobber`: replacing an asset can
+silently change images embedded in older PRs.
 
-Upload:
+After `gh release upload`, read back the release and asset metadata. Verify the
+tag, non-draft release, uploaded state, filename, size, digest when present, and
+browser download URL. Perform a direct GET of the bytes (authenticated for a
+private repository), compare SHA-256 and size with the local render, and verify
+the decoded file type or image magic so an HTML error page cannot pass.
 
-- Before upload, compute the PNG's SHA-256 and use a portable name such as
-  `pr-<number>-<head-short-sha>-<content-sha12>-visual-overview.png`. Use a
-  branch slug before a PR number exists.
-- Inspect existing assets first so publishing is idempotent. Reuse an exact
-  name only when its GitHub digest (or, with no digest, a downloaded hash)
-  matches. For different content, extend the digest or add a deterministic
-  suffix and upload under a new name.
-- Never use `--clobber`: replacing an asset can silently change images
-  embedded in older PRs.
+Maintain a local `pr-assets-manifest.json` with repository, release tag and URL,
+PR number, head commit, source/render paths, asset name, SHA-256, size, asset API
+and browser URLs, upload-or-reuse status, timestamp, and content-verification
+result. Never put credentials or sensitive source material in the manifest.
 
-Verify:
-
-- After `gh release upload`, read back the release and asset metadata. Check
-  the tag, a non-draft release, uploaded state, filename, size, digest when
-  present, and browser download URL.
-- GET the bytes directly (authenticated for a private repository), compare
-  SHA-256 and size with the local render, and check the decoded file type or
-  image magic, so an HTML error page fails.
-- Keep a local `pr-assets-manifest.json` with the repository, release tag and
-  URL, PR number, head commit, source and render paths, asset name, SHA-256,
-  size, asset API and browser URLs, upload-or-reuse status, timestamp, and
-  verification result. Keep credentials and sensitive source material out of
-  it.
-
-Commit the image only when tracked docs (a README, a design doc) embed it and
-need a stable in-repo path. Put it in `.github/pr-assets/` or `docs/` and
-reference it with a blob URL plus `?raw=1`, for example
+Commit the image only when it is embedded in tracked docs (a README, design
+doc) that needs a stable in-repo path, then `.github/pr-assets/` or
+`docs/`, referenced with a blob URL + `?raw=1`, e.g.
 `https://github.com/<owner>/<repo>/blob/<branch>/.github/pr-assets/<image>.png?raw=1`.
-Keep `.excalidraw` sources outside the repo unless the user asks to track
-them.
+Keep `.excalidraw` sources outside the repo unless the user asks to track them.
 
 Either way:
 
-- After updating, open or fetch the image URL. A PR visual with a 404 image is
-  a failed handoff.
-- Embed the verified image inline in a `## Visual Overview` section of the PR
-  body or comment, bounded by `<!-- pr-visual-overview:start -->` and
-  `<!-- pr-visual-overview:end -->`. On rerun, replace dead, expiring,
-  temporary, or local-only references. Update only the marked section and
-  preserve author text. For a broken image outside a marker, replace only the
-  URL, after verifying the intended asset.
-- Read back or preview the PR body or comment after updating it. Markdown that
-  collapses bullets, headings, or the image into one paragraph is a failed
-  handoff.
+- After updating, open or fetch the image URL. A PR visual with a 404 image is a failed handoff.
+- Embed the verified image inline inside a `## Visual Overview` PR body/comment section bounded by `<!-- pr-visual-overview:start -->` and `<!-- pr-visual-overview:end -->`. Replace dead, expiring, temporary, or local-only references on rerun. Update only the marked section and preserve author text; for a broken image outside a marker, replace only the URL after verifying the intended asset.
+- Read back or preview the PR body/comment after updating it. Markdown that collapses bullets, headings, or the image into one paragraph is a failed handoff.
 
-### PR diagram standard
+### PR Diagram Standard
 
-A PR diagram must teach the change in a way prose can't. Before drawing, find
-the visual truth of the PR:
+For PR diagrams, a simple pair of red/green cards is not acceptable. The diagram must teach the change in a way prose cannot.
 
-- **Boundary changed**: draw walls, membranes, trust zones, or origin or
-  process boundaries.
+Before drawing, identify the visual truth of the PR:
+
+- **Boundary changed**: draw walls, membranes, trust zones, or origin/process boundaries.
 - **Lifecycle changed**: draw a state machine, gate sequence, or retry loop.
-- **Responsibility moved**: draw before and after ownership regions and move
-  the action across them.
-- **Failure mode removed**: draw the old failure path dead-ending and the new
-  path avoiding it.
-- **Concurrency or race fixed**: draw clocks, timelines, joins, or retry
-  circuits.
-- **Validation or permissions changed**: draw a decision path, a lock or gate,
-  and what passes through it.
+- **Responsibility moved**: draw before/after ownership regions and move the action across them.
+- **Failure mode removed**: draw the old failure path visibly dead-ending and the new path avoiding it.
+- **Concurrency/race fixed**: draw clocks, timelines, joins, or retry circuits.
+- **Validation/permissions changed**: draw a decision path, lock/gate, and what passes through it.
 
-Every PR visual overview includes:
+Every PR visual overview must include:
 
-- a **before path** showing where the old system failed or was fragile
-- an **after path** showing the new route or control point
-- at least one **semantic visual structure**: boundary, timeline, loop,
-  funnel, state machine, swimlane, queue, fan-out, convergence, or layered
-  stack
-- one short **truth statement** that states the visual argument in plain
-  language
-- a small **term explainer** for protocol or framework words a reviewer may
-  not know, such as header, preflight, origin, token, cookie, CORS, WebSocket
-  upgrade, cache key, breakpoint, or trace
+- A **before path** showing where the old system failed or was fragile.
+- An **after path** showing the new route/control point.
+- At least one **semantic visual structure**: boundary, timeline, loop, funnel, state machine, swimlane, queue, fan-out, convergence, or layered stack.
+- One short **truth statement** that explains the visual argument in plain language.
+- A small **term explainer** when the diagram uses protocol/framework words that a reviewer may not know. Do not assume terms like header, preflight, origin, token, cookie, CORS, WebSocket upgrade, cache key, breakpoint, or trace are self-explanatory.
 
-Give each PR in a series its own visual metaphor unless the code changes
-truly share a shape. Split PRs usually fix different kinds of problems.
+Do not use the same diagram structure for a series of PRs unless the code changes truly have the same shape. Split PRs usually need different visual metaphors because they fix different kinds of problems.
 
-### Shareable explainers
+### Shareable Explainers
 
-When the user wants a PR image that teaches the change to someone else:
+When the user wants a PR image that can teach the change to someone else, design it as a shareable explainer, not just reviewer decoration.
 
-- Make the title state the strategic outcome.
+- Make the title state the strategic outcome, not the implementation detail.
 - Show the old blind spot, failure mode, or uncertainty on the left.
 - Show the new loop, boundary, path, or control point on the right.
-- Include at least one concrete example input and one concrete output. Real
-  event names, endpoint paths, page names, source URLs, or dashboard fields
-  make the image authoritative.
-- If measurement is part of the value, show what gets captured and how it
-  becomes a decision, backlog item, or next action.
-- Give each box room to breathe. Route loop-back arrows around the outside of
-  the boxes.
-- Inspect the final image at the size GitHub shows in a PR. If the viewer has
-  to open it full size to understand it, simplify.
+- Include at least one concrete example input and one concrete output. Real event names, endpoint paths, page names, source URLs, or dashboard fields make the image feel authoritative.
+- If measurement is part of the value, show what gets captured and how it becomes a decision, backlog item, or next action.
+- Add enough whitespace that each box can breathe. If an arrow needs to loop back, route it around the outside of the boxes.
+- Inspect the final image at the size GitHub shows in a PR. If the viewer must open the image full size to understand it, simplify the diagram.
 
-### Reviewer explainers
+### Reviewer Explainers
 
-When a PR involves technical protocol behavior, add a compact teaching layer:
+When a PR involves technical protocol behavior, include a compact teaching layer in the visual:
 
-- Define the technical noun with a concrete metaphor before using it. For
-  example: `headers = extra notes the browser wants to attach`,
-  `preflight = permission check before the real request`,
-  `origin = website address the browser trusts or blocks`.
-- Show who performs each action: `Browser asks`, `API answers`,
-  `Browser blocks`.
-- Use concrete examples sparingly: `login badge`, `Sentry trace`, and
-  `Firebase app id` read better than a long raw header list.
-- Keep the official term in parentheses after the plain one when useful:
-  `permission check (CORS preflight)`.
-- Map any metaphor to the real system with labels. A security desk can teach
-  CORS, but the browser and API roles stay visible.
+- Define the technical noun in a concrete metaphor before using it. Example: `headers = extra notes the browser wants to attach`, `preflight = permission check before the real request`, `origin = website address the browser trusts or blocks`.
+- Show who performs each action. Example: `Browser asks`, `API answers`, `Browser blocks`, not just `headers requested`.
+- Use concrete examples sparingly: `login badge`, `Sentry trace`, `Firebase app id` is clearer than a long raw header list.
+- Keep the official term visible in parentheses after the plain-English term when useful: `permission check (CORS preflight)`.
+- If the diagram has a metaphor, keep it mapped to the real system with labels. A security desk can teach CORS, but the browser/API roles must remain visible.
 
-Assume the reader is smart but new to this subsystem. Wherever they would ask
-"who does that?" or "what is that?", add a visual cue or a one-line
-explainer.
+For review diagrams, assume the reader is smart but has not learned this subsystem yet. If the reader would ask "who does that?" or "what is that?", add a visual cue or one-line explainer instead of relying on the PR prose.
 
 ## Customization
 
-All colors and brand-specific styles live in
-[references/color-palette.md](references/color-palette.md). Read it before
-generating any diagram and take every color from it: shape fills, strokes,
-text colors, evidence artifact backgrounds. To change the brand style, edit
-that file; the rest of this skill is general design method and Excalidraw
-practice.
+**All colors and brand-specific styles live in one file:** `references/color-palette.md`. Read it before generating any diagram and use it as the single source of truth for all color choices: shape fills, strokes, text colors, evidence artifact backgrounds, everything.
+
+To make this skill produce diagrams in your own brand style, edit `color-palette.md`. Everything else in this file is universal design methodology and Excalidraw best practices.
 
 ---
 
-## Core philosophy
+## Core Philosophy
 
-**Diagrams argue.** A diagram is a visual argument that shows relationships,
-causality, and flow that words alone can't. The shape should be the meaning.
+**Diagrams should ARGUE, not DISPLAY.**
 
-- **Isomorphism test**: with all text removed, would the structure alone
-  communicate the concept? If not, redesign.
-- **Education test**: could someone learn something concrete from it? A good
-  diagram teaches: actual formats, real event names, concrete examples.
-- **Redundancy test**: if the diagram is the PR description split into red and
-  green rectangles, discard it. A good diagram uses spatial relationships,
-  arrows, boundaries, and shape to reveal something the prose doesn't.
-- **High-schooler test**: a smart high-schooler should be able to point at the
-  diagram and explain the core before and after change without reading the
-  PR. If they would only read labels aloud, redesign.
+A diagram isn't formatted text. It's a visual argument that shows relationships, causality, and flow that words alone can't express. The shape should BE the meaning.
+
+**The Isomorphism Test**: If you removed all text, would the structure alone communicate the concept? If not, redesign.
+
+**The Education Test**: Could someone learn something concrete from this diagram, or does it just label boxes? A good diagram teaches: it shows actual formats, real event names, concrete examples.
+
+**The Redundancy Test**: If the diagram is just the PR description broken into red and green rectangles, discard it. A good diagram uses spatial relationships, arrows, boundaries, and shape to reveal something the prose does not.
+
+**The High-Schooler Test**: A smart high-schooler should be able to point at the diagram and explain the core before/after change without reading the full PR. If they would only read labels out loud, redesign.
 
 ---
 
-## Depth assessment (do this first)
+## Depth Assessment (Do This First)
 
-Decide how much detail the diagram needs.
+Before designing, determine what level of detail this diagram needs:
 
-### Simple or conceptual
-
+### Simple/Conceptual Diagrams
 Use abstract shapes when:
+- Explaining a mental model or philosophy
+- The audience doesn't need technical specifics
+- The concept IS the abstraction (e.g., "separation of concerns")
 
-- explaining a mental model or philosophy
-- the audience needs no technical specifics
-- the concept is the abstraction (for example, "separation of concerns")
-
-### Comprehensive or technical
-
+### Comprehensive/Technical Diagrams
 Use concrete examples when:
+- Diagramming a real system, protocol, or architecture
+- The diagram will be used to teach or explain (e.g., YouTube video)
+- The audience needs to understand what things actually look like
+- You're showing how multiple technologies integrate
 
-- diagramming a real system, protocol, or architecture
-- the diagram will teach or explain (for example, in a YouTube video)
-- the audience needs to see what things actually look like
-- showing how several technologies integrate
-
-**Technical diagrams must include evidence artifacts** (see below).
+**For technical diagrams, you MUST include evidence artifacts** (see below).
 
 ---
 
-## Research first (technical diagrams)
+## Research Mandate (For Technical Diagrams)
 
-**Before drawing anything technical, research the actual specifications.** For
-a protocol, API, or framework:
+**Before drawing anything technical, research the actual specifications.**
 
-1. Look up the actual JSON and data formats.
-2. Find the real event names, method names, or API endpoints.
-3. Understand how the pieces connect.
-4. Use real terminology in place of generic placeholders.
+If you're diagramming a protocol, API, or framework:
+1. Look up the actual JSON/data formats
+2. Find the real event names, method names, or API endpoints
+3. Understand how the pieces actually connect
+4. Use real terminology, not generic placeholders
 
 Bad: "Protocol" → "Frontend"
 Good: "AG-UI streams events (RUN_STARTED, STATE_DELTA, A2UI_UPDATE)" → "CopilotKit renders via createA2UIMessageRenderer()"
 
-Research makes diagrams accurate and educational.
+**Research makes diagrams accurate AND educational.**
 
 ---
 
-## Evidence artifacts
+## Evidence Artifacts
 
-Evidence artifacts are concrete examples that prove the diagram is accurate
-and help viewers learn. Include them in technical diagrams. Choose the types
-that fit:
+Evidence artifacts are concrete examples that prove your diagram is accurate and help viewers learn. Include them in technical diagrams.
+
+**Types of evidence artifacts** (choose what's relevant to your diagram):
 
 | Artifact Type | When to Use | How to Render |
 |---------------|-------------|---------------|
@@ -253,36 +196,42 @@ that fit:
 | **Real input content** | Showing what goes IN to a system | Rectangle with sample content visible |
 | **API/method names** | Real function calls, endpoints | Use actual names from docs, not placeholders |
 
-Examples:
+**Example**: For a diagram about a streaming protocol, you might show:
+- The actual event names from the spec (not just "Event 1", "Event 2")
+- A code snippet showing how to connect
+- What the streamed data actually looks like
 
-- A streaming protocol: the actual event names from the spec, a code snippet
-  showing how to connect, and what the streamed data looks like.
-- A data transformation pipeline: sample input and output in their actual
-  formats, plus intermediate states if relevant.
+**Example**: For a diagram about a data transformation pipeline:
+- Show sample input data (actual format, not "Input")
+- Show sample output data (actual format, not "Output")
+- Show intermediate states if relevant
 
-The principle: **show what things actually look like.**
+The key principle: **show what things actually look like**, not just what they're called.
 
 ---
 
-## Multi-zoom architecture
+## Multi-Zoom Architecture
 
-A comprehensive diagram works at several zoom levels at once, like a map with
-both country borders and street names.
+Comprehensive diagrams operate at multiple zoom levels simultaneously. Think of it like a map that shows both the country borders AND the street names.
 
-1. **Summary flow.** A simplified overview of the whole pipeline or process,
-   often at the top or bottom. Example: `Input → Processing → Output` or
-   `Client → Server → Database`.
-2. **Section boundaries.** Labeled regions that group related components into
-   visual "rooms". Example: by responsibility (Backend / Frontend), by phase
-   (Setup / Execution / Cleanup), or by team (User / System / External).
-3. **Detail inside sections.** Evidence artifacts, code snippets, and concrete
-   examples, where the teaching happens. Example: inside a "Backend" section,
-   the actual API response format.
+### Level 1: Summary Flow
+A simplified overview showing the full pipeline or process at a glance. Often placed at the top or bottom of the diagram.
 
-Aim for all three levels in comprehensive diagrams: the summary gives context,
-the sections organize, and the details teach.
+*Example*: `Input → Processing → Output` or `Client → Server → Database`
 
-### Bad vs good
+### Level 2: Section Boundaries
+Labeled regions that group related components. These create visual "rooms" that help viewers understand what belongs together.
+
+*Example*: Grouping by responsibility (Backend / Frontend), by phase (Setup / Execution / Cleanup), or by team (User / System / External)
+
+### Level 3: Detail Inside Sections
+Evidence artifacts, code snippets, and concrete examples within each section. This is where the educational value lives.
+
+*Example*: Inside a "Backend" section, you might show the actual API response format, not just a box labeled "API Response"
+
+**For comprehensive diagrams, aim to include all three levels.** The summary gives context, the sections organize, and the details teach.
+
+### Bad vs Good
 
 | Bad (Displaying) | Good (Arguing) |
 |------------------|----------------|
@@ -295,22 +244,20 @@ the sections organize, and the details teach.
 | Repeating the same template across unrelated PRs | Choosing a visual metaphor per PR: boundary, lifecycle, race, permission gate, retry loop |
 | Paragraphs pasted into shapes | Short labels plus visual evidence, arrows, gates, and concrete artifacts |
 
-### Hard anti-patterns
+### Hard Anti-Patterns
 
-Leave these out unless the user explicitly asks for a deliberately minimal
-sketch:
+Never ship these unless the user explicitly asks for a deliberately minimal sketch:
 
-- two large cards that summarize "Before" and "After"
-- a diagram whose boxes could become bullets with no loss of meaning
-- red and green color as the only source of meaning
-- several PR diagrams with the same layout when the PRs solve different
-  problems
-- oversized headings that make the rest of the diagram sprawl
-- long prose inside Excalidraw text boxes
-- rendered output with any text, title, arrow, or shape clipped
-- rendered output that needs horizontal scrolling to understand
+- Two large cards that simply summarize "Before" and "After".
+- A diagram whose boxes could be replaced by bullets with no loss of meaning.
+- Red/green color as the only source of meaning.
+- Multiple PR diagrams with the same layout when the PRs solve different problems.
+- Oversized headings that force the rest of the diagram to sprawl.
+- Long prose inside Excalidraw text boxes.
+- Rendered output where any text, title, arrow, or shape is clipped.
+- Rendered output where key content requires horizontal scrolling to understand.
 
-### Simple vs comprehensive
+### Simple vs Comprehensive (Know Which You Need)
 
 | Simple Diagram | Comprehensive Diagram |
 |----------------|----------------------|
@@ -321,16 +268,13 @@ sketch:
 | ~30 seconds to explain | ~2-3 minutes of teaching content |
 | Viewer learns the structure | Viewer learns the structure AND the details |
 
-Simple diagrams suit abstract concepts, quick overviews, and audiences who
-already know the details. Comprehensive diagrams suit technical
-architectures, tutorials, and educational content, where the diagram itself
-should teach.
+**Simple diagrams** are fine for abstract concepts, quick overviews, or when the audience already knows the details. **Comprehensive diagrams** are needed for technical architectures, tutorials, educational content, or when you want the diagram itself to teach.
 
 ---
 
-## Containers and free-floating text
+## Container vs. Free-Floating Text
 
-Default to free-floating text. Add a container only when it serves a purpose.
+**Not every piece of text needs a shape around it.** Default to free-floating text. Add containers only when they serve a purpose.
 
 | Use a Container When... | Use Free-Floating Text When... |
 |------------------------|-------------------------------|
@@ -340,75 +284,60 @@ Default to free-floating text. Add a container only when it serves a purpose.
 | The shape itself carries meaning (decision diamond, etc.) | Typography alone creates sufficient hierarchy |
 | It represents a distinct "thing" in the system | It's a section title, subtitle, or annotation |
 
-- **Typography as hierarchy**: font size, weight, and color create hierarchy
-  without boxes. A 28px title needs no rectangle.
-- **Container test**: for each boxed element, ask whether it would work as
-  free-floating text. If yes, remove the container.
+**Typography as hierarchy**: Use font size, weight, and color to create visual hierarchy without boxes. A 28px title doesn't need a rectangle around it.
 
-## Canvas, text, and fit
+**The container test**: For each boxed element, ask "Would this work as free-floating text?" If yes, remove the container.
 
-Excalidraw text wraps differently from HTML. Design for the renderer and its
-actual output.
+## Canvas, Text, and Fit Rules
+
+Excalidraw text does not wrap exactly like normal HTML. Design for the renderer, not for wishful JSON dimensions.
 
 ### Canvas
 
-- Start larger than you think you need. For PR diagrams, plan around
-  **1600-2200 px wide** and **900-1400 px tall** before export.
-- Spend the space on spatial structure. Titles and paragraphs stay small.
+- Start with a larger canvas than you think you need. For PR diagrams, plan around roughly **1600-2200 px wide** and **900-1400 px tall** before export.
+- Use the larger canvas for meaningful spatial structure, not for giant titles or long paragraphs.
 - Prefer two or three clear regions over many cramped micro-panels.
-- Leave at least **80 px** of outer margin and **50 px** between major
-  regions.
+- Leave at least **80 px** outer margin and **50 px** between major regions.
 
 ### Text
 
-- Keep titles short, ideally under 55 characters.
-- Use smaller titles than instinct suggests: **24-30 px** is usually enough.
-- Use **14-18 px** for labels and **16-20 px** for truth statements.
-- Keep shape labels to **1-4 short lines**. For more, split into nearby
-  annotations or let the diagram carry more of the meaning.
-- Insert line breaks by hand.
-- Make text boxes at least **30-50% wider** than the text seems to need.
-- Set `width` and `height` generously on every text element. Clipping is a
-  hard failure.
+- Keep titles short: ideally under 55 characters.
+- Use smaller title type than instinct suggests: **24-30 px** is usually enough.
+- Use labels at **14-18 px** and truth statements at **16-20 px**.
+- Keep shape labels to **1-4 short lines**. If a label needs more, split it into multiple nearby annotations or make the diagram itself carry more meaning.
+- Manually insert line breaks. Do not rely on Excalidraw/renderer wrapping.
+- Make text boxes wider than the text appears to need. Add at least **30-50% extra width** as a safety margin.
+- For every text element, set `width` and `height` generously. Clipping is a hard failure.
 
-### Render fit
+### Render Fit
 
-Inspect the exact PNG that the PR will show:
+After rendering, inspect at the exact PNG that will be shown in the PR:
 
-- If anything is clipped, add canvas space or shrink and reposition text.
+- If anything is clipped, increase canvas space or shrink/reposition text.
 - If the diagram is mostly text, remove prose and add visual structure.
-- If the title dominates, shrink it.
-- If labels overlap arrows or shapes, move them out of the flow path.
-- If the image is too wide to read in GitHub, cut prose and stack regions
-  vertically.
+- If the title dominates the image, shrink it.
+- If labels overlap arrows or shapes, move labels out of the flow path.
+- If the image is too wide to understand in GitHub, reduce prose and stack regions vertically.
 
 ---
 
-## Design process (before generating JSON)
+## Design Process (Do This BEFORE Generating JSON)
 
-### Step 0: assess depth
+### Step 0: Assess Depth Required
+Before anything else, determine if this needs to be:
+- **Simple/Conceptual**: Abstract shapes, labels, relationships (mental models, philosophies)
+- **Comprehensive/Technical**: Concrete examples, code snippets, real data (systems, architectures, tutorials)
 
-Decide whether the diagram is:
+**If comprehensive**: Do research first. Look up actual specs, formats, event names, APIs.
 
-- **Simple or conceptual**: abstract shapes, labels, relationships (mental
-  models, philosophies)
-- **Comprehensive or technical**: concrete examples, code snippets, real data
-  (systems, architectures, tutorials)
-
-For a comprehensive diagram, research first: actual specs, formats, event
-names, APIs.
-
-### Step 1: understand deeply
-
+### Step 1: Understand Deeply
 Read the content. For each concept, ask:
-
-- What does this concept **do**?
+- What does this concept **DO**? (not what IS it)
 - What relationships exist between concepts?
-- What is the core transformation or flow?
-- **What would someone need to see to understand this?**
+- What's the core transformation or flow?
+- **What would someone need to SEE to understand this?** (not just read about)
 
-### Step 2: map concepts to patterns
-
+### Step 2: Map Concepts to Patterns
 For each concept, find the visual pattern that mirrors its behavior:
 
 | If the concept... | Use this pattern |
@@ -423,94 +352,70 @@ For each concept, find the visual pattern that mirrors its behavior:
 | Compares two things | **Side-by-side** (parallel with contrast) |
 | Separates into phases | **Gap/Break** (visual separation between sections) |
 
-### Step 3: ensure variety
+### Step 3: Ensure Variety
+For multi-concept diagrams: **each major concept must use a different visual pattern**. No uniform cards or grids.
 
-In multi-concept diagrams, give **each major concept a different visual
-pattern**. Avoid uniform cards and grids.
+### Step 4: Sketch the Flow
+Before JSON, mentally trace how the eye moves through the diagram. There should be a clear visual story.
 
-### Step 4: sketch the flow
+### Step 5: Generate JSON
+Only now create the Excalidraw elements. **See below for how to handle large diagrams.**
 
-Before writing JSON, trace how the eye moves through the diagram. It should
-tell a clear visual story.
-
-### Step 5: generate JSON
-
-Now create the Excalidraw elements. For large diagrams, see
-[Building large diagrams](#building-large-diagrams).
-
-### Step 6: render and validate (required)
-
-After generating the JSON, run the render-view-fix loop in
-[Render and validate](#render-and-validate-required) until the diagram looks
-right.
+### Step 6: Render & Validate (MANDATORY)
+After generating the JSON, you MUST run the render-view-fix loop until the diagram looks right. This is not optional. See the **Render & Validate** section below for the full process.
 
 ---
 
-## Building large diagrams
+## Large / Comprehensive Diagram Strategy
 
-**Build comprehensive or technical diagrams one section at a time.** This is a
-hard constraint. Output limits per response (about 32,000 tokens in Claude
-Code) are easy to exceed with a full diagram, which yields truncated, broken
-JSON. Even when it would fit, section-by-section gives better results.
+**For comprehensive or technical diagrams, you MUST build the JSON one section at a time.** Do NOT attempt to generate the entire file in a single pass. This is a hard constraint: Claude Code has a ~32,000 token output limit per response, and a comprehensive diagram easily exceeds that in one shot. Even if it didn't, generating everything at once leads to worse quality. Section-by-section is better in every way.
 
-Write the JSON by hand in your own session:
+### The Section-by-Section Workflow
 
-- A delegated coding agent lacks this skill's rules, and the coordination
-  costs more than it saves.
-- A Python generator script adds a layer of indirection that makes debugging
-  harder. Hand-written JSON with descriptive IDs is easier to maintain.
+**Phase 1: Build each section**
 
-### Phase 1: build each section
+1. **Create the base file** with the JSON wrapper (`type`, `version`, `appState`, `files`) and the first section of elements.
+2. **Add one section per edit.** Each section gets its own dedicated pass. Take your time with it. Think carefully about the layout, spacing, and how this section connects to what's already there.
+3. **Use descriptive string IDs** (e.g., `"trigger_rect"`, `"arrow_fan_left"`) so cross-section references are readable.
+4. **Namespace seeds by section** (e.g., section 1 uses 100xxx, section 2 uses 200xxx) to avoid collisions.
+5. **Update cross-section bindings** as you go. When a new section's element needs to bind to an element from a previous section (e.g., an arrow connecting sections), edit the earlier element's `boundElements` array at the same time.
 
-1. **Create the base file** with the JSON wrapper (`type`, `version`,
-   `appState`, `files`) and the first section's elements.
-2. **Add one section per edit.** Give each section its own careful pass:
-   layout, spacing, and how it connects to what's already there.
-3. **Use descriptive string IDs** (for example `"trigger_rect"`,
-   `"arrow_fan_left"`) so cross-section references are readable.
-4. **Namespace seeds by section** (section 1 uses 100xxx, section 2 uses
-   200xxx) to avoid collisions.
-5. **Update cross-section bindings as you go.** When a new element binds to
-   one from an earlier section (an arrow between sections, say), edit the
-   earlier element's `boundElements` array at the same time.
+**Phase 2: Review the whole**
 
-### Phase 2: review the whole
+After all sections are in place, read through the complete JSON and check:
+- Are cross-section arrows bound correctly on both ends?
+- Is the overall spacing balanced, or are some sections cramped while others have too much whitespace?
+- Do IDs and bindings all reference elements that actually exist?
 
-With all sections in place, read the complete JSON and check:
+Fix any alignment or binding issues before rendering.
 
-- Are cross-section arrows bound correctly at both ends?
-- Is spacing balanced, or are some sections cramped and others sparse?
-- Do all IDs and bindings reference elements that exist?
+**Phase 3: Render & validate**
 
-Fix alignment and binding issues before rendering.
+Now run the render-view-fix loop from the Render & Validate section. This is where you'll catch visual issues that aren't obvious from JSON: overlaps, clipping, imbalanced composition.
 
-### Phase 3: render and validate
+### Section Boundaries
 
-Run the render-view-fix loop. It catches what JSON hides: overlaps, clipping,
-and unbalanced composition.
+Plan your sections around natural visual groupings from the diagram plan. A typical large diagram might split into:
 
-### Section boundaries
+- **Section 1**: Entry point / trigger
+- **Section 2**: First decision or routing
+- **Section 3**: Main content (hero section, which may be the largest single section)
+- **Section 4-N**: Remaining phases, outputs, etc.
 
-Plan sections around the natural visual groupings in your design. A typical
-large diagram splits into:
+Each section should be independently understandable: its elements, internal arrows, and any cross-references to adjacent sections.
 
-- **Section 1**: entry point or trigger
-- **Section 2**: first decision or routing
-- **Section 3**: main content (the hero section, often the largest)
-- **Sections 4-N**: remaining phases, outputs, and so on
+### What NOT to Do
 
-Each section should stand on its own: its elements, internal arrows, and any
-cross-references to adjacent sections.
+- **Don't generate the entire diagram in one response.** You will hit the output token limit and produce truncated, broken JSON. Even if the diagram is small enough to fit, splitting into sections produces better results.
+- **Don't use a coding agent** to generate the JSON. The agent won't have sufficient context about the skill's rules, and the coordination overhead negates any benefit.
+- **Don't write a Python generator script.** The templating and coordinate math seem helpful but introduce a layer of indirection that makes debugging harder. Hand-crafted JSON with descriptive IDs is more maintainable.
 
 ---
 
-## Visual pattern library
+## Visual Pattern Library
 
-### Fan-out (one-to-many)
-
-A central element with arrows radiating to several targets. Use for sources,
-PRDs, root causes, central hubs.
-
+### Fan-Out (One-to-Many)
+Central element with arrows radiating to multiple targets. Use for: sources, PRDs, root causes, central hubs.
 ```
         ○
        ↗
@@ -519,22 +424,16 @@ PRDs, root causes, central hubs.
         ○
 ```
 
-### Convergence (many-to-one)
-
-Several inputs merging through arrows into one output. Use for aggregation,
-funnels, synthesis.
-
+### Convergence (Many-to-One)
+Multiple inputs merging through arrows to single output. Use for: aggregation, funnels, synthesis.
 ```
   ○ ↘
   ○ → □
   ○ ↗
 ```
 
-### Tree (hierarchy)
-
-Parent-child branching with connecting lines and free-floating text. Use for
-file systems, org charts, taxonomies.
-
+### Tree (Hierarchy)
+Parent-child branching with connecting lines and free-floating text (no boxes needed). Use for: file systems, org charts, taxonomies.
 ```
   label
   ├── label
@@ -542,57 +441,38 @@ file systems, org charts, taxonomies.
   │   └── label
   └── label
 ```
+Use `line` elements for the trunk and branches, free-floating text for labels.
 
-Use `line` elements for the trunk and branches, and free-floating text for
-labels.
-
-### Spiral or cycle (continuous loop)
-
-Elements in sequence with an arrow back to the start. Use for feedback loops,
-iterative processes, evolution.
-
+### Spiral/Cycle (Continuous Loop)
+Elements in sequence with arrow returning to start. Use for: feedback loops, iterative processes, evolution.
 ```
   □ → □
   ↑     ↓
   □ ← □
 ```
 
-### Cloud (abstract state)
+### Cloud (Abstract State)
+Overlapping ellipses with varied sizes. Use for: context, memory, conversations, mental states.
 
-Overlapping ellipses of varied sizes. Use for context, memory, conversations,
-mental states.
-
-### Assembly line (transformation)
-
-Input → process box → output, with a clear before and after. Use for
-transformations, processing, conversion.
-
+### Assembly Line (Transformation)
+Input → Process Box → Output with clear before/after. Use for: transformations, processing, conversion.
 ```
   ○○○ → [PROCESS] → □□□
   chaos              order
 ```
 
-### Side-by-side (comparison)
+### Side-by-Side (Comparison)
+Two parallel structures with visual contrast. Use for: before/after, options, trade-offs.
 
-Two parallel structures with visual contrast. Use for before and after,
-options, trade-offs.
+### Gap/Break (Separation)
+Visual whitespace or barrier between sections. Use for: phase changes, context resets, boundaries.
 
-### Gap or break (separation)
-
-Whitespace or a barrier between sections. Use for phase changes, context
-resets, boundaries.
-
-### Lines as structure
-
-Use lines (type `line`, without arrowheads) as primary structure in place of
-boxes:
-
-- **Timelines**: a vertical or horizontal line with small dots (10-20px
-  ellipses) at intervals and free-floating labels beside each dot
-- **Trees**: a vertical trunk line and horizontal branch lines with
-  free-floating labels
-- **Dividers**: thin dashed lines between sections
-- **Flow spines**: a central line that elements relate to
+### Lines as Structure
+Use lines (type: `line`, not arrows) as primary structural elements instead of boxes:
+- **Timelines**: Vertical or horizontal line with small dots (10-20px ellipses) at intervals, free-floating labels beside each dot
+- **Tree structures**: Vertical trunk line + horizontal branch lines, with free-floating text labels (no boxes needed)
+- **Dividers**: Thin dashed lines to separate sections
+- **Flow spines**: A central line that elements relate to, rather than connecting boxes
 
 ```
 Timeline:           Tree:
@@ -603,14 +483,13 @@ Timeline:           Tree:
   ●─── Label 3        └── item
 ```
 
-Lines with free-floating text often look cleaner than boxes with contained
-text.
+Lines + free-floating text often creates a cleaner result than boxes + contained text.
 
 ---
 
-## Shape meaning
+## Shape Meaning
 
-Choose a shape for what it represents, or use none:
+Choose shape based on what it represents, or use no shape at all:
 
 | Concept Type | Shape | Why |
 |--------------|-------|-----|
@@ -624,76 +503,73 @@ Choose a shape for what it represents, or use none:
 | Abstract state, context | overlapping `ellipse` | Fuzzy, cloud-like |
 | Hierarchy node | lines + text (no boxes) | Structure through lines |
 
-**Rule**: default to no container, and add shapes only when they carry
-meaning. Aim for under 30% of text elements inside containers.
+**Rule**: Default to no container. Add shapes only when they carry meaning. Aim for <30% of text elements to be inside containers.
 
 ---
 
-## Color as meaning
+## Color as Meaning
 
-Colors encode information. Take every color from
-[references/color-palette.md](references/color-palette.md), which defines the
-semantic shape colors, text hierarchy colors, and evidence artifact colors.
+Colors encode information, not decoration. Every color choice should come from `references/color-palette.md`. The semantic shape colors, text hierarchy colors, and evidence artifact colors are all defined there.
 
-- Each semantic purpose (start, end, decision, AI, error, and so on) has its
-  own fill and stroke pair.
-- Free-floating text uses color for hierarchy: titles, subtitles, and details
-  each at their own level.
-- Evidence artifacts (code snippets, JSON examples) use their own dark
-  background and colored text.
-- Pair a darker stroke with a lighter fill for contrast.
-- Use only palette colors. If a concept fits no semantic category, use
-  Primary/Neutral or Secondary.
+**Key principles:**
+- Each semantic purpose (start, end, decision, AI, error, etc.) has a specific fill/stroke pair
+- Free-floating text uses color for hierarchy (titles, subtitles, details, each at a different level)
+- Evidence artifacts (code snippets, JSON examples) use their own dark background + colored text scheme
+- Always pair a darker stroke with a lighter fill for contrast
+
+**Do not invent new colors.** If a concept doesn't fit an existing semantic category, use Primary/Neutral or Secondary.
 
 ---
 
-## Modern aesthetics
+## Modern Aesthetics
+
+For clean, professional diagrams:
 
 ### Roughness
+- `roughness: 0`: Clean, crisp edges. Use for modern/technical diagrams.
+- `roughness: 1`: Hand-drawn, organic feel. Use for brainstorming/informal diagrams.
 
-- `roughness: 0`: clean, crisp edges for modern or technical diagrams. The
-  default for most professional work.
-- `roughness: 1`: hand-drawn, organic feel for brainstorming or informal
-  diagrams.
+**Default to 0** for most professional use cases.
 
-### Stroke width
-
-- `strokeWidth: 1`: thin and elegant, for lines, dividers, subtle connections
-- `strokeWidth: 2`: standard, for shapes and primary arrows
-- `strokeWidth: 3`: bold, used sparingly for emphasis (the main flow line, key
-  connections)
+### Stroke Width
+- `strokeWidth: 1`: Thin, elegant. Good for lines, dividers, subtle connections.
+- `strokeWidth: 2`: Standard. Good for shapes and primary arrows.
+- `strokeWidth: 3`: Bold. Use sparingly for emphasis (main flow line, key connections).
 
 ### Opacity
+**Always use `opacity: 100` for all elements.** Use color, size, and stroke width to create hierarchy instead of transparency.
 
-Use `opacity: 100` on every element. Build hierarchy with color, size, and
-stroke width.
-
-### Small markers
-
-Use small dots (10-20px ellipses) in place of full shapes as timeline markers,
-bullet points, connection nodes, and anchors for free-floating text.
-
----
-
-## Layout principles
-
-- **Hierarchy through scale**:
-  - Hero: 300×150, the visual anchor and most important element
-  - Primary: 180×90
-  - Secondary: 120×60
-  - Small: 60×40
-- **Whitespace is importance**: the most important element has the most empty
-  space around it (200px+).
-- **Flow direction**: guide the eye left to right or top to bottom for
-  sequences, and radially for hub-and-spoke.
-- **Connections**: if A relates to B, draw an arrow between them. Position
-  alone shows no relationship.
+### Small Markers Instead of Shapes
+Instead of full shapes, use small dots (10-20px ellipses) as:
+- Timeline markers
+- Bullet points
+- Connection nodes
+- Visual anchors for free-floating text
 
 ---
 
-## Text rules
+## Layout Principles
 
-The JSON `text` property contains **only readable words**.
+### Hierarchy Through Scale
+- **Hero**: 300×150 - visual anchor, most important
+- **Primary**: 180×90
+- **Secondary**: 120×60
+- **Small**: 60×40
+
+### Whitespace = Importance
+The most important element has the most empty space around it (200px+).
+
+### Flow Direction
+Guide the eye: typically left→right or top→bottom for sequences, radial for hub-and-spoke.
+
+### Connections Required
+Position alone doesn't show relationships. If A relates to B, there must be an arrow.
+
+---
+
+## Text Rules
+
+**CRITICAL**: The JSON `text` property contains ONLY readable words.
 
 ```json
 {
@@ -707,7 +583,7 @@ Settings: `fontSize: 16`, `fontFamily: 3`, `textAlign: "center"`, `verticalAlign
 
 ---
 
-## JSON structure
+## JSON Structure
 
 ```json
 {
@@ -723,162 +599,134 @@ Settings: `fontSize: 16`, `fontFamily: 3`, `textAlign: "center"`, `verticalAlign
 }
 ```
 
-## Element templates
+## Element Templates
 
-[references/element-templates.md](references/element-templates.md) has
-copy-paste JSON templates for each element type (text, line, dot, rectangle,
-arrow). [references/json-schema.md](references/json-schema.md) lists the
-properties. Pull colors from the palette by each element's semantic purpose.
+See `references/element-templates.md` for copy-paste JSON templates for each element type (text, line, dot, rectangle, arrow). Pull colors from `references/color-palette.md` based on each element's semantic purpose.
 
 ---
 
-## Render and validate (required)
+## Render & Validate (MANDATORY)
 
-Judge the diagram from the rendered image. After generating or editing the
-JSON, render it to PNG, view the image, and fix what you see, in a loop until
-it's right. This loop is part of the work, and it runs every time.
+You cannot judge a diagram from JSON alone. After generating or editing the Excalidraw JSON, you MUST render it to PNG, view the image, and fix what you see (in a loop) until it's right. This is a core part of the workflow, not a final check.
 
-### How to render
+### How to Render
 
 ```bash
-cd .claude/skills/excalidraw-pr-diagrams/references && uv run python render_excalidraw.py <path-to-file.excalidraw>
+cd <skill-directory>/references && uv run python render_excalidraw.py <path-to-file.excalidraw>
 ```
 
-Codex: use the matching `.codex/skills/excalidraw-pr-diagrams/references`
-directory.
+Replace `<skill-directory>` with the directory containing this loaded SKILL.md, as provided by Agent Farm.
 
-The script writes a PNG next to the `.excalidraw` file. Inspect the PNG with
-the image viewer you have: the Read tool, `view_image`, or a browser
-screenshot.
+This outputs a PNG next to the `.excalidraw` file. Then use the available image viewer on the PNG to actually inspect it, such as the Read tool, `view_image`, or a browser screenshot.
 
-### The loop
+### The Loop
 
-1. **Render and view.** Run the render script, then view the PNG.
-2. **Audit against your design.** Before hunting bugs, compare the result with
-   what you planned in steps 1-4:
-   - Does the visual structure match the conceptual structure?
-   - Does each section use the intended pattern (fan-out, convergence,
-     timeline, and so on)?
-   - Does the eye move through the diagram in the order you designed?
-   - Is the hierarchy right, with hero elements dominant and supporting
-     elements smaller?
-   - Technical diagrams: are the evidence artifacts readable and well placed?
-   - PR diagrams: does the image tell a non-redundant before and after story
-     through structure?
-   - Would the image still carry the main change with the prose paragraphs
-     removed?
-3. **Check for visual defects:**
-   - text clipped by or overflowing its container
-   - text or shapes overlapping other elements
-   - arrows crossing through elements
-   - arrows landing on the wrong element or pointing into empty space
-   - arrowheads, dashed loops, or feedback paths sitting on top of boxes or
-     labels
-   - labels floating ambiguously, unclear what they describe
-   - uneven spacing between elements that should be evenly spaced
-   - sparse sections next to cramped ones
-   - text too small to read at the rendered size
-   - a lopsided or unbalanced composition
-   - any part of the title, subtitle, truth statement, or a major region
-     clipped by the screenshot bounds
-   - a horizontally sprawling image that is hard to scan in a GitHub PR
-   - PR-specific: the published image URL 404s, the PR body image fails to
-     render, or Markdown collapses into one paragraph
-4. **Fix.** Edit the JSON to address everything you found. Common fixes:
-   - widen containers when text is clipped
-   - adjust `x` and `y` coordinates for spacing and alignment
-   - add waypoints to arrow `points` arrays to route around elements
-   - move labels closer to what they describe
-   - resize elements to rebalance weight across sections
-   - shrink titles and labels before enlarging the diagram
-   - replace long labels with a diagram construct: boundary, queue, gate,
-     loop, timeline, or swimlane
-5. **Re-render and re-view.** Run the script again and view the new PNG.
-6. **Repeat** until the diagram passes both the design audit (step 2) and the
-   defect check (step 3), typically 2-4 iterations. If the composition could
-   still be better after a clean pass, improve it.
+After generating the initial JSON, run this cycle:
 
-### When to stop
+**1. Render & View**: Run the render script, then Read the PNG.
+
+**2. Audit against your original vision**: Before looking for bugs, compare the rendered result to what you designed in Steps 1-4. Ask:
+- Does the visual structure match the conceptual structure you planned?
+- Does each section use the pattern you intended (fan-out, convergence, timeline, etc.)?
+- Does the eye flow through the diagram in the order you designed?
+- Is the visual hierarchy correct (hero elements dominant, supporting elements smaller)?
+- For technical diagrams: are the evidence artifacts (code snippets, data examples) readable and properly placed?
+- For PR diagrams: does the rendered image tell a non-redundant before/after story through structure, not just labels?
+- Would the image still communicate the main change if the prose paragraphs were removed?
+
+**3. Check for visual defects:**
+- Text clipped by or overflowing its container
+- Text or shapes overlapping other elements
+- Arrows crossing through elements instead of routing around them
+- Arrows landing on the wrong element or pointing into empty space
+- Arrowheads, dashed loops, or feedback paths visually sitting on top of boxes or labels
+- Labels floating ambiguously (not clearly anchored to what they describe)
+- Uneven spacing between elements that should be evenly spaced
+- Sections with too much whitespace next to sections that are too cramped
+- Text too small to read at the rendered size
+- Overall composition feels lopsided or unbalanced
+- Any part of the title, subtitle, truth statement, or major region clipped by the screenshot bounds
+- A horizontally sprawling image whose important content is hard to scan in a GitHub PR
+- PR-specific defects: the published image URL 404s, the PR body image does not render, or Markdown formatting collapses into a single paragraph.
+
+**4. Fix**: Edit the JSON to address everything you found. Common fixes:
+- Widen containers when text is clipped
+- Adjust `x`/`y` coordinates to fix spacing and alignment
+- Add intermediate waypoints to arrow `points` arrays to route around elements
+- Reposition labels closer to the element they describe
+- Resize elements to rebalance visual weight across sections
+- Shrink titles and labels before enlarging the diagram further.
+- Replace long labels with a diagrammatic construct: boundary, queue, gate, loop, timeline, or swimlane.
+
+**5. Re-render & re-view**: Run the render script again and Read the new PNG.
+
+**6. Repeat**: Keep cycling until the diagram passes both the vision check (Step 2) and the defect check (Step 3). Typically takes 2-4 iterations. Don't stop after one pass just because there are no critical bugs. If the composition could be better, improve it.
+
+### When to Stop
 
 The loop is done when:
+- The rendered diagram matches the conceptual design from your planning steps
+- No text is clipped, overlapping, or unreadable
+- Arrows route cleanly and connect to the right elements
+- Spacing is consistent and the composition is balanced
+- You'd be comfortable showing it to someone without caveats
+- For PR diagrams, the before and after are visually different in a way that reflects the actual code change.
+- The diagram would not be equally useful as a plain bullet list.
 
-- the render matches the design from your planning steps
-- all text is unclipped, separate, and readable
-- arrows route cleanly and connect to the right elements
-- spacing is consistent and the composition balanced
-- you'd show it to someone without caveats
-- for PR diagrams, before and after differ visually in a way that reflects the
-  actual code change
-- the diagram does more than a plain bullet list could
-
-### First-time setup
-
-If the render script isn't set up yet:
-
+### First-Time Setup
+If the render script hasn't been set up yet:
 ```bash
-cd .claude/skills/excalidraw-pr-diagrams/references
+cd <skill-directory>/references
 uv sync
 uv run playwright install chromium
 ```
 
-Codex: use `.codex/skills/excalidraw-pr-diagrams/references`.
+Use the same loaded skill directory for both native harnesses.
 
 ---
 
-## Quality checklist
+## Quality Checklist
 
-### Depth and evidence (check first for technical diagrams)
-
-1. **Research done**: you looked up actual specs, formats, and event names.
-2. **Evidence artifacts**: code snippets, JSON examples, or real data appear.
-3. **Multi-zoom**: summary flow, section boundaries, and detail.
-4. **Concrete**: real content shown, beyond labeled boxes.
-5. **Educational**: someone could learn something concrete from it.
+### Depth & Evidence (Check First for Technical Diagrams)
+1. **Research done**: Did you look up actual specs, formats, event names?
+2. **Evidence artifacts**: Are there code snippets, JSON examples, or real data?
+3. **Multi-zoom**: Does it have summary flow + section boundaries + detail?
+4. **Concrete over abstract**: Real content shown, not just labeled boxes?
+5. **Educational value**: Could someone learn something concrete from this?
 
 ### Conceptual
+6. **Isomorphism**: Does each visual structure mirror its concept's behavior?
+7. **Argument**: Does the diagram SHOW something text alone couldn't?
+8. **Variety**: Does each major concept use a different visual pattern?
+9. **No uniform containers**: Avoided card grids and equal boxes?
+10. **Non-redundant**: The image is not just the PR description repeated in boxes.
+11. **Before/after story**: The old failure path and new success path are visibly different.
+12. **Metaphor fit**: The chosen metaphor matches the change type (boundary, lifecycle, race, permission, ownership, etc.).
 
-6. **Isomorphism**: each visual structure mirrors its concept's behavior.
-7. **Argument**: the diagram shows something text alone couldn't.
-8. **Variety**: each major concept uses a different visual pattern.
-9. **Varied containers**: no card grids or rows of equal boxes.
-10. **Non-redundant**: the image adds to the PR description.
-11. **Before and after story**: the old failure path and new success path look
-    different.
-12. **Metaphor fit**: the metaphor matches the change type (boundary,
-    lifecycle, race, permission, ownership, and so on).
-
-### Container discipline
-
-13. **Minimal containers**: every boxed element needs its box.
-14. **Lines as structure**: tree and timeline patterns use lines and text.
-15. **Typography hierarchy**: font size and color create the hierarchy.
+### Container Discipline
+13. **Minimal containers**: Could any boxed element work as free-floating text instead?
+14. **Lines as structure**: Are tree/timeline patterns using lines + text rather than boxes?
+15. **Typography hierarchy**: Are font size and color creating visual hierarchy (reducing need for boxes)?
 
 ### Structural
-
-16. **Connections**: every relationship has an arrow or line.
-17. **Flow**: a clear visual path for the eye.
-18. **Hierarchy**: important elements are larger or more isolated.
+16. **Connections**: Every relationship has an arrow or line
+17. **Flow**: Clear visual path for the eye to follow
+18. **Hierarchy**: Important elements are larger/more isolated
 
 ### Technical
+19. **Text clean**: `text` contains only readable words
+20. **Font**: `fontFamily: 3`
+21. **Roughness**: `roughness: 0` for clean/modern (unless hand-drawn style requested)
+22. **Opacity**: `opacity: 100` for all elements (no transparency)
+23. **Container ratio**: <30% of text elements should be inside containers
 
-19. **Text clean**: `text` contains only readable words.
-20. **Font**: `fontFamily: 3`.
-21. **Roughness**: `roughness: 0` for clean and modern, unless a hand-drawn
-    style was requested.
-22. **Opacity**: `opacity: 100` on every element.
-23. **Container ratio**: under 30% of text elements inside containers.
-
-### Visual validation (render required)
-
-24. **Rendered to PNG**: the diagram was rendered and inspected.
-25. **No text overflow**: all text fits its container.
-26. **No clipping**: the screenshot bounds include every title, label, arrow,
-    and shape.
-27. **No unintended overlaps** between shapes and text.
-28. **Even spacing**: similar elements are spaced consistently.
-29. **Arrows land correctly**: arrows reach their targets without crossing
-    other elements.
-30. **Readable at export size**: text is legible in the PNG.
-31. **Balanced composition**: no large voids or overcrowded regions.
-32. **GitHub readable**: the image makes sense embedded in a PR, without
-    opening it full size.
+### Visual Validation (Render Required)
+24. **Rendered to PNG**: Diagram has been rendered and visually inspected
+25. **No text overflow**: All text fits within its container
+26. **No clipping**: Screenshot bounds include every title, label, arrow, and shape
+27. **No overlapping elements**: Shapes and text don't overlap unintentionally
+28. **Even spacing**: Similar elements have consistent spacing
+29. **Arrows land correctly**: Arrows connect to intended elements without crossing others
+30. **Readable at export size**: Text is legible in the rendered PNG
+31. **Balanced composition**: No large empty voids or overcrowded regions
+32. **GitHub readable**: The image is understandable when embedded in a PR without opening it full-size

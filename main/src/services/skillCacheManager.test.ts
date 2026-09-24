@@ -10,7 +10,7 @@ function normalizePathSeparators(value: string): string {
 }
 
 const STALE_CACHED_ORCHESTRATOR = `---
-name: runpane-orchestrator
+name: runpane
 ---
 
 # RunPane Orchestrator
@@ -98,24 +98,22 @@ describe('SkillCacheManager Pane Chat guide', () => {
     }
   });
 
-  it('points the Pane Chat guide and skill only at files that exist before any sync', async () => {
+  it('points the Pane Chat entry skill only at files that exist before any sync', async () => {
     const manager = new SkillCacheManager();
 
     await manager.ensurePaneChatGuide();
 
-    for (const generated of [manager.paneChatGuidePath, manager.paneChatOrchestratorSkillPath]) {
+    for (const generated of [manager.paneChatOrchestratorSkillPath]) {
       const text = await fs.readFile(generated, 'utf8');
       const referencedFiles = [...text.matchAll(/`([^`\s]+\.md)`/g)]
         .map(match => match[1])
         .filter(candidate => path.isAbsolute(candidate));
-      expect(referencedFiles.length).toBeGreaterThan(3);
+      expect(referencedFiles.length).toBeGreaterThanOrEqual(3);
       for (const file of referencedFiles) {
         await expect(fs.access(file)).resolves.toBeUndefined();
       }
     }
-    const guide = await fs.readFile(manager.paneChatGuidePath, 'utf8');
-    expect(guide).toContain(manager.paneChatOrchestratorSkillPath);
-    expect(guide).toContain('## Generated RunPane Context');
+    expect(manager.paneChatGuidePath).toBe(manager.paneChatOrchestratorSkillPath);
   });
 
   it('writes runtime context with same-runtime CLI recovery guidance', async () => {
@@ -338,7 +336,6 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('runpane doctor --report');
     expect(canonicalSkill).toContain('## Session-owned workflow (authoritative)');
     expect(canonicalSkill).toContain('create-ticket');
-    expect(canonicalSkill).toContain('astra-ticket');
     expect(canonicalSkill).toContain('runpane sessions overview --session <session-id-or-name> --json');
     expect(canonicalSkill).toContain('RunPane Sessions commands are `list`, `create`, `get`, `update`');
     expect(canonicalSkill).toContain('--from-json <path|->');
@@ -347,16 +344,15 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('--settle 180000 --blocked-settle 30000 --min-interval 600000');
     expect(canonicalSkill).toContain('A discussion-only Session does not');
     expect(canonicalSkill).toContain('After associate or detach');
-    expect(canonicalSkill).toContain('selected agent, profile, and tool configuration');
+    expect(canonicalSkill).toContain("Session's own agent, profile, and tool configuration");
     expect(canonicalSkill).not.toContain('`/do`');
     expect(canonicalSkill).not.toContain('## Delivery Lanes');
     expect(canonicalSkill).not.toContain('## Lifecycle State Machine');
     expect(canonicalSkill).not.toContain('Light (default)');
     expect(canonicalSkill).toContain('cold-read');
-    expect(canonicalSkill).toContain('pane-work-recap');
-    expect(canonicalSkill).toContain('pane-work-prioritizer');
+    expect(canonicalSkill).toContain('pane-work');
     expect(canonicalSkill).toContain('## Hard stops');
-    expect(canonicalSkill).toContain('runpane-orchestrator');
+    expect(canonicalSkill).toContain('orchestrate-sessions');
     expect(canonicalSkill).not.toContain('fresh-eyes');
   });
 
@@ -433,8 +429,6 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
     // The shared contract is present in every generated form and the startup
     // question cannot be restored by a stale generated file.
-    expect(guide).toContain('## Initialize quietly');
-    expect(guide).toContain('If the Session has associated Panes, arm liveness');
     expect(canonicalSkill.replace(/\s+/g, ' ')).toContain('When the Session has associated Panes, arm liveness');
     expect(canonicalSkill).toContain('## Liveness Contract');
     for (const variant of [guide, ...variants]) {
@@ -526,7 +520,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
   it('replaces the project skill folders with the bundled skills on every start', async () => {
     const manager = new SkillCacheManager();
-    const staleOrchestrator = path.join(manager.claudeProjectSkillsRoot, 'runpane-orchestrator', 'SKILL.md');
+    const staleOrchestrator = path.join(manager.claudeProjectSkillsRoot, 'runpane', 'SKILL.md');
     const leftoverSkill = path.join(manager.codexProjectSkillsRoot, 'old-synced-skill', 'SKILL.md');
     for (const [file, contents] of [[staleOrchestrator, STALE_CACHED_ORCHESTRATOR], [leftoverSkill, '# old\n']]) {
       await fs.mkdir(path.dirname(file), { recursive: true });
@@ -537,22 +531,47 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
     const bundleRoot = path.join(__dirname, 'paneChatBundle', 'skills');
     const bundledSkills = (await fs.readdir(bundleRoot)).sort();
-    const bundledOrchestrator = await fs.readFile(path.join(bundleRoot, 'runpane-orchestrator', 'SKILL.md'), 'utf8');
+    const bundledOrchestrator = await fs.readFile(path.join(bundleRoot, 'runpane', 'SKILL.md'), 'utf8');
     for (const root of [manager.paneChatSkillsRoot, manager.codexProjectSkillsRoot, manager.claudeProjectSkillsRoot]) {
       const installed = (await fs.readdir(root)).filter(name => name !== 'pane-orchestrator').sort();
       expect(installed).toEqual(bundledSkills);
-      await expect(fs.readFile(path.join(root, 'runpane-orchestrator', 'SKILL.md'), 'utf8')).resolves.toBe(bundledOrchestrator);
+      await expect(fs.readFile(path.join(root, 'runpane', 'SKILL.md'), 'utf8')).resolves.toBe(bundledOrchestrator);
     }
     await expect(fs.access(leftoverSkill)).rejects.toThrow();
     await expect(fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8')).resolves.toContain('name: pane-orchestrator');
-    await expect(fs.readFile(manager.paneChatWorkQuestionsPath, 'utf8')).resolves.toContain('pane-work-recap');
+  });
+
+  it('installs the helper subagents for Claude and Codex, each pointing at an installed skill', async () => {
+    const manager = new SkillCacheManager();
+
+    await manager.start();
+
+    const expected = ['cold-reader', 'explorer', 'qa-and-verify', 'reviewer'];
+    const claudeAgents = (await fs.readdir(manager.claudeProjectAgentsRoot)).sort();
+    expect(claudeAgents).toEqual(expected.map(name => `${name}.md`));
+    for (const name of expected) {
+      const claudeAgent = await fs.readFile(path.join(manager.claudeProjectAgentsRoot, `${name}.md`), 'utf8');
+      expect(claudeAgent).toMatch(new RegExp(`^---\\nname: ${name}\\ndescription: .+`));
+      const skillPath = /read and follow `([^`]+)`/.exec(claudeAgent)?.[1];
+      expect(skillPath).toBeDefined();
+      await expect(fs.access(skillPath!)).resolves.toBeUndefined();
+
+      const codexConfig = await fs.readFile(path.join(manager.codexProjectAgentsRoot, `${name}.toml`), 'utf8');
+      expect(codexConfig).toContain(`name = "${name}"`);
+      expect(codexConfig).toContain('developer_instructions = ');
+      expect(codexConfig).toContain(skillPath!);
+    }
+    if (process.platform !== 'win32') {
+      expect(manager.codexLaunchArgs()).toContain(`agents.explorer.config_file="${path.join(manager.codexProjectAgentsRoot, 'explorer.toml')}"`);
+    }
   });
 
   it('removes the folders older versions synced skills into', async () => {
     const manager = new SkillCacheManager();
     const oldCache = path.join(manager.skillsRoot, 'dcouple', 'parsa', '.claude', 'skills', 'review', 'SKILL.md');
     const oldCheckout = path.join(manager.skillsRoot, '.sources', 'dcouple-skills', 'README.md');
-    for (const file of [oldCache, oldCheckout]) {
+    const oldGuide = path.join(manager.paneChatRoot, 'runpane-orchestrator.md');
+    for (const file of [oldCache, oldCheckout, oldGuide]) {
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, '# old\n', 'utf8');
     }
@@ -561,6 +580,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
     await expect(fs.access(path.join(manager.skillsRoot, 'dcouple'))).rejects.toThrow();
     await expect(fs.access(path.join(manager.skillsRoot, '.sources'))).rejects.toThrow();
+    await expect(fs.access(oldGuide)).rejects.toThrow();
   });
 
 });

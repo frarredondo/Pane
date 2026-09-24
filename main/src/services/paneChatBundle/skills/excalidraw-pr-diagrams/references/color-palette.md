@@ -1,14 +1,12 @@
-# Color palette and brand style
+# Color Palette & Brand Style
 
-**This file is the single source of truth for all colors and brand-specific
-styles.** To use your own brand, edit this file; the rest of the skill stays
-the same.
+**This is the single source of truth for all colors and brand-specific styles.** To customize diagrams for your own brand, edit this file. Everything else in the skill is universal.
 
 ---
 
-## Shape colors (semantic)
+## Shape Colors (Semantic)
 
-Colors encode meaning. Each semantic purpose has a fill and stroke pair.
+Colors encode meaning, not decoration. Each semantic purpose has a fill/stroke pair.
 
 | Semantic Purpose | Fill | Stroke |
 |------------------|------|--------|
@@ -23,13 +21,13 @@ Colors encode meaning. Each semantic purpose has a fill and stroke pair.
 | Inactive/Disabled | `#dbeafe` | `#1e40af` (use dashed stroke) |
 | Error | `#fecaca` | `#b91c1c` |
 
-**Rule**: pair a darker stroke with a lighter fill for contrast.
+**Rule**: Always pair a darker stroke with a lighter fill for contrast.
 
 ---
 
-## Text colors (hierarchy)
+## Text Colors (Hierarchy)
 
-Color free-floating text to create hierarchy without containers.
+Use color on free-floating text to create visual hierarchy without containers.
 
 | Level | Color | Use For |
 |-------|-------|---------|
@@ -41,10 +39,9 @@ Color free-floating text to create hierarchy without containers.
 
 ---
 
-## Evidence artifact colors
+## Evidence Artifact Colors
 
-For code snippets, data examples, and other concrete evidence in technical
-diagrams.
+Used for code snippets, data examples, and other concrete evidence inside technical diagrams.
 
 | Artifact | Background | Text Color |
 |----------|-----------|------------|
@@ -53,7 +50,7 @@ diagrams.
 
 ---
 
-## Default stroke and line colors
+## Default Stroke & Line Colors
 
 | Element | Color |
 |---------|-------|

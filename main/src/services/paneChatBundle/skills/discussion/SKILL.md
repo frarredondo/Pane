@@ -20,8 +20,8 @@ create, or delete project files, and never propose diffs or patches to apply.
 
 - Clarify the topic and the outcome the user wants.
 - When the topic depends on current behavior, read the relevant code paths.
-  Claude can spawn `Explore` or `codebase-explorer` agents for code and
-  `researcher` agents for external libraries or approaches, including
+  Use the `explorer` subagent or `codebase-explorer` for code, and
+  `research-web` for external libraries or approaches, including
   mid-conversation when new questions come up.
 - Research only what the conversation needs.
 
@@ -56,13 +56,15 @@ Recap in the conversation:
 
 Mark which points are the user's intent and which are your assumptions. Then
 recommend the next step, usually `create-ticket` when the work is ready to
-delegate, or `create-plan`, `simple-plan`, `investigate`, or implementation.
+delegate, `options` when more than one approach is live, `brief` for a
+write-up, `investigate` for a bug, or implementation.
 
 ```
 Suggested next steps:
-- `/create-plan [description]` - Create an implementation plan
+- `/create-ticket [description]` - Capture the work for delegation
+- `/options [question]` - Lay out the approaches and trade-offs
 - `/discussion [follow-up]` - Continue exploring a specific aspect
-- `/researcher [topic]` - Deep-dive into external documentation
+- `/research-web [topic]` - Look up external documentation
 ```
 
 Topic to discuss: $ARGUMENTS

@@ -1,20 +1,18 @@
 ---
 name: cold-read
-description: Have a fresh agent walk through something with zero context (a PR body, a landing page, a document, a process, instructions, or code) and report what's broken, confusing, or contradictory. Useful before anything ships, especially a PR you think is finished or any user-facing artifact. Always dispatch it as a fresh subagent with no conversation history; the missing context is the point.
+description: Give a fresh agent something to walk through with zero context - a PR body, a landing page, a document, a process, instructions, code. It reports what's broken, confusing, or contradictory. A fresh perspective on something before it ships - especially useful on a PR you think is finished, or any user-facing artifact. Always dispatch as a fresh sub-agent with no conversation history - the zero context is the point.
 ---
 
 # Cold Read
 
-You've never seen this before. It's 8am and you're groggy. Walk through it
-from start to finish.
+You know nothing about this. You're seeing it for the first time at
+8am with groggy eyes. Walk through it start to finish.
 
-Report:
+Report what's broken, confusing, or contradictory. Report what could be
+described more simply. Report what information you don't have that you
+need - do you know the what, why, how, when, where? Be thorough about
+what you don't know and what you'd need to know.
 
-- what's broken, confusing, or contradictory
-- what could be said more simply
-- what you'd need to know and don't: the what, why, how, when, and where
-
-Be thorough about the gaps in what you know.
-
-Leave the fixes to the author; you don't have the context to choose them.
-Describe what you experienced as someone going through it for the first time.
+Don't fix anything. You don't have the context to know what the fixes
+should be. Just explain what you experienced as someone walking through
+this for the first time.

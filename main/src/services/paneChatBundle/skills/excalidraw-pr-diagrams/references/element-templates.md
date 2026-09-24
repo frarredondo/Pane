@@ -1,10 +1,8 @@
-# Element templates
+# Element Templates
 
-Copy-paste JSON templates for each Excalidraw element type. The `strokeColor`
-and `backgroundColor` values are placeholders. Take the actual colors from
-[color-palette.md](color-palette.md) by the element's semantic purpose.
+Copy-paste JSON templates for each Excalidraw element type. The `strokeColor` and `backgroundColor` values are placeholders. Always pull actual colors from `color-palette.md` based on the element's semantic purpose.
 
-## Free-floating text (no container)
+## Free-Floating Text (no container)
 ```json
 {
   "type": "text",
@@ -38,7 +36,7 @@ and `backgroundColor` values are placeholders. Take the actual colors from
 }
 ```
 
-## Line (structural)
+## Line (structural, not arrow)
 ```json
 {
   "type": "line",
@@ -65,7 +63,7 @@ and `backgroundColor` values are placeholders. Take the actual colors from
 }
 ```
 
-## Small marker dot
+## Small Marker Dot
 ```json
 {
   "type": "ellipse",
@@ -117,7 +115,7 @@ and `backgroundColor` values are placeholders. Take the actual colors from
 }
 ```
 
-## Text (centered in a shape)
+## Text (centered in shape)
 ```json
 {
   "type": "text",
@@ -130,7 +128,7 @@ and `backgroundColor` values are placeholders. Take the actual colors from
   "fontFamily": 3,
   "textAlign": "center",
   "verticalAlign": "middle",
-  "strokeColor": "<text color — match parent shape's stroke or use 'on light/dark fills' from palette>",
+  "strokeColor": "<text color: match parent shape's stroke or use 'on light/dark fills' from palette>",
   "backgroundColor": "transparent",
   "fillStyle": "solid",
   "strokeWidth": 1,
@@ -157,7 +155,7 @@ and `backgroundColor` values are placeholders. Take the actual colors from
   "type": "arrow",
   "id": "arrow1",
   "x": 282, "y": 145, "width": 118, "height": 0,
-  "strokeColor": "<arrow color — typically matches source element's stroke from palette>",
+  "strokeColor": "<arrow color: typically matches source element's stroke from palette>",
   "backgroundColor": "transparent",
   "fillStyle": "solid",
   "strokeWidth": 2,
@@ -181,4 +179,4 @@ and `backgroundColor` values are placeholders. Take the actual colors from
 }
 ```
 
-For curves, use 3 or more points in the `points` array.
+For curves: use 3+ points in `points` array.

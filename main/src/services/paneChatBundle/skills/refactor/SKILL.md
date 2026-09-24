@@ -6,27 +6,30 @@ argument-hint: "[--size=small|large] [--plan-only]"
 
 # Refactor
 
-The manual post-PR quality pass. It sizes the change, runs the right analyses
-independently, merges them once, stops for the user, then applies. Applying
-changes the head, so run it before QA when QA evidence must come from the
-current head.
+One command for the post-PR quality pass. It sizes the change, runs the right
+analyses independently, merges once, stops for the user, then applies. It
+is a manual post-PR quality pass. It changes the head, so run it before
+QA when QA evidence must be current-head evidence.
 
-## Blind analyses, one merge
+## Why the analyses run blind
 
-Each analysis runs in a fresh subagent that never sees the other's output,
-and the merge happens once, here, after both finish. Independent runs of
-`refactor-simple` and `refactor-deep` overlap on about half their findings;
-the rest is complementary, and the severe correctness findings often come
-from only one of them. Run each analysis once per diff.
+Two analyses that see each other's findings converge into one opinion. Run
+independently, `refactor-simple` and `refactor-deep` overlap on about half
+their findings, the other half is complementary, and the severe correctness
+findings tend to come from one of them alone. So each analysis runs in a
+fresh subagent with no access to the other's output, and the merge happens
+exactly once, here, after both are done. Repeated runs on the same diff
+converge on the same findings, and averaging them has demoted real Criticals;
+one run per analysis is the rule.
 
 ## Process
 
 ### 1. Size the change
 
-First resolve the relevant remote from the PR or current branch, and that
-remote's default branch. If either is ambiguous or unavailable, report the
-comparison as blocked; an unresolved base must not pass as an empty diff.
-Record the resolved remote, base ref, and merge-base for the subagents.
+Resolve the PR/current branch's relevant remote and that remote's default
+branch before running these commands. If either is ambiguous or unavailable,
+report the blocked comparison; do not guess a remote or silently review an
+empty diff. Record the resolved remote, base ref, and merge-base for helpers.
 
 ```bash
 # Resolve the relevant remote from the PR/current branch configuration first.
@@ -38,137 +41,134 @@ git rev-parse --verify "$BASE^{commit}"
 git diff "$(git merge-base "$BASE" HEAD)" --numstat
 ```
 
-This diffs the merge-base with the remote's real default branch against the
-working tree, so uncommitted work counts.
+Also enumerate non-ignored untracked files with
+`git ls-files --others --exclude-standard -z`. Treat these as added files:
+include their full contents and handwritten line counts in sizing and analysis,
+applying the same generated/vendor/lockfile exclusions. Pass this file inventory
+to every analyzer; plain `git diff` omits it. Do not stage files to inspect them.
 
-Plain `git diff` omits untracked files, so also list them with
-`git ls-files --others --exclude-standard -z`. Treat them as added files:
-count and analyze their full contents, with the same exclusions below. Pass
-this inventory to every analysis. Leave the index alone while inspecting.
 
-Leave lockfiles, generated files, and vendored directories out of the count.
-Under about 10 hand-written files and 500 lines is **small**; anything above
-is **large**. `--size` overrides. State the size and file count before
-fanning out.
+Merge-base to working tree, so uncommitted work counts; the remote's real
+default branch, not an assumed `main`.
 
-### 2. Fan out independently
+Exclude lockfiles, generated files, and vendored directories from the count.
+Under ~10 hand-written files and ~500 lines is **small**; above is **large**.
+`--size` overrides. State the size and the file count before fanning out.
 
-`refactor-simple`, `refactor-deep`, and `refactor-apply` are skills that one
-kind of subagent runs; they need no separate agent types. You do all the
-dispatching: a subagent spawns no helpers and returns to you at each gate.
-Reuse one apply subagent for authorized edits and fixes, and give every
-independent review a fresh one.
+### 2. Fan out, independently
 
-Run each analysis as its own fresh-context subagent, all launched together so
-they run concurrently when capacity allows (Claude: one Agent tool call per
-analysis, in the same message). The prompt names the skill, the worktree, the
-resolved base and untracked inventory from step 1, and your model, effort, and
-no-archive requirements. It carries no other reviewer's findings. Each
-subagent invokes its skill and returns the absolute path of its plan.
+Use the single configured `refactor` agent role for every refactoring assignment.
+`refactor-simple`, `refactor-deep`, and `refactor-apply` are skill modes, not
+separate agent types. The parent orchestrates dispatch; a leaf instance cannot
+spawn helpers and returns to the parent at those gates. Reuse one apply instance
+for authorized edits and fixes, while independent reviews get fresh instances.
+
+Each analysis runs as a separate fresh-context subagent (the available native subagent API and configured roles, one
+per analysis, launched together when capacity permits). Each
+subagent invokes its skill and returns the absolute path of the plan it wrote.
+Pass the skill, worktree, and parent model/effort and no-archive requirements, without another reviewer’s findings.
 
 - **small**: `refactor-simple` only.
 - **large**: `refactor-simple` and `refactor-deep`, concurrently.
 
-For a comprehensive review, or a large change that needs specialist coverage,
-use [the specialist lenses](references/specialist-review.md):
+For a comprehensive review or a large change needing specialist coverage, use
+[the specialist lenses](references/specialist-review.md). Selected scoped deep
+reviews replace the broad deep pass rather than duplicate it; retain the simple
+pass. Run applicable lenses in waves within capacity, not an unconditional
+all-at-once fanout. Pass an explicit read-only scope override and distinct output
+path to each instance. No reviewer publishes or edits code.
 
-- The selected scoped deep reviews replace the broad `refactor-deep` pass.
-  Keep the `refactor-simple` pass.
-- Run the applicable lenses in waves within capacity.
-- Give each subagent an explicit read-only scope override and its own output
-  path. Reviewers neither publish nor edit code.
-
-Each writes its own file under `./tmp/` and reads only its own.
+Each writes its own file under `./tmp/`, and reads only its own.
 
 ### 3. Merge once
 
-Read every plan and write one merged report to
+Read every plan and produce one merged report at
 `./tmp/refactor-merged-[timestamp].md`. Rules, in priority order:
 
-1. **Cluster** findings about the same file or area and the same underlying
-   issue, however they are worded.
-2. **Keep the maximum severity.** Critical in one plan and Warning in another
-   is Critical. A reproduced defect keeps its reproduction.
-3. **Keep sole-source findings.** Corroboration isn't required; disagreement
-   between independent runs is signal.
-4. **Tag every item** with its source to show who found it: `[S]`, `[D]`, a
-   named specialist lens, or a combination such as `[S+D]`.
-5. **Carry each plan's quality score as reported**, plus the merged Critical,
-   Warning, and Info counts. The merged report has no combined score.
-6. Items marked pre-existing, not against this PR, stay in Info unchanged.
+1. **Cluster** findings that point at the same file/area and the same
+   underlying issue, even if worded differently.
+2. **Keep the maximum severity.** A finding that is Critical in one plan and
+   Warning in another is Critical. A reproduced defect keeps its reproduction.
+3. **Sole-source findings are kept.** Corroboration is not required; the
+   independent runs are expected to disagree, and the disagreement is signal.
+4. **Tag every item** with its source (`[S]`, `[D]`, named specialist lenses, or their combination), so the
+   reader can see who found what.
+5. **Carry each plan's quality score as reported**, plus the merged
+   Critical/Warning/Info counts. The merged report has no combined score.
+6. Pre-existing-not-against-this-PR items stay in Info, unchanged.
 
-Keep each item's `file:line`, fix, and auto-fixable flag from its source
-plan. The merged report has the same shape as the individual plans, so
-`refactor-apply` reads it as is.
+Keep every item's `file:line`, fix, and auto-fixable flag from its source
+plan. The merged report is the same shape as the individual plans, so
+`refactor-apply` reads it unchanged.
 
 ### 4. Stop for the user
 
-Run `cold-read` on the merged report first, since a person reads it to decide
-what to change in their code. The cold-read may reorder, retitle, and
-clarify; severities, findings, and `file:line` stay as written.
+Run `cold-read` on the merged report first: a person reads it to decide what
+to change in their code. The cold-read may reorder, retitle, and clarify;
+severities, findings, and `file:line` stay as written. Then show it, Criticals
+in full, Warnings and Info summarised, with the auto-fixable and manual
+counts, and stop. This is the gate: nothing
+is applied until the user says so. `--plan-only` ends here.
 
-Then show it: Criticals in full, Warnings and Info summarised, with the
-auto-fixable and manual counts. Stop here. Nothing is applied until the user
-says so. `--plan-only` ends here.
-
-Show auto-fixable items too, even though they are the safe class. Each manual
-item waits for the user's judgment.
+Auto-fixable items are the safe class; still show them. Manual items always
+wait for the user's judgment on each.
 
 ### 5. Apply, then prove it
 
-On the user's go, invoke `refactor-apply` on the merged report: auto-fixable
-items first, then manual ones with the user. `refactor-apply` leaves its
-edits uncommitted. Commit them here as one scoped commit named for the plan
-and the round, so the adversary has an exact diff. Commit every later repair
+On the user's go, invoke `refactor-apply` on the merged report, auto-fixable
+first, then manual with the user. `refactor-apply` leaves its edits
+uncommitted; this step commits them as one scoped commit named for the plan
+and the round, so the adversary has an exact diff. Every repair is committed
 the same way before its review.
 
-Then run the adversarial loop as one continuous chain and report when it
-ends. The cap is three review passes.
+Then run the adversarial loop as one continuous chain, and report when it
+ends. Three review passes is the cap.
 
-1. **Pass 1 reviews the apply commit.** A fresh subagent reads only that
-   commit's diff (`git diff <sha>~1..<sha>`), briefed to prove it broke
-   something:
-   - every claim in the apply report is a claim to falsify
-   - a behaviour-preserving change must have preserved behaviour
-   - a consolidation must keep every edge case a caller relied on
-   - a test that claims to fix a defect must fail on the parent and pass on
-     the head; characterization tests for behaviour-preserving changes may
-     pass on both
-
+1. **Pass 1 reviews the apply commit.** A fresh subagent reads that commit's
+   diff alone (`git diff <sha>~1..<sha>`), briefed to prove it broke
+   something: every claim in the apply report is a claim to falsify; a
+   behaviour-preserving change must have preserved behaviour; a consolidation
+   must keep every edge case a caller relied on. A test that claims to fix a
+   defect runs on the parent (must fail) and the head (must pass);
+   characterization tests for behaviour-preserving changes may pass on both.
    It returns CLEAN, or REGRESSION with `file:line` and a repro.
-2. **On REGRESSION, the applier repairs and two reviewers look.** The repro
-   goes back to the apply session, which knows the code. The repair is
-   committed with the repro as a test proven to fail on its parent. Then, in
-   the same message:
-   - The reviewer who found the finding gets the repair as a follow-up in its
-     own session, re-runs its repro, and says whether the finding is closed.
-   - A fresh subagent reads only the repair commit's diff, briefed to break
-     the repair itself. A repair can break an adjacent case the first
-     reviewer was primed to overlook.
-
-   The follow-up settles the finding. The fresh pass is the numbered pass and
-   counts toward the cap.
+2. **On REGRESSION, the applier repairs, then two reviewers look.** The
+   repro goes back to the apply session, which knows the code; the repair is
+   committed with the repro as a test proven failing on its parent. Then, in
+   the same message: the reviewer who found the finding gets the repair as a
+   follow-up in its own session, to re-run its repro and say whether that
+   finding is closed; and a fresh subagent reads the repair commit's diff
+   alone, briefed to break the repair itself, since a repair that changed
+   code can break an adjacent case the first reviewer was primed to look
+   past. The follow-up settles the finding; the fresh pass is the numbered
+   pass and counts toward the cap.
 3. **Pass 3 is the last.** Reaching it means each repair fixed the reported
-   inputs and broke the next ones, so the repair before pass 3 is
-   spec-driven: the applier writes the input class as a test table, or
-   replaces the mechanism with a pure derivation. If the correct fix needs
-   scope beyond the files at hand, the applier stops without committing.
-   Whatever pass 3 finds goes to the user with the plan.
+   inputs and broke the next; the repair before pass 3 is spec-driven: the
+   applier writes the input class as a test table, or replaces the mechanism
+   with a pure derivation, and stops rather than commits when the correct fix
+   needs scope beyond the files at hand. Whatever pass 3 finds goes to the
+   user with the plan.
 
-A CLEAN pass advances. At the cap, advance anyway: report the survivors as
-open Criticals beside the delta, and let the user decide. Then re-run the
-analyses once (step 2, fresh subagents) and show the delta: what closed, what
-remains, and anything new.
+A CLEAN pass advances. At the cap, advance anyway: the survivors are reported
+as open Criticals beside the delta, and the user decides. Then re-run the
+analyses (step 2, fresh subagents) once and show the delta: what closed,
+what remains, anything new.
+
+On the first real run, two apply commits passed every check and their own new
+tests, and the adversary found a reproduced regression in each; the repairs
+then broke adjacent cases twice, with tests that passed trivially. The
+adversary told to falsify caught all of it.
 
 ## Rules
 
-- Steps 1-4 leave tracked files untouched. Only step 5 edits code, and only
-  after the user's explicit go.
-- Analyses run in fresh subagents, blind to each other. Each plan stays out
-  of every other analysis.
-- Merging means clustering and keeping the maximum severity.
+- Steps 1-4 modify no tracked files. Only step 5 edits code, and only after
+  the user's explicit go.
+- Analyses run in fresh subagents, blind to each other; a plan stays out of
+  every other analysis.
+- Merge means cluster and keep the maximum severity.
 - If a subagent fails or returns no plan, say so and merge what exists.
-- Run the adversarial loop as one chain and report at the end. Waiting on a
-  person between rounds turns ten minutes of agent work into hours.
-- The reviewer who found a finding verifies its repair in its own session; a
-  fresh reviewer hunts for what the repair introduced.
+- The adversarial loop runs in one chain. Waiting on a human between rounds
+  turns ten minutes of agent work into hours; report at the end.
+- The reviewer who found a finding verifies its repair, in its own session;
+  a fresh reviewer hunts what the repair introduced. Two questions, two
+  readers.
