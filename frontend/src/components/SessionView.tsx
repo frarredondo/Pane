@@ -2027,7 +2027,6 @@ export const SessionView = memo(() => {
         dialogType={hook.dialogType}
         gitCommands={hook.gitCommands}
         commitMessage={hook.commitMessage}
-        setCommitMessage={hook.setCommitMessage}
         shouldSquash={hook.shouldSquash}
         setShouldSquash={hook.setShouldSquash}
         onConfirm={(message) => {

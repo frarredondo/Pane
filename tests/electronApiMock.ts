@@ -254,6 +254,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const preferenceWrites: Array<{ key: string; value: string }> = [];
     const sessionDeleteCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
+    const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
     const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[] }>>();
     let sessionsGetCount = 0;
 
@@ -789,6 +790,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           if (explicit) return success(clone(explicit));
           return success({ file: { path: request.path, kind: 'modified' as const, additions: null, deletions: null, isBinary: false }, patch: '', status: 'no-longer-changed' as const });
         },
+        gitStageAndCommit: (sessionId: string, message: string) => {
+          gitStageAndCommitCalls.push({ sessionId, message });
+          return success();
+        },
       }),
       remoteDaemon: namespace({
         getConfig: () => success(clone(remoteDaemonConfig)),
@@ -1123,6 +1128,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionFavoriteToggleCalls() {
           return clone(sessionFavoriteToggleCalls);
+        },
+        getGitStageAndCommitCalls() {
+          return clone(gitStageAndCommitCalls);
         },
         getDiffManifestCalls() {
           return clone(diffManifestCalls);

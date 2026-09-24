@@ -540,8 +540,6 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         onClose={() => mainRepoGit.setShowCommitDialog(false)}
         dialogType="commit"
         gitCommands={mainRepoGit.gitCommands}
-        commitMessage={mainRepoGit.commitMessage}
-        setCommitMessage={mainRepoGit.setCommitMessage}
         shouldSquash={false}
         setShouldSquash={() => {}}
         onConfirm={mainRepoGit.handleCommit}
