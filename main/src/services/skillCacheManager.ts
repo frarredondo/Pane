@@ -24,11 +24,8 @@ const TOP_LEVEL_FILES = [
   'docs/readme-skill-legend.excalidraw',
 ] as const;
 
-// The upstream orchestrator references this Pane-specific guide even though
-// it lives beside the skill roots. Keep it available when Git is unavailable.
-const SUPPORTING_REPOSITORY_FILES = [
-  'parsa/pane-chat/work-questions.md',
-] as const;
+// Skills Pane Chat depends on ship with Pane and overwrite synced copies.
+const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
 
 const SOURCE_SKILL_ROOT_PATHS = [
   'parsa/.codex/skills',
@@ -36,10 +33,6 @@ const SOURCE_SKILL_ROOT_PATHS = [
 ] as const;
 
 const IMPORTANT_SKILL_PATHS = [
-  'parsa/.codex/skills/runpane-orchestrator',
-  'parsa/.codex/skills/astra-ticket',
-  'parsa/.codex/skills/create-ticket',
-  'parsa/.codex/skills/cold-read',
   'parsa/.codex/skills/explain-visually',
   'parsa/.codex/skills/discussion',
   'parsa/.codex/skills/plan',
@@ -52,12 +45,7 @@ const IMPORTANT_SKILL_PATHS = [
   'parsa/.codex/skills/teach-back',
   'parsa/.codex/skills/investigate',
   'parsa/.codex/skills/codebase-explorer',
-  'parsa/.codex/skills/pane-work-recap',
-  'parsa/.codex/skills/pane-work-prioritizer',
   'parsa/.codex/skills/commit',
-  'parsa/.claude/skills/runpane-orchestrator',
-  'parsa/.claude/skills/create-ticket',
-  'parsa/.claude/skills/cold-read',
   'parsa/.claude/skills/explain-visually',
   'parsa/.claude/skills/discussion',
   'parsa/.claude/skills/create-plan',
@@ -69,28 +57,16 @@ const IMPORTANT_SKILL_PATHS = [
   'parsa/.claude/skills/review',
   'parsa/.claude/skills/teach-back',
   'parsa/.claude/skills/investigate',
-  'parsa/.claude/skills/pane-work-recap',
-  'parsa/.claude/skills/pane-work-prioritizer',
   'parsa/.claude/skills/commit',
 ] as const;
 
 const REQUIRED_FALLBACK_RAW_FILES = [
   ...TOP_LEVEL_FILES,
-  ...SUPPORTING_REPOSITORY_FILES,
   ...IMPORTANT_SKILL_PATHS.map(skillPath => `${skillPath}/SKILL.md`),
-  'parsa/.codex/skills/create-ticket/agents/openai.yaml',
-  'parsa/.codex/skills/create-ticket/references/intent-handoff.md',
-  'parsa/.codex/skills/create-ticket/references/socrates.md',
-  'parsa/.claude/skills/create-ticket/references/intent-handoff.md',
-  'parsa/.claude/skills/create-ticket/references/socrates.md',
   'parsa/.codex/skills/gh-address-comments/agents/openai.yaml',
   'parsa/.codex/skills/pr-test-automation/agents/openai.yaml',
-  'parsa/.codex/skills/pane-work-recap/agents/openai.yaml',
-  'parsa/.codex/skills/pane-work-prioritizer/agents/openai.yaml',
   'parsa/.claude/skills/gh-address-comments/agents/openai.yaml',
   'parsa/.claude/skills/pr-test-automation/agents/openai.yaml',
-  'parsa/.claude/skills/pane-work-recap/agents/openai.yaml',
-  'parsa/.claude/skills/pane-work-prioritizer/agents/openai.yaml',
   'parsa/.claude/skills/review/CRITERIA.md',
 ] as const;
 
@@ -288,97 +264,6 @@ Watcher re-arm:
 - Only a non-zero exit or a WATCH ERROR line means the watch died. HEARTBEAT
   is filtered out of the monitor, so silence is expected.`;
 
-const SESSIONS_ROUTING_ADAPTER_START = '<!-- Pane Sessions routing adapter: begin -->';
-const SESSIONS_ROUTING_ADAPTER_END = '<!-- Pane Sessions routing adapter: end -->';
-
-/**
- * This is deliberately an adapter, rather than a copy of astra-ticket. The
- * upstream skill keeps its control-plane, inspection, and readiness guidance;
- * the adapter defines who owns the implementation entry point in Sessions.
- */
-const CACHED_SESSIONS_ROUTING_ADAPTER = `${SESSIONS_ROUTING_ADAPTER_START}
-## Pane Sessions routing adapter (authoritative)
-
-When this cached skill is loaded by Pane Chat or a RunPane Session, this
-section is the Pane-specific routing contract. It takes precedence over any
-generic lifecycle examples in the synchronized skill.
-
-The Session owns the user's ongoing conversation and intent. Keep discussion,
-read-only code exploration and investigation, clarification, and ticket work
-in that Session. Use \`discussion\`, \`investigate\`, \`codebase-explorer\`, and
-\`create-ticket\` as appropriate. A Session may update authorized control-plane
-notes, briefs, and tickets, but it does not edit project implementation files
-or run an implementation lifecycle in its hidden conversation.
-
-When the ticket is ready and the user authorizes implementation, dispatch
-\`astra-ticket\` through RunPane in a suitable existing Pane or tab, or create a
-Pane/tab when one is needed. Pass the stable Session ID, its persisted goal,
-context, decisions, blockers, next action, evidence, and associated Pane/tab
-IDs with the delegation. A Session may coordinate one Pane or several Panes;
-tabs share their parent Pane's worktree.
-
-The delegated \`astra-ticket\` skill remains authoritative for its own model,
-planning, implementation, PR, review, QA, and CI requirements. Do not copy,
-inline, or substitute that pipeline here. Keep the user's selected Session
-agent, profile, and tool configuration unchanged while the delegated workflow
-runs.
-
-Use the Sessions control plane to inspect and update the overview:
-
-\`\`\`text
-runpane sessions overview --session <session-id-or-name> --json
-\`\`\`
-
-Read \`PANE_ORCHESTRATION_SESSION_ID\` from the current environment whenever
-this conversation starts or resumes. TerminalPanelManager exports this stable
-identity for Session panels, including resume paths that do not receive the
-original bootstrap input. Do not infer the Session from a terminal panel ID or
-from conversation text. When the variable is present, reload the saved record
-and reconcile live state before acting:
-
-\`\`\`text
-runpane sessions get --session "$PANE_ORCHESTRATION_SESSION_ID" --json
-runpane sessions overview --session "$PANE_ORCHESTRATION_SESSION_ID" --json
-\`\`\`
-
-If the variable is missing, use \`runpane sessions list --json\` to resolve a
-Session explicitly; never guess an identity. If the stable ID cannot be
-resolved, report the error before taking Session-specific actions.
-
-RunPane Sessions commands are \`list\`, \`create\`, \`get\`, \`update\`,
-\`set-agent\`, \`associate\`, \`detach\`, and \`overview\`. Selectors accept
-the stable Session ID or an exact name. Use \`--from-json <path|->\` for
-structured \`create\` and \`update\` input. The IPC counterparts are
-\`orchestration-sessions:list/select/create/get/update/set-agent/associate/detach/overview\`.
-
-For conversational notifications, use one durable named cursor scoped to the
-Session's associated Panes and return findings to that Session:
-
-\`\`\`text
-runpane watch --as session-<session-id> --follow --pane <pane-id> \\
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone \\
-  --settle 180000 --blocked-settle 30000 --min-interval 600000 \\
-  --idle-backoff --json
-\`\`\`
-
-Repeat \`--pane\` for every associated Pane. A discussion-only Session has no
-follow watcher; never omit \`--pane\` to watch all Panes. After an associate or
-detach mutation, refresh the overview and re-arm the same named cursor with the
-current Pane set, removing detached Panes from its scope. On restart, retain
-the cursor name tied to the stable Session ID and capture a fresh output
-baseline before interpreting notifications. Terminal idle, stopped, or exited
-state is activity evidence only; it never proves completion. Completion reports
-require explicit evidence and provenance, and new activity makes older reports
-stale.
-
-The retained RunPane control-plane, authorization, inspection, configuration,
-dispatch, evidence, and hard-stop guidance remains available. Feedback and
-readiness remain inspectable; an authorized response goes back through the
-delegated \`astra-ticket\` Pane. The generic implementation lane and lifecycle
-sections are intentionally removed from this Pane cache because the delegated
-workflow owns them. Every authorized implementation in a Pane Session enters
-through \`astra-ticket\` after the Session-owned discussion and ticket gate.
-${SESSIONS_ROUTING_ADAPTER_END}`;
 
 interface SkillSyncState {
   lastAttemptAt?: string;
@@ -395,6 +280,8 @@ export class SkillCacheManager {
   readonly paneChatGuidePath: string;
   readonly paneChatRuntimeContextPath: string;
   readonly paneChatOrchestratorSkillPath: string;
+  readonly paneChatSkillsRoot: string;
+  readonly paneChatWorkQuestionsPath: string;
   readonly codexProjectSkillsRoot: string;
   readonly claudeProjectSkillsRoot: string;
   readonly codexPaneOrchestratorSkillPath: string;
@@ -416,6 +303,8 @@ export class SkillCacheManager {
     this.paneChatGuidePath = path.join(this.paneChatRoot, 'runpane-orchestrator.md');
     this.paneChatRuntimeContextPath = path.join(this.paneChatRoot, 'runtime-context.md');
     this.paneChatOrchestratorSkillPath = path.join(this.paneChatRoot, 'pane-orchestrator', 'SKILL.md');
+    this.paneChatSkillsRoot = path.join(this.paneChatRoot, 'skills');
+    this.paneChatWorkQuestionsPath = path.join(this.paneChatRoot, 'work-questions.md');
     this.codexProjectSkillsRoot = path.join(getAppDirectory(), '.codex', 'skills');
     this.claudeProjectSkillsRoot = path.join(getAppDirectory(), '.claude', 'skills');
     this.codexPaneOrchestratorSkillPath = path.join(this.codexProjectSkillsRoot, 'pane-orchestrator', 'SKILL.md');
@@ -494,7 +383,6 @@ export class SkillCacheManager {
       } else {
         await this.downloadFallbackFiles();
       }
-      await this.reconcileCachedOrchestratorGuidance();
       await this.writePaneChatGuide();
 
       await this.writeSyncState({
@@ -539,10 +427,6 @@ export class SkillCacheManager {
     await fs.mkdir(this.cacheRoot, { recursive: true });
 
     for (const relativePath of TOP_LEVEL_FILES) {
-      await copyPath(path.join(this.sourceRoot, relativePath), path.join(this.cacheRoot, relativePath));
-    }
-
-    for (const relativePath of SUPPORTING_REPOSITORY_FILES) {
       await copyPath(path.join(this.sourceRoot, relativePath), path.join(this.cacheRoot, relativePath));
     }
 
@@ -608,7 +492,6 @@ export class SkillCacheManager {
   }
 
   private async writePaneChatGuide(): Promise<void> {
-    await this.reconcileCachedOrchestratorGuidance();
     const guide = this.buildPaneChatGuide();
     const runtimeContext = await this.buildPaneChatRuntimeContext();
     const orchestratorSkill = this.buildPaneOrchestratorSkill();
@@ -617,6 +500,7 @@ export class SkillCacheManager {
     await fs.writeFile(this.paneChatGuidePath, guide, 'utf8');
     await this.writeTextFile(this.paneChatOrchestratorSkillPath, orchestratorSkill);
     await this.mirrorCachedAgentSkillsIntoProject();
+    await this.installBundledSkills();
     await this.writeTextFile(this.codexPaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.claudePaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.cursorPaneOrchestratorRulePath, this.toCursorRule(orchestratorSkill));
@@ -624,28 +508,6 @@ export class SkillCacheManager {
     await fs.chmod(this.paneWatchScriptPath, 0o755);
     await this.writeTextFile(this.paneIdleWatchScriptPath, this.buildPaneIdleWatchScript());
     await fs.chmod(this.paneIdleWatchScriptPath, 0o755);
-  }
-
-  /**
-   * Upstream's generic orchestrator is intentionally retained in the cache,
-   * but Pane Sessions need one authoritative entry point. Re-apply this small
-   * adapter after every clone, pull, fallback download, and startup refresh so
-   * a newer upstream checkout cannot silently restore the competing route.
-   */
-  private async reconcileCachedOrchestratorGuidance(): Promise<void> {
-    const cachedOrchestratorPaths = [
-      path.join(this.cacheRoot, 'parsa', '.codex', 'skills', 'runpane-orchestrator', 'SKILL.md'),
-      path.join(this.cacheRoot, 'parsa', '.claude', 'skills', 'runpane-orchestrator', 'SKILL.md'),
-    ];
-
-    for (const filePath of cachedOrchestratorPaths) {
-      if (!(await exists(filePath))) continue;
-      const contents = await fs.readFile(filePath, 'utf8');
-      const reconciled = reconcileSessionsRouting(contents);
-      if (reconciled !== contents) {
-        await this.writeTextFile(filePath, reconciled);
-      }
-    }
   }
 
   /** Cursor reads .cursor/rules/*.mdc, not SKILL.md files — swap the frontmatter. */
@@ -667,155 +529,62 @@ export class SkillCacheManager {
     );
   }
 
+  /** Bundled skills replace any synced copy, in Pane Chat's root and both project roots. */
+  private async installBundledSkills(): Promise<void> {
+    const bundledSkills = path.join(PANE_CHAT_BUNDLE_ROOT, 'skills');
+    await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'work-questions.md'), this.paneChatWorkQuestionsPath);
+    await fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true });
+    for (const skill of await fs.readdir(bundledSkills)) {
+      for (const root of [this.paneChatSkillsRoot, this.codexProjectSkillsRoot, this.claudeProjectSkillsRoot]) {
+        await fs.rm(path.join(root, skill), { recursive: true, force: true });
+        await copyBundledPath(path.join(bundledSkills, skill), path.join(root, skill));
+      }
+    }
+  }
+
+  private paneChatReferencePaths() {
+    return {
+      runpaneOrchestrator: path.join(this.paneChatSkillsRoot, 'runpane-orchestrator', 'SKILL.md'),
+      createTicket: path.join(this.paneChatSkillsRoot, 'create-ticket', 'SKILL.md'),
+      astraTicket: path.join(this.paneChatSkillsRoot, 'astra-ticket', 'SKILL.md'),
+      workQuestions: this.paneChatWorkQuestionsPath,
+    };
+  }
+
   private buildPaneChatGuide(): string {
-    const runtimeContext = this.paneChatRuntimeContextPath;
-    const paneOrchestratorSkill = this.paneChatOrchestratorSkillPath;
-    const claudeOrchestrator = path.join(this.cacheRoot, 'parsa', '.claude', 'skills', 'runpane-orchestrator', 'SKILL.md');
-    const claudeCreateTicket = path.join(this.cacheRoot, 'parsa', '.claude', 'skills', 'create-ticket', 'SKILL.md');
-    const codexAstraTicket = path.join(this.cacheRoot, 'parsa', '.codex', 'skills', 'astra-ticket', 'SKILL.md');
-    const workQuestions = path.join(this.cacheRoot, 'parsa', 'pane-chat', 'work-questions.md');
+    const { runpaneOrchestrator, createTicket, astraTicket, workQuestions } = this.paneChatReferencePaths();
     const managedBlock = RUNPANE_CONTRACT.agentContext.managedBlock.join('\n');
 
     return `# Pane Chat Orchestrator (Sessions)
 
 You are the user's Session orchestrator for this Pane workspace. The Session
-is the named, ongoing conversation where intent lives; associated Panes and
-tabs are the focused work surfaces.
+is the named, ongoing conversation where intent lives. Its associated Panes
+and tabs are where the focused work happens.
 
 ## Initialize quietly
 
-Do these before anything else, but keep routine setup and its output internal:
+Do these first, and keep the setup and its output to yourself:
 
-1. Runtime context: \`${runtimeContext}\` (authoritative for this Pane install)
-2. Pane Chat orchestrator skill: \`${paneOrchestratorSkill}\`
-3. RunPane orchestrator skill: \`${claudeOrchestrator}\` (control-plane, inspection, dispatch, evidence)
-4. Session ticket skill: \`${claudeCreateTicket}\`
-5. Delegated implementation skill: \`${codexAstraTicket}\` (its workflow
-   requirements apply only after implementation is authorized)
-6. Work-question guide: \`${workQuestions}\`
-7. Run the doctor command from the runtime context
-8. If the Session has associated Panes, arm liveness with the two commands in
-   the pane-orchestrator skill's Liveness Contract (\`runpane watch --self-test\`,
-   then the flagged follow line; never the bare \`--follow\`)
+1. Read the runtime context: \`${this.paneChatRuntimeContextPath}\`. It
+   describes this Pane install and wins over any other document.
+2. Read the Pane Chat orchestrator skill: \`${this.paneChatOrchestratorSkillPath}\`.
+   It is the contract for this Session: startup, Session identity, Pane
+   association, the workflow, liveness, unattended resilience, and hard stops.
+3. Read the skills it relies on:
+   - RunPane orchestrator: \`${runpaneOrchestrator}\` (dispatch, delivery,
+     evidence, readiness)
+   - Session tickets: \`${createTicket}\`
+   - Delegated implementation: \`${astraTicket}\` (applies once implementation
+     is authorized)
+   - Work questions: \`${workQuestions}\`
+4. Run the doctor command from the runtime context.
+5. If the Session has associated Panes, arm liveness with the two commands in
+   the skill's Liveness Contract: \`runpane watch --self-test\`, then the
+   flagged follow command.
 
-${SESSION_STARTUP_GUIDANCE}
-
-${SESSION_PANE_ASSOCIATION_GUIDANCE}
-
-## Resume and refresh persisted Session context
-
-Read \`PANE_ORCHESTRATION_SESSION_ID\` from the current environment whenever
-this conversation starts or resumes. TerminalPanelManager exports this stable
-identity for Session panels, including resume paths that do not receive the
-original bootstrap input. Do not infer the Session from a terminal panel ID or
-from conversation text.
-
-When the variable is present, reload persisted intent and associations before
-acting, then refresh live state with the overview command:
-
-\`\`\`text
-runpane sessions get --session "$PANE_ORCHESTRATION_SESSION_ID" --json
-runpane sessions overview --session "$PANE_ORCHESTRATION_SESSION_ID" --json
-\`\`\`
-
-Run \`get\` to recover the saved record and \`overview\` after a resume or
-mutation to reconcile current Pane, tab, branch, and evidence state. If the
-variable is missing, use \`runpane sessions list --json\` to resolve a Session
-explicitly; never guess an identity. If the stable ID cannot be resolved,
-report the error before taking Session-specific actions.
-
-The runtime context wins over cached docs when they conflict. Do not
-fetch GitHub to initialize; the cached files are refreshed in the
-background.
-
-Skills are cached under \`${path.join(this.cacheRoot, 'parsa', '.claude', 'skills')}\`
-and mirrored to \`${this.claudeProjectSkillsRoot}\` so launched agents
-discover them by name.
-
-## Role
-
-You are the user's Session orchestrator, not an implementation worker. Keep
-discussion, read-only exploration/investigation, clarification, and ticket
-creation or revision in this Session. Authorized control-plane notes, briefs,
-and tickets may be updated from the Session, but project implementation files
-belong in an associated Pane/tab.
-
-For "what did I work on?" or "what should I do next?", use
-\`pane-work-recap\` or \`pane-work-prioritizer\` with \`${workQuestions}\`.
-Do not create implementation workstreams for those answers.
-
-## Session-owned workflow (authoritative)
-
-1. Discuss the goal and read the relevant context in this conversation.
-2. Dispatch read-only exploration when repository facts are needed, then bring
-   findings back to this Session.
-3. Use \`create-ticket\` to capture the current what, why, scope, decisions,
-   and acceptance criteria. Revise the same ticket and brief as intent changes.
-4. After the ticket is ready and the user explicitly authorizes implementation,
-   dispatch \`astra-ticket\` in an appropriate existing Pane or tab, or create
-   one when needed. Pass the stable Session ID, persisted overview, and
-   associated Pane/tab IDs so progress returns to this conversation.
-5. Keep the Session's selected agent, profile, and tool configuration intact;
-   the delegated \`astra-ticket\` workflow owns its own model, planning,
-   implementation, review, QA, and CI requirements.
-
-Never write project implementation files from the Session and never route an
-authorized implementation through a competing legacy lifecycle loop. A
-Session can remain discussion-only, coordinate one Pane, or coordinate several
-Panes; tabs share their parent Pane's worktree.
-
-RunPane Sessions commands are \`list\`, \`create\`, \`get\`, \`update\`,
-\`set-agent\`, \`associate\`, \`detach\`, and \`overview\`. Selectors accept
-the stable Session ID or an exact name. Use \`--from-json <path|->\` for
-structured \`create\` and \`update\` input. The IPC counterparts are
-\`orchestration-sessions:list/select/create/get/update/set-agent/associate/detach/overview\`.
-
-Use \`runpane sessions overview --session <session-id-or-name> --json\` after
-mutations and use one named watcher scoped to every associated Pane:
-
-\`\`\`text
-runpane watch --as session-<session-id> --follow --pane <pane-id> \\
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone \\
-  --settle 180000 --blocked-settle 30000 --min-interval 600000 \\
-  --idle-backoff --json
-\`\`\`
-
-Repeat \`--pane\` for every associated Pane. A discussion-only Session has no
-follow watcher; never omit \`--pane\` to watch all Panes. After an associate or
-detach mutation, refresh the overview and re-arm the same named cursor with the
-current Pane set, removing detached Panes from its scope. On restart, retain
-the cursor name tied to the stable Session ID and capture a fresh output
-baseline before interpreting notifications. Keep findings in this
-conversation. Idle, stopped, and exited terminal state is activity evidence;
-it does not prove completion. Completion reports require inspectable evidence,
-timestamp, and provenance, and new activity makes an older report stale.
-
-## Other orchestration capabilities
-
-Use RunPane as the control plane. Verify state through RunPane commands
-after every mutation. Never write an ad-hoc watcher; the Liveness
-Contract in the pane-orchestrator skill owns that.
-
-Use existing RunPane control-plane operations to configure CLI tools, prompts,
-and agents; create, inspect, and coordinate Panes and tabs; monitor progress;
-and preserve context across work. The cached \`runpane-orchestrator\` skill
-remains the source for those control-plane, inspection, dispatch, monitoring,
-feedback readback, and readiness capabilities. Its Pane Sessions adapter is
-authoritative for the entry route above, so generic implementation examples
-cannot redirect Session work.
-When delegating, name the stage and relevant artifact without copying the
-delegated \`astra-ticket\` pipeline.
-
-Before dispatching: state your assumptions so the user can correct
-them, and ask about gaps no sweep reaches.
-
-${UNATTENDED_RESILIENCE_SECTION}
-
-## Hard stops
-
-Stop before merge, deploy, release creation, publishing, version
-changes, production or destructive mutation, deleting user data, or
-scope expansion unless the user explicitly authorizes that exact step.
+Pane writes these files from its own bundle on every start, so they are
+current; initialize from them without fetching anything. Every skill is also
+in \`${this.claudeProjectSkillsRoot}\`, where launched agents find it by name.
 
 ## Generated RunPane Context
 
@@ -826,14 +595,7 @@ ${managedBlock}
   private buildPaneOrchestratorSkill(): string {
     const runtimeContext = this.paneChatRuntimeContextPath;
     const guidePath = this.paneChatGuidePath;
-    const codexOrchestrator = path.join(this.cacheRoot, 'parsa', '.codex', 'skills', 'runpane-orchestrator', 'SKILL.md');
-    const claudeOrchestrator = path.join(this.cacheRoot, 'parsa', '.claude', 'skills', 'runpane-orchestrator', 'SKILL.md');
-    const codexCreateTicket = path.join(this.cacheRoot, 'parsa', '.codex', 'skills', 'create-ticket', 'SKILL.md');
-    const claudeCreateTicket = path.join(this.cacheRoot, 'parsa', '.claude', 'skills', 'create-ticket', 'SKILL.md');
-    const codexAstraTicket = path.join(this.cacheRoot, 'parsa', '.codex', 'skills', 'astra-ticket', 'SKILL.md');
-    const workQuestions = path.join(this.cacheRoot, 'parsa', 'pane-chat', 'work-questions.md');
-    const workflowMap = path.join(this.cacheRoot, 'docs', 'readme-workflow-map.png');
-    const workflowMapSource = path.join(this.cacheRoot, 'docs', 'readme-workflow-map.excalidraw');
+    const { runpaneOrchestrator, createTicket, astraTicket, workQuestions } = this.paneChatReferencePaths();
     const codexProjectSkillsRoot = this.codexProjectSkillsRoot;
     const claudeProjectSkillsRoot = this.claudeProjectSkillsRoot;
 
@@ -854,13 +616,9 @@ Read all of these in parallel:
 
 - \`${runtimeContext}\` (runtime context, has the doctor command)
 - \`${guidePath}\` (Pane Chat guide)
-- RunPane orchestrator skill for the active agent:
-  - Claude: \`${claudeOrchestrator}\`
-  - Codex: \`${codexOrchestrator}\`
-- Session ticket skill for the active agent:
-  - Claude: \`${claudeCreateTicket}\`
-  - Codex: \`${codexCreateTicket}\`
-- Delegated implementation skill: \`${codexAstraTicket}\`
+- RunPane orchestrator skill: \`${runpaneOrchestrator}\`
+- Session ticket skill: \`${createTicket}\`
+- Delegated implementation skill: \`${astraTicket}\`
 - Work-question guide: \`${workQuestions}\`
 
 Then, as quiet setup:
@@ -904,9 +662,7 @@ implementation workers. This Session handles:
 - creating and revising tickets
 - authorized control-plane notes, briefs, and tickets
 
-Project implementation files are edited in an associated Pane or tab. When
-the upstream skill says "do it yourself in this chat", do it in an associated
-Pane.
+Project implementation files are edited in an associated Pane or tab.
 
 Context is the scarce resource. Weigh the claims panes report and spend your
 context on cross-pane work, the part only you can do.
@@ -957,11 +713,8 @@ activity makes an older report stale. Keep findings in this conversation.
 
 Use RunPane control-plane operations to configure CLI tools, prompts, and
 agents; create, inspect, and coordinate Panes and tabs; monitor progress; and
-keep context across work. The cached \`runpane-orchestrator\` skill is the
-reference for control plane, inspection, dispatch, monitoring, feedback
-readback, and readiness. Its Pane Sessions adapter defines the entry route
-above, and that route takes precedence over its generic implementation
-examples.
+keep context across work. The \`runpane-orchestrator\` skill covers dispatch,
+confirming delivery, handling external text, PR readiness, and reporting.
 
 When delegating, name the stage and the relevant artifact; the \`astra-ticket\`
 pipeline carries the rest.
@@ -1025,10 +778,8 @@ ${UNATTENDED_RESILIENCE_SECTION}
 
 ## Local references
 
-- RunPane orchestrator: \`${claudeOrchestrator}\`
-- Codex orchestrator: \`${codexOrchestrator}\`
-- Skills: \`${claudeProjectSkillsRoot}\`, \`${codexProjectSkillsRoot}\`
-- Workflow map: \`${workflowMap}\` (source: \`${workflowMapSource}\`)
+- Skills Pane Chat depends on: \`${this.paneChatSkillsRoot}\`
+- Every skill, as agents discover it: \`${claudeProjectSkillsRoot}\`, \`${codexProjectSkillsRoot}\`
 
 ## Hard stops
 
@@ -1329,9 +1080,9 @@ if __name__ == "__main__":
           '',
           '## App-compatible development wrapper (candidate)',
           `- Repository-local wrapper: ${markdownCode(`node ${quoteForDisplayedShellArg(devRunpaneWrapper)}`)}`,
-          '- Verify this candidate before use with the command-detail check below',
-          '  and a doctor call pointed at this same Pane data directory. Use it',
-          '  only if it exposes `sessions associate` and reaches this app/daemon.',
+          '- Before using it, run the command-detail check below and a doctor call',
+          '  against this Pane data directory. Use it when it exposes',
+          '  `sessions associate` and reaches this app and its daemon.',
           `- Command-detail check: ${markdownCode(`node ${quoteForDisplayedShellArg(devRunpaneWrapper)} agent-context --command "sessions associate" --json`)}`,
           `- Same-instance doctor check: ${markdownCode(`node ${quoteForDisplayedShellArg(devRunpaneWrapper)} doctor --json --pane-dir ${quoteForDisplayedShellArg(appDirectory)}`)}`,
         ]
@@ -1340,9 +1091,8 @@ if __name__ == "__main__":
     return [
       '# Pane Chat Runtime Context',
       '',
-      'This file is generated by Pane for this exact Pane Chat instance. Treat it',
-      'as higher priority than generic cached RunPane documentation when choosing',
-      'how to reach Pane.',
+      'Pane generates this file for this Pane Chat instance. When it disagrees',
+      'with other RunPane documentation about how to reach Pane, follow this file.',
       '',
       '## Pane Instance',
       '',
@@ -1357,30 +1107,26 @@ if __name__ == "__main__":
       '## RunPane Routing',
       '',
       `- First command to run: ${markdownCode(doctorCommand)}`,
-      '- RunPane commands that support `--pane-dir` should target the Pane data',
+      '- Point every RunPane command that accepts `--pane-dir` at the Pane data',
       '  directory above.',
-      '- Windows-mounted paths such as `/mnt/c/...` are not automatically wrong',
-      '  in WSL.',
-      '- If `runpane` resolves to a Windows-mounted shim and that shim fails',
-      '  because its Windows toolchain is unavailable, treat it as a local',
-      '  CLI/PATH mismatch for this shell. Fix or select a RunPane wrapper that',
-      '  can execute in this runtime before orchestrating Pane work.',
-      '- If `runpane` is missing in this shell, do not continue by manually',
-      '  simulating Pane state. Use a wrapper for this exact runtime, such as',
-      `  \`npx --yes runpane@latest doctor --json --pane-dir ${quoteForDisplayedShellArg(appDirectory)}\`,`,
-      '  or install the RunPane CLI in this OS/shell and rerun the doctor',
-      '  command before taking Pane actions.',
-      '- If a one-shot wrapper works but the persistent `runpane` command does',
-      '  not, continue with the working one-shot form or fix PATH before',
-      '  orchestration. Do not switch to a different Pane install.',
+      '- In WSL, Windows-mounted paths such as `/mnt/c/...` can be correct.',
+      '- If `runpane` resolves to a Windows-mounted shim that fails because its',
+      '  Windows toolchain is missing, the CLI or PATH is wrong for this shell.',
+      '  Fix it, or pick a RunPane wrapper that runs here, before orchestrating.',
+      '- If `runpane` is missing in this shell, use a wrapper for this runtime,',
+      `  such as \`npx --yes runpane@latest doctor --json --pane-dir ${quoteForDisplayedShellArg(appDirectory)}\`,`,
+      '  or install the RunPane CLI here, and rerun the doctor command before any',
+      '  Pane action. Pane state comes from RunPane, never from guesses.',
+      '- If a one-shot wrapper works and the persistent `runpane` command fails,',
+      '  keep using the one-shot form or fix PATH. Stay on this Pane install.',
       ...devWrapperGuidance,
       powerShellPolicy,
       '',
-      '## Mismatch Guardrail',
+      '## Wrong instance',
       '',
       'If a fallback opens, focuses, or controls a different Pane window or data',
-      'directory, stop and report the runtime mismatch. Do not continue with',
-      'commands pointed at a different Pane instance.',
+      'directory, stop and report the mismatch. Every command targets this',
+      'Pane instance.',
       '',
     ].join('\n');
   }
@@ -1418,12 +1164,11 @@ if __name__ == "__main__":
   private buildPowerShellPolicy(isWsl: boolean): string {
     if (isWsl) {
       return [
-        '- PowerShell fallback: not allowed by this runtime context. This Pane',
-        '  process is running inside WSL/Linux; `powershell.exe ... runpane` may',
-        '  target a separate Windows Pane install or data directory instead of',
-        '  this app.',
-        '- Do not use PowerShell as a recovery path unless the user explicitly',
-        '  tells you to control the Windows Pane instance.',
+        '- PowerShell fallback: off. This Pane process runs inside WSL or Linux,',
+        '  and `powershell.exe ... runpane` can reach a separate Windows Pane',
+        '  install or data directory.',
+        '- Use PowerShell only when the user explicitly asks you to control the',
+        '  Windows Pane instance.',
       ].join('\n');
     }
 
@@ -1437,7 +1182,7 @@ if __name__ == "__main__":
       ].join('\n');
     }
 
-    return '- PowerShell fallback: not relevant for this Pane process. Use native RunPane commands unless the user explicitly targets a different OS/app instance.';
+    return '- PowerShell fallback: not needed for this Pane process. Use native RunPane commands; switch only when the user explicitly targets another OS or Pane instance.';
   }
 
   private async readSyncState(): Promise<SkillSyncState> {
@@ -1479,33 +1224,17 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
-function reconcileSessionsRouting(contents: string): string {
-  const start = contents.indexOf(SESSIONS_ROUTING_ADAPTER_START);
-  let base = contents;
-
-  if (start >= 0) {
-    const end = contents.indexOf(SESSIONS_ROUTING_ADAPTER_END, start);
-    if (end >= 0) {
-      base = `${contents.slice(0, start)}${contents.slice(end + SESSIONS_ROUTING_ADAPTER_END.length)}`;
-    } else {
-      // Treat a partially written adapter as stale too; the next refresh
-      // should leave one complete authoritative section.
-      base = contents.slice(0, start);
-    }
+// Plain reads and writes, which also work inside Electron's asar archive.
+async function copyBundledPath(source: string, target: string): Promise<void> {
+  const stat = await fs.stat(source);
+  if (!stat.isDirectory()) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, await fs.readFile(source));
+    return;
   }
-
-  // The synchronized upstream skill's delivery-lane and lifecycle sections
-  // describe a competing implementation route. Remove that bounded block
-  // while keeping the generic control-plane and dispatch/evidence guidance
-  // that follows it. The adapter below supplies the Session-owned route and
-  // deliberately does not copy the delegated skill's pipeline.
-  const deliveryLanesStart = base.indexOf('## Delivery Lanes');
-  const dispatchAndObserveStart = base.indexOf('## Dispatch And Observe RunPane', deliveryLanesStart + 1);
-  if (deliveryLanesStart >= 0 && dispatchAndObserveStart > deliveryLanesStart) {
-    base = `${base.slice(0, deliveryLanesStart)}${base.slice(dispatchAndObserveStart)}`;
+  for (const entry of await fs.readdir(source)) {
+    await copyBundledPath(path.join(source, entry), path.join(target, entry));
   }
-
-  return `${base.trimEnd()}\n\n${CACHED_SESSIONS_ROUTING_ADAPTER}\n`;
 }
 
 async function copyPath(source: string, target: string): Promise<void> {

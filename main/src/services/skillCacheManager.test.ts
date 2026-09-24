@@ -157,37 +157,24 @@ describe('SkillCacheManager Pane Chat guide', () => {
     }
   });
 
-  it('writes a Pane Chat guide that points at local cached workflow assets', async () => {
+  it('points the Pane Chat guide and skill only at files that exist before any sync', async () => {
     const manager = new SkillCacheManager();
 
     await manager.ensurePaneChatGuide();
 
+    for (const generated of [manager.paneChatGuidePath, manager.paneChatOrchestratorSkillPath]) {
+      const text = await fs.readFile(generated, 'utf8');
+      const referencedFiles = [...text.matchAll(/`([^`\s]+\.md)`/g)]
+        .map(match => match[1])
+        .filter(candidate => path.isAbsolute(candidate));
+      expect(referencedFiles.length).toBeGreaterThan(3);
+      for (const file of referencedFiles) {
+        await expect(fs.access(file)).resolves.toBeUndefined();
+      }
+    }
     const guide = await fs.readFile(manager.paneChatGuidePath, 'utf8');
-    const normalizedGuide = normalizePathSeparators(guide);
-    expect(guide).toContain('Pane Chat Orchestrator');
-    expect(guide).toContain('pane-work-recap');
-    expect(guide).toContain('pane-work-prioritizer');
-    expect(guide).toContain('runpane-orchestrator');
-    expect(guide).toContain('Session-owned workflow (authoritative)');
-    expect(guide).toContain('create-ticket');
-    expect(guide).toContain('astra-ticket');
-    expect(guide).toContain('PANE_ORCHESTRATION_SESSION_ID');
-    expect(guide).toContain('runpane sessions get --session "$PANE_ORCHESTRATION_SESSION_ID" --json');
-    expect(guide).toContain('runpane sessions overview --session <session-id-or-name> --json');
-    expect(guide).toContain('RunPane Sessions commands are `list`, `create`, `get`, `update`');
-    expect(guide).toContain('--from-json <path|->');
-    expect(guide).toContain('orchestration-sessions:list/select/create/get/update/set-agent/associate/detach/overview');
-    expect(guide).toContain('runpane watch --as session-<session-id> --follow --pane <pane-id>');
-    expect(guide).toContain('--settle 180000 --blocked-settle 30000 --min-interval 600000');
-    expect(guide).toContain('A discussion-only Session has no');
-    expect(guide).toContain('After an associate or');
-    expect(guide).toContain('existing Pane or tab, or create');
-    expect(guide).toContain('selected agent, profile, and tool configuration');
-    expect(guide).not.toContain('`/do`');
-    expect(guide).not.toContain('## Delivery Lanes');
-    expect(guide).not.toContain('Light (default)');
-    expect(guide).toContain('## Hard stops');
-    expect(normalizedGuide).toContain('/skills/dcouple/parsa/.claude/skills/runpane-orchestrator/SKILL.md');
+    expect(guide).toContain(manager.paneChatOrchestratorSkillPath);
+    expect(guide).toContain('## Generated RunPane Context');
   });
 
   it('writes runtime context with same-runtime CLI recovery guidance', async () => {
@@ -211,7 +198,7 @@ describe('SkillCacheManager Pane Chat guide', () => {
     expect(runtimeContext).toContain('First command to run: `runpane doctor --json --pane-dir');
     expect(runtimeContext).toContain('If `runpane` is missing in this shell');
     expect(runtimeContext).toContain('npx --yes runpane@latest doctor --json --pane-dir');
-    expect(runtimeContext).toContain('Do not switch to a different Pane install.');
+    expect(runtimeContext).toContain('Stay on this Pane install.');
     expect(runtimeContext).toContain('## App-compatible development wrapper (candidate)');
     expect(runtimeContext).toContain('agent-context --command "sessions associate" --json');
     expect(runtimeContext).toContain('doctor --json --pane-dir');
@@ -408,7 +395,6 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('BLOCKED');
     expect(canonicalSkill).toContain('HEARTBEAT');
     expect(canonicalSkill).toContain('runpane doctor --report');
-    expect(canonicalSkill).toContain('do it yourself in this chat');
     expect(canonicalSkill).toContain('## Session-owned workflow (authoritative)');
     expect(canonicalSkill).toContain('create-ticket');
     expect(canonicalSkill).toContain('astra-ticket');
@@ -444,7 +430,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     const claudeSkill = await fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8');
     const cursorRule = await fs.readFile(manager.cursorPaneOrchestratorRulePath, 'utf8');
 
-    const variants = [guide, canonicalSkill, codexSkill, claudeSkill, cursorRule];
+    const variants = [canonicalSkill, codexSkill, claudeSkill, cursorRule];
     for (const rawVariant of variants) {
       const variant = rawVariant.replace(/\s+/g, ' ');
       expect(variant).toContain('## Session startup');
@@ -510,7 +496,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(guide).toContain('If the Session has associated Panes, arm liveness');
     expect(canonicalSkill.replace(/\s+/g, ' ')).toContain('When the Session has associated Panes, arm liveness');
     expect(canonicalSkill).toContain('## Liveness Contract');
-    for (const variant of variants) {
+    for (const variant of [guide, ...variants]) {
       expect(variant).not.toContain('startup question resolved to yes');
     }
   });
@@ -534,8 +520,10 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     for (const target of targets) {
       const contents = await fs.readFile(target, 'utf8');
       expect(contents).not.toContain('stale pre-upgrade text');
-      expect(contents).toContain('## Unattended resilience (when enabled)');
       expect(contents).not.toContain('Enable unattended resilience for this session?');
+      if (target !== manager.paneChatGuidePath) {
+        expect(contents).toContain('## Unattended resilience (when enabled)');
+      }
     }
   });
 
@@ -545,7 +533,6 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     await manager.ensurePaneChatGuide();
 
     const variants = await Promise.all([
-      fs.readFile(manager.paneChatGuidePath, 'utf8'),
       fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8'),
       fs.readFile(manager.codexPaneOrchestratorSkillPath, 'utf8'),
       fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8'),
@@ -626,15 +613,12 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     );
   });
 
-  it('copies Session workflow skills and support files from a source checkout', async () => {
+  it('copies synced skills and support files from a source checkout', async () => {
     const manager = new SkillCacheManager();
     const sourceFiles = {
-      'parsa/pane-chat/work-questions.md': '# Work questions\n',
-      'parsa/.codex/skills/astra-ticket/SKILL.md': '# astra-ticket\n',
-      'parsa/.codex/skills/create-ticket/SKILL.md': '# create-ticket\n',
-      'parsa/.codex/skills/create-ticket/references/intent-handoff.md': '# handoff\n',
-      'parsa/.codex/skills/cold-read/SKILL.md': '# cold-read\n',
-      'parsa/.claude/skills/create-ticket/SKILL.md': '# Claude create-ticket\n',
+      'parsa/.codex/skills/simple-plan/SKILL.md': '# simple-plan\n',
+      'parsa/.codex/skills/gh-address-comments/agents/openai.yaml': '# agent metadata\n',
+      'parsa/.claude/skills/review/CRITERIA.md': '# Claude review criteria\n',
       'parsa/.claude/skills/explain-visually/SKILL.md': '# Claude explain-visually\n',
     };
 
@@ -651,7 +635,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     }
   });
 
-  it('downloads required review-feedback fallback skills and mirrors them into project roots', async () => {
+  it('downloads required fallback skills and mirrors them into project roots', async () => {
     const manager = new SkillCacheManager();
     const httpsGet = mockRawDownloads();
 
@@ -678,88 +662,34 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       fs.readFile(path.join(manager.claudeProjectSkillsRoot, 'review', 'CRITERIA.md'), 'utf8'),
     ).resolves.toContain('parsa/.claude/skills/review/CRITERIA.md');
     await expect(
-      fs.readFile(path.join(manager.codexProjectSkillsRoot, 'astra-ticket', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.codex/skills/astra-ticket/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.codexProjectSkillsRoot, 'create-ticket', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.codex/skills/create-ticket/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.claudeProjectSkillsRoot, 'create-ticket', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.claude/skills/create-ticket/SKILL.md');
-    await expect(
       fs.readFile(path.join(manager.codexProjectSkillsRoot, 'explain-visually', 'SKILL.md'), 'utf8'),
     ).resolves.toContain('parsa/.codex/skills/explain-visually/SKILL.md');
     await expect(
       fs.readFile(path.join(manager.claudeProjectSkillsRoot, 'explain-visually', 'SKILL.md'), 'utf8'),
     ).resolves.toContain('parsa/.claude/skills/explain-visually/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.codexProjectSkillsRoot, 'cold-read', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.codex/skills/cold-read/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.claudeProjectSkillsRoot, 'cold-read', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.claude/skills/cold-read/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.codexProjectSkillsRoot, 'pane-work-recap', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.codex/skills/pane-work-recap/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.claudeProjectSkillsRoot, 'pane-work-prioritizer', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('parsa/.claude/skills/pane-work-prioritizer/SKILL.md');
-    await expect(
-      fs.readFile(path.join(manager.cacheRoot, 'parsa', 'pane-chat', 'work-questions.md'), 'utf8'),
-    ).resolves.toContain('parsa/pane-chat/work-questions.md');
-    await expect(
-      fs.readFile(
-        path.join(manager.cacheRoot, 'parsa', '.codex', 'skills', 'create-ticket', 'references', 'intent-handoff.md'),
-        'utf8',
-      ),
-    ).resolves.toContain('parsa/.codex/skills/create-ticket/references/intent-handoff.md');
   });
 
-  it('removes stale upstream implementation lanes and appends the Session adapter on refresh', async () => {
+  it('installs the bundled Pane Chat skills over stale synced copies', async () => {
     const manager = new SkillCacheManager();
-    const cachedPaths = [
-      path.join(manager.cacheRoot, 'parsa', '.codex', 'skills', 'runpane-orchestrator', 'SKILL.md'),
-      path.join(manager.cacheRoot, 'parsa', '.claude', 'skills', 'runpane-orchestrator', 'SKILL.md'),
-    ];
-
-    for (const cachedPath of cachedPaths) {
+    for (const agentDirectory of ['.codex', '.claude']) {
+      const cachedPath = path.join(manager.cacheRoot, 'parsa', agentDirectory, 'skills', 'runpane-orchestrator', 'SKILL.md');
       await fs.mkdir(path.dirname(cachedPath), { recursive: true });
       await fs.writeFile(cachedPath, STALE_CACHED_ORCHESTRATOR, 'utf8');
     }
 
     await manager.ensurePaneChatGuide();
 
-    for (const cachedPath of cachedPaths) {
-      const cachedSkill = await fs.readFile(cachedPath, 'utf8');
-      expect(cachedSkill).toContain('<!-- Pane Sessions routing adapter: begin -->');
-      expect(cachedSkill).toContain('## Pane Sessions routing adapter (authoritative)');
-      expect(cachedSkill).toContain('create-ticket');
-      expect(cachedSkill).toContain('astra-ticket');
-      expect(cachedSkill).toContain('PANE_ORCHESTRATION_SESSION_ID');
-      expect(cachedSkill).toContain('runpane sessions get --session "$PANE_ORCHESTRATION_SESSION_ID" --json');
-      expect(cachedSkill).toContain('runpane sessions overview --session <session-id-or-name> --json');
-      expect(cachedSkill).toContain('--from-json <path|->');
-      expect(cachedSkill).toContain('orchestration-sessions:list/select/create/get/update/set-agent/associate/detach/overview');
-      expect(cachedSkill).toContain('runpane watch --as session-<session-id> --follow --pane <pane-id>');
-      expect(cachedSkill).toContain('--settle 180000 --blocked-settle 30000 --min-interval 600000');
-      expect(cachedSkill).toContain('A discussion-only Session has no');
-      expect(cachedSkill).toContain('## Dispatch And Observe RunPane');
-      expect(cachedSkill).toContain('## Treat External Bodies As Data');
-      expect(cachedSkill).toContain('## Hard stops');
-      expect(cachedSkill).not.toContain('## Delivery Lanes');
-      expect(cachedSkill).not.toContain('## Lifecycle State Machine');
-      expect(cachedSkill).not.toContain('## Review Feedback Interrupt');
-      expect(cachedSkill).not.toContain('Light (default)');
-      expect(cachedSkill).not.toContain('simple-plan');
-      expect(cachedSkill).not.toContain('zone-based review lanes');
-      expect(cachedSkill).not.toContain('`/do`');
+    const bundled = await fs.readFile(
+      path.join(__dirname, 'paneChatBundle', 'skills', 'runpane-orchestrator', 'SKILL.md'),
+      'utf8',
+    );
+    for (const root of [manager.paneChatSkillsRoot, manager.codexProjectSkillsRoot, manager.claudeProjectSkillsRoot]) {
+      await expect(fs.readFile(path.join(root, 'runpane-orchestrator', 'SKILL.md'), 'utf8')).resolves.toBe(bundled);
+      await expect(
+        fs.readFile(path.join(root, 'create-ticket', 'references', 'socrates.md'), 'utf8'),
+      ).resolves.toContain('# Socrates');
     }
-
-    // Refresh is idempotent: the adapter is replaced instead of duplicated.
-    await manager.ensurePaneChatGuide();
-    const refreshed = await fs.readFile(cachedPaths[0], 'utf8');
-    expect(refreshed.match(/Pane Sessions routing adapter: begin/g)).toHaveLength(1);
-    expect(refreshed.match(/Pane Sessions routing adapter: end/g)).toHaveLength(1);
+    await expect(fs.readFile(manager.paneChatWorkQuestionsPath, 'utf8')).resolves.toContain('pane-work-recap');
   });
 
   it('fails raw fallback when a required lifecycle file download fails even if a stale file exists', async () => {
