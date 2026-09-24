@@ -1,6 +1,6 @@
 ---
 name: pr-test-automation
-description: Run first-pass automated manual testing for PRs that are reviewed or nearly ready to merge. Use when the user asks Codex to test a PR/branch/worktree, validate product flows, exercise browser or CLI workflows, map changed UI journeys with screenshots, verify analytics/webhooks/payments/email/SMS behavior through connected tools, or produce manual QA notes before human testing.
+description: Run first-pass automated manual testing for PRs that are reviewed or nearly ready to merge. Use when the user asks to test a PR/branch/worktree, validate product flows, exercise browser or CLI workflows, map changed UI journeys with screenshots, verify analytics/webhooks/payments/email/SMS behavior through connected tools, or produce manual QA notes before human testing.
 ---
 
 # PR Test Automation

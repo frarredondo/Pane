@@ -57,7 +57,7 @@ Under ~10 hand-written files and ~500 lines is **small**; above is **large**.
 
 ### 2. Fan out, independently
 
-Use the single configured `refactor` agent role for every refactoring assignment.
+Use one fresh subagent per refactoring assignment.
 `refactor-simple`, `refactor-deep`, and `refactor-apply` are skill modes, not
 separate agent types. The parent orchestrates dispatch; a leaf instance cannot
 spawn helpers and returns to the parent at those gates. Reuse one apply instance

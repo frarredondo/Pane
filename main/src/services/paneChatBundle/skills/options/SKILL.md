@@ -9,7 +9,7 @@ This is the only place alternatives are argued. If the implementation session co
 
 ## Rules
 
-- One section per decision. Small decisions can be asked inline and recorded later in the plan instead of getting a document.
+- One section per decision. Small decisions can be asked inline and recorded later in the plan (the ticket from `create-ticket`, or `plan.html`) instead of getting a document.
 - Two or three real options per decision, plus two that are always present: the **smallest version** (what ships if everything deferrable is deferred, and what the user loses) and **do nothing** (what stays wrong, observably).
 - State each option's complexity-ladder rung, and give a reason for every rung above the lowest workable one. The ladder: 1 configuration or copy, 2 reuse an existing pattern, 3 new code inside one module, 4 a new contract between modules, 5 a schema change or migration, 6 a new dependency or new infrastructure.
 - Give every option, including the smallest version and doing nothing, a short complexity statement as described in the template. Cover both the requirements and the implementation: the complexity added compared with today, the likely ways it breaks, and the ongoing maintenance or operating cost. Say which requirements drive that cost, what could be simplified or deferred, and what the user would lose. Back claims with repository evidence where you have it, label assumptions, and describe effort and risk in words rather than scores or probabilities.

@@ -8,7 +8,7 @@ Every piece of work has one bundle: a folder holding all the pages written for a
 <root>/<slug>/
   index.html           the brief. It is the hub, so opening the folder lands on it
   options.html
-  plan.html            the approved plan, when the plan is written as a page
+  plan.html            the approved plan, when it is written as a page (often it is the ticket)
   trace.html           conversation viewer, when one is requested
   post-mortem.html     retrospective, when implementation work ends
   explainers/<topic>.html

@@ -24,7 +24,7 @@ Read [references/page-guide.md](references/page-guide.md) first. It says what th
 2. **Read the session for the story.** Run `node scripts/build-trace.mjs --out <tmp> --outline` to list every request with its anchor (`t0`, `t1`, …). Use what you remember of the session plus that outline to write `story.json`: a plain summary and 4–8 key moments, as described in the guide.
 3. **Build the page.** Run `node scripts/build-trace.mjs --out <dir> --story story.json --title "<task>: session trace" --back index.html`. This writes `trace.html` and `trace.otlp.json` (OpenTelemetry spans). Open the page and check the story, the moments, and that the PRs you know about are listed. Add missing PRs, releases, or artifacts by hand or by extending the script.
 4. **Review before publishing.** The page shows every user message in full, including anything pasted (meeting notes, logs, customer text). Only emails and tokens are redacted automatically. Remove or trim anything the page's readers shouldn't see, and ask when unsure.
-5. **Publish with the `grain` skill.**
+5. **Publish with Grain's installed skill when Grain is connected.** Otherwise save `trace.html` in the page bundle (see `page`) and report its path.
    - Add the page to the task's existing Grain workspace and link it from that workspace's main page, near the top.
    - With no existing page, create one in `Development Artifacts/<org>/<repo>`, named for the task.
    - Keep it private. Never create or widen a share. If the workspace already has a public share, tell the user the trace will be visible through it before you push.

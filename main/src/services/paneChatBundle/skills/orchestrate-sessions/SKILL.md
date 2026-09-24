@@ -17,6 +17,21 @@ Before any workspace or session action, read the host's own instructions (in Pan
 
 Use the host's own tools for its mechanics. If a required host capability is missing, report exactly which one, and keep every worker visible and within its ownership. Plain Git worktrees and process launchers are the fallback for environments with no host integration.
 
+## In Pane
+
+Pane's `pane-orchestrator` and `runpane` skills bind this skill to Pane, and
+they win where the two differ:
+
+- The Pane Chat Session is the planning session. Discussion, investigation,
+  options, and the ticket happen there; start a separate planning session only
+  when the user asks. The ticket from `create-ticket` is the plan.
+- Pane refreshes Session state and arms its watcher at startup.
+- Review and QA run as `runpane` describes: fresh panels or the `reviewer` and
+  `qa-and-verify` subagents, returning findings to the implementation
+  authority.
+- Durable records live where `runpane` says. The status board is optional,
+  on request.
+
 ## Intake and routing
 
 Act only on authorized work. Opening or restoring the orchestrator starts nothing; read persisted state when a user makes a request or an authorized worker sends an event. Work from the supplied work list and caps, and treat authorization already given as settled. Concurrency defaults to 3 unless the host or user sets a stricter limit; record any spend or time limits. Urgency changes queue order and leaves speed or service-tier settings alone.
@@ -50,7 +65,7 @@ Without a host requirement, give each work item its own Git worktree and branch,
 
 Pass the source, completion criteria, and host ownership and reporting instructions through the host's supported context mechanism. Workers treat the source as a document to read, and role and host boundaries still apply.
 
-An implementation session runs its own verification and review, as its plan or ticket and the user's review policy require, so the orchestrator launches no extra reviewers or implementation workers unless the user asks. Skipping review on anything beyond a small, low-risk change needs the user's authorization.
+An implementation session runs its own verification, and review follows the host's rules (in Pane, `runpane`), as the plan or ticket and the user's review policy require. Launch no extra implementation workers unless the user asks. Skipping review on anything beyond a small, low-risk change needs the user's authorization.
 
 ## Events, not polling
 
@@ -74,4 +89,4 @@ Update the same status-board bundle when something meaningful changes or the use
 
 A worker is done when its revision, checks, review outcome and PR or artifact links check out; an exit code or an opened PR is only a signal to look. Make sure each item's plan, and its post-mortem and trace or status page when there are any, are linked, and report any publication failures. Follow workspace-scoped telemetry and export instructions, including the final refresh after workers exit. Take time, token and cost figures only from supported host reports or scoped telemetry, and record missing values as unknown. Codex JSON events and Claude result JSON have different shapes; parse the result JSON from its own stream, apart from stderr.
 
-Never merge or push to a default branch, and do only the cleanup the host and user allow. Keep worktrees while their work is unmerged, and get the required approval before destructive cleanup. At a cap, queue the remaining work and report it. Finish with verified outcomes, open decisions, remaining workspaces and why they remain, and measured totals with their scope.
+Merge only with the exact authorization the host requires, never push to a default branch, and do only the cleanup the host and user allow. Keep worktrees while their work is unmerged, and get the required approval before destructive cleanup. At a cap, queue the remaining work and report it. Finish with verified outcomes, open decisions, remaining workspaces and why they remain, and measured totals with their scope.

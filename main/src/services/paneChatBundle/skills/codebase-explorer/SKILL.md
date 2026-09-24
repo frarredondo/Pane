@@ -1,6 +1,6 @@
 ---
 name: codebase-explorer
-description: Explore the notetake codebase to locate files, trace behavior, and document existing patterns with precise file references. Use when the task is understanding what exists, not proposing changes.
+description: Explore the codebase to locate files, trace behavior, and document existing patterns with precise file references. Use when the task is understanding what exists, not proposing changes.
 ---
 
 # Codebase Explorer

@@ -589,7 +589,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     }
   });
 
-  it('removes the folders older versions synced skills into', async () => {
+  it('removes old sync folders and points the old guide path at the entry skill', async () => {
     const manager = new SkillCacheManager();
     const oldCache = path.join(manager.skillsRoot, 'dcouple', 'parsa', '.claude', 'skills', 'review', 'SKILL.md');
     const oldCheckout = path.join(manager.skillsRoot, '.sources', 'dcouple-skills', 'README.md');
@@ -603,7 +603,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
     await expect(fs.access(path.join(manager.skillsRoot, 'dcouple'))).rejects.toThrow();
     await expect(fs.access(path.join(manager.skillsRoot, '.sources'))).rejects.toThrow();
-    await expect(fs.access(oldGuide)).rejects.toThrow();
+    await expect(fs.readFile(oldGuide, 'utf8')).resolves.toContain(manager.paneChatOrchestratorSkillPath);
   });
 
 });

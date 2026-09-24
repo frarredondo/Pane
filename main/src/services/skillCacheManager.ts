@@ -232,7 +232,9 @@ export class SkillCacheManager {
   }
 
   async ensurePaneChatGuide(): Promise<string> {
-    await this.installOnce();
+    // The entry skill still works without the bundle, so a failed install
+    // shouldn't stop a Session from opening.
+    await this.installOnce().catch(error => console.warn('[SkillCache] Failed to install Pane Chat skills', error));
     await fs.mkdir(this.paneChatRoot, { recursive: true });
     await this.writePaneChatGuide();
     return this.paneChatGuidePath;
@@ -283,7 +285,11 @@ export class SkillCacheManager {
     // Older versions synced skills into these folders and wrote these files.
     await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
     await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
-    await fs.rm(path.join(this.paneChatRoot, 'runpane-orchestrator.md'), { force: true });
+    // Conversations started before the upgrade may still read the old guide path.
+    await this.writeTextFile(
+      path.join(this.paneChatRoot, 'runpane-orchestrator.md'),
+      `# Moved\n\nPane Chat's instructions are now in \`${this.paneChatOrchestratorSkillPath}\`. Read that file and follow it.\n`,
+    );
     await fs.rm(path.join(this.paneChatRoot, 'work-questions.md'), { force: true });
   }
 
@@ -475,6 +481,44 @@ The Liveness Contract below sets up the Session's watcher.
 Idle, stopped, and exited states are activity signals. Completion needs a
 report with inspectable evidence, a timestamp, and provenance, and newer
 activity makes an older report stale. Keep findings in this conversation.
+
+## Which skill
+
+| Job | Skill |
+| --- | --- |
+| Talk an idea through | \`discussion\` |
+| Lay out approaches and trade-offs | \`options\` |
+| Capture work for delegation (the ticket is the plan) | \`create-ticket\`; \`brief\` for a long-form page it links |
+| Settle one unknown fact cheaply | \`smallest-test\`, or \`spike\` when a decision is blocked |
+| Find facts in code | the \`explorer\` subagent, or \`gather-evidence\` for one question |
+| Find facts outside the code | \`research-web\` |
+| Explain something | \`explain\`; \`eli5\` for a newcomer; \`explain-visually\` when a picture helps |
+| A bug report | \`bug-intake\` to reproduce and file; \`investigate\` to find the cause |
+| Show a UI before it's built | \`ui-mockup\` |
+| Check a change while building it | \`quick-verify\` |
+| Prove behavior in the running app | \`verify-app\` |
+| Full QA of a PR | \`pr-test-automation\`, or the \`qa-and-verify\` subagent |
+| Review a PR | \`review\`, or the \`reviewer\` subagent |
+| Open, then shepherd, a PR | \`prepare-pr\`, then \`babysit-pr\` |
+| Clean up a large diff | \`refactor\` |
+| Hand work to another session | \`handoff\` |
+| Share how a session went | \`session-trace\` |
+| The user's own work | \`pane-work\` |
+
+## Pane conventions
+
+These hold for this Session and for everything it delegates; \`runpane\` lists
+what to put in delegated prompts.
+
+- This Session is the planning session, and the ticket is the plan. Start a
+  separate planning session only when the user asks.
+- Pages and records go to Grain when it's connected. Otherwise follow
+  \`page\`; for this Session, the bundle root is
+  \`${path.join(this.paneChatRoot, 'pages')}\`.
+- HTML pages follow \`page\`. \`html-explainer\` is how \`eli5\` renders.
+- Reviewers and QA return findings. Only the implementation authority posts
+  to GitHub, under a recorded grant.
+- Merges need the user's explicit authorization for that exact merge.
 
 ## Other orchestration capabilities
 

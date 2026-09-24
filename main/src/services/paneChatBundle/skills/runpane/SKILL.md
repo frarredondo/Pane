@@ -7,8 +7,9 @@ description: Drive Pane through the runpane CLI. Covers dispatching work to agen
 
 Use RunPane as the control plane. Keep every authorized workstream moving until
 its pull request is ready to merge or it reaches a real blocker: a missing
-decision, a scope question, or a hard stop. Keep your turn going while
-authorized work remains. When an agent goes idle, check on it.
+decision, a scope question, or a hard stop. Advance every step that is ready,
+then yield to the watcher; a READY, BLOCKED, or IDLE line is the cue to check
+on an agent.
 
 `pane-orchestrator` says what a Pane Session does and when; `orchestrate-sessions`
 covers routing work to planning, implementation, and bug-report sessions. This
@@ -18,7 +19,8 @@ skill is how you carry it out in Pane.
 
 Persist decisions, holds, and ownership. Query everything else.
 
-- Write each fact to the work tracker where it has a home: the item's
+- Write each fact to the work tracker (the GitHub issue from
+  `create-ticket`) where it has a home: the item's
   description, its status, or a comment, once the user has allowed tracker
   writes for the workstream. Where it has no home, ask once and record it in
   your ledger.
@@ -69,9 +71,13 @@ While one workstream waits, continue the others.
 
 - Each workstream has one implementation authority. It owns every source edit,
   fix commit, rebase, push, and PR update.
-- Review and QA run in fresh panels on every new head. Reviewers read and
-  report; QA may run authorized tests and publish authorized evidence, and it
+- Review and QA run on every new head, in fresh panels or through the
+  `reviewer` and `qa-and-verify` subagents. They return findings and post
+  nothing. QA may run authorized tests and publish authorized evidence, and it
   returns code defects to the implementation authority.
+- Only the implementation authority posts to GitHub (review replies, thread
+  resolutions, PR updates), under a recorded grant. A grant to finish work
+  "through PR readiness" covers `babysit-pr`'s replies to review bots.
 - Create panes and panels in the background with `--source agent` and
   `--no-focus` where supported. Check the returned focus state. If a pane
   steals focus anyway, report it with `runpane doctor --report`.
@@ -90,6 +96,20 @@ Agents in other repositories don't have Pane's skills installed. When a prompt
 asks for a skill, give its absolute path from the skills folder that
 `pane-orchestrator` names, for example "Follow `<skills>/tdd/SKILL.md`". The
 agent reads the file and follows it; links inside it resolve from its folder.
+
+A delegated agent reads only the skills you name, so put Pane's conventions
+in every implementation prompt:
+
+- The ticket is the plan. Its acceptance criteria are the agreed behaviors and
+  test seams, so `tdd` starts from them; review checks against them.
+- Questions for the user come back to this Session: stop and state the
+  question, and it arrives here as BLOCKED.
+- Save pages and records to Grain when connected, otherwise as `page`
+  describes.
+- No merges. Release-asset uploads need a grant; without one, prepare the
+  Markdown and report.
+- The `reviewer` and `qa-and-verify` subagents exist only in Pane Chat. In
+  another repository, run `review` or `pr-test-automation` directly.
 
 A stage has started when both hold:
 

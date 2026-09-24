@@ -17,7 +17,7 @@ A spike answers one question so a decision can be made. Write one only when a de
 
 ## Format
 
-Plain text in the worktree, for example `docs/agent/spikes/{slug}.md`:
+Plain text in the page bundle (see `page`), for example `spikes/{slug}.md`:
 
 ```
 # Spike: {one question}

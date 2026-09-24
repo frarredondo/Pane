@@ -15,8 +15,8 @@ sketch carries a design review; a section that has no visual either
 earns its place in prose or belongs folded into depth. Without one
 standard, every generated page invents its own fonts, colors, and
 structure, and the reader pays for the drift. This skill is where the
-look and the bar live. Skills that produce pages (teach-back,
-reality-check, eli5, and whatever comes next) follow it; invoked
+look and the bar live. `eli5` renders with it (other pages follow
+`page`); invoked
 directly, it renders a one-off explainer of whatever the argument
 names.
 
