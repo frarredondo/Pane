@@ -199,7 +199,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             ? 'claude --dangerously-skip-permissions'
             : agent === 'codex' ? 'codex --yolo' : 'cursor-agent --force --trust',
           initialInput: agent === 'cursor'
-            ? 'Read /tmp/.pane/skills/pane-chat/runpane-orchestrator.md and initialize yourself as Pane Chat.'
+            ? 'Read /tmp/.pane/skills/pane-chat/pane-orchestrator/SKILL.md and initialize yourself as Pane Chat.'
             : 'Use the pane-orchestrator skill and initialize yourself as Pane Chat.',
           initialInputMode: 'argument',
           initialInputSubmitStrategy: 'enter',
@@ -224,7 +224,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         panel: clone(createPaneChatPanel(agent)),
         agent,
         cwd: '/tmp/.pane',
-        guidePath: '/tmp/.pane/skills/pane-chat/runpane-orchestrator.md',
+        guidePath: '/tmp/.pane/skills/pane-chat/pane-orchestrator/SKILL.md',
         started: false,
       };
     };

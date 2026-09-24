@@ -344,9 +344,12 @@ export class TerminalPanelManager extends EventEmitter {
   ): CliLaunchResolution | undefined {
     if (customState.wasInterrupted) {
       nextState.wasInterrupted = undefined;
+      // Keep Pane Chat's helper-subagent flags (`-c 'agents.…'`) on resume;
+      // other options, such as a prompt in a custom command, don't apply.
+      const launchOptions = (initialCommand.match(/ -c 'agents\.(?:[^']|'\\'')*'/g) ?? []).join('');
       const commandToRun = customState.agentSessionId
-        ? `codex resume --yolo ${customState.agentSessionId}`
-        : 'codex resume --yolo';
+        ? `codex resume --yolo${launchOptions} ${customState.agentSessionId}`
+        : `codex resume --yolo${launchOptions}`;
 
       if (customState.agentSessionId) {
         console.log(`[TerminalPanelManager] Resolved interrupted Codex panel ${panelId} to direct resume`);
