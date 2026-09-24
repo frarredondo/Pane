@@ -113,6 +113,17 @@ runpane panes rename --pane <pane-id> --name issue-393 --yes --json
 runpane panels list --pane <pane-id> --json
 runpane panels output --panel <panel-id> --limit 200 --json
 printf 'Continue\n' | runpane panels input --panel <panel-id> --input-file - --yes --json
+runpane watch --self-test
+runpane watch --follow
+runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+runpane sessions list [--json] [--pane-dir <path>]
+runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]
+runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
+runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
+runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane help
 runpane <command> --help
 ```
@@ -155,6 +166,8 @@ For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is repor
 
 `runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.
 
+`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
+
 `runpane panels list` lists tool panels inside one Pane session.
 
 `runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.
@@ -166,6 +179,24 @@ For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is repor
 If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.
 
 When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.
+
+`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). The recommended orchestrator invocation is `runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence.
+
+`sessions list` list durable named orchestration Sessions.
+
+`sessions create` create a durable named orchestration Session and its hidden terminal owner.
+
+`sessions get` read one durable named orchestration Session.
+
+`sessions update` update a Session overview from structured JSON.
+
+`sessions set-agent` switch the durable terminal agent for a named Session.
+
+`sessions associate` associate a user-visible Pane with a named Session.
+
+`sessions detach` detach a Pane from a named Session.
+
+`sessions overview` read a live status, activity, git, and pull request overview for a named Session.
 
 ## Agent Context
 
@@ -204,6 +235,7 @@ Brief tools:
 - `panes pin`: Declaratively pin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes unpin`: Declaratively unpin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
+- `panes focus`: Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.
 - `panels create`: Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
@@ -212,6 +244,7 @@ Brief tools:
 - `panels submit`: Send text plus terminal Enter to a terminal panel.
 - `panels submit-composer`: Submit an agent composer with the correct key sequence, including Ctrl+Enter for Codex.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
+- `watch`: Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.
 
 Managed AGENTS.md block body:
 
@@ -224,7 +257,7 @@ This managed guidance was created by [runpane.com](https://runpane.com) for the 
 
 Pane mental model: a repository is the saved base repo; a Pane is a user-visible feature/PR workspace (Pane session) that normally maps to one Pane-managed git worktree and branch; a panel/tab is a terminal inside one Pane and shares that Pane's worktree; an agent is the CLI process running in a panel.
 
-Default happy path when the user asks you to use Pane or RunPane: run `runpane doctor --json`; read `runpane agent-context --json`; resolve the saved base repository with `runpane repos list --json` or add it once with `runpane repos add --path <repo> --yes --json`; create one visible Pane (Pane session) for the requested feature/PR with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt "<task>" --source agent --no-focus --wait-ready --yes --json` or the equivalent `--tool-command <command>` form; then validate with `runpane panels wait` or `runpane panels screen` before reporting progress.
+Default happy path when the user asks you to use Pane or RunPane: run `runpane doctor --json`; read `runpane agent-context --json`; resolve the saved base repository with `runpane repos list --json` or add it once with `runpane repos add --path <repo> --yes --json`; create one visible Pane (Pane session) for the requested feature/PR with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt "<task>" --source agent --no-focus --wait-ready --yes --json` or the equivalent `--tool-command <command>` form; then validate with `runpane panels wait` or `runpane panels screen` before reporting progress. For long-lived supervision, use `runpane watch --follow` instead of polling wait or screen.
 
 Use Pane when the user wants visible Panes or co-drivable parallel feature/PR workspaces. Do not use Pane as your default private delegation mechanism; for private background decomposition, use your normal subagent/worktree workflow.
 
@@ -244,9 +277,9 @@ Start with `runpane doctor --json` before taking Pane actions. Use it to underst
 
 In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`.
 
-Use `runpane agent-context --json` for full Pane CLI context. Use `runpane agent-context --command "panels wait" --json` or another command name for detailed schema only when needed.
+Use `runpane agent-context --json` for full Pane CLI context. Use `runpane agent-context --command "watch" --json` or another command name for detailed schema only when needed.
 
-Default to context-safe validation: after creating Panes or sending terminal input, run `runpane panels wait` or `runpane panels screen` before reporting success. Prefer `runpane panels submit` for normal text plus Enter; use `runpane panels input` only for exact bytes such as Ctrl-C or escape sequences.
+Default to context-safe validation: after creating Panes or sending terminal input, run `runpane panels wait` or `runpane panels screen` before reporting success. For ongoing supervision, `runpane watch --follow` is the canonical monitor; do not poll wait or screen. Prefer `runpane panels submit` for normal text plus Enter; use `runpane panels input` only for exact bytes such as Ctrl-C or escape sequences.
 
 Pane terminals draw inline images: sixel, iTerm2 inline images, and the kitty graphics protocol. Tools that need kitty graphics, such as [terminal-browser](https://github.com/zenbu-labs/terminal-browser) and [terminal-doom](https://github.com/dcouple/terminal-doom), run inside a Pane panel. `runpane doctor --json` reports the protocol list under `terminal.graphicsProtocols`.
 
@@ -261,6 +294,7 @@ Common commands:
 - `runpane panels list --pane <pane-id> --json`
 - `runpane panels screen --panel <panel-id> --limit 80 --json`
 - `runpane panels wait --panel <panel-id> --for ready --timeout-ms 30000 --json`
+- `runpane watch --follow --json`
 - `runpane panels submit --panel <panel-id> --text "<answer>" --yes --json`
 - `runpane panels input --panel <panel-id> --input-file <path|-> --yes --json`
 
@@ -324,7 +358,11 @@ These flags are consumed by local daemon-control commands:
 --format <lines|json>
 --heartbeat <seconds>
 --idle-after <milliseconds>
+--settle <milliseconds>
+--blocked-settle <milliseconds>
+--min-interval <milliseconds>
 --body-file <path|->
+--session <id|name>
 --json
 --wait-ready
 --no-focus
@@ -341,6 +379,7 @@ These flags are consumed by local daemon-control commands:
 --include-shells
 --no-held-input
 --self-test
+--idle-backoff
 --report
 ```
 

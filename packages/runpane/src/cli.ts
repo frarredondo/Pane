@@ -32,6 +32,15 @@ import {
   runPanesList,
   runPanesPin,
   runPanesRename,
+  runPanesFocus,
+  runSessionsAssociate,
+  runSessionsCreate,
+  runSessionsDetach,
+  runSessionsGet,
+  runSessionsList,
+  runSessionsOverview,
+  runSessionsSetAgent,
+  runSessionsUpdate,
   runReposAdd,
   runReposList,
   runWatch,
@@ -124,6 +133,38 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return runPanesCost(parsed);
   }
 
+  if (parsed.command === 'sessions list') {
+    return runSessionsList(parsed);
+  }
+
+  if (parsed.command === 'sessions create') {
+    return runSessionsCreate(parsed);
+  }
+
+  if (parsed.command === 'sessions get') {
+    return runSessionsGet(parsed);
+  }
+
+  if (parsed.command === 'sessions update') {
+    return runSessionsUpdate(parsed);
+  }
+
+  if (parsed.command === 'sessions set-agent') {
+    return runSessionsSetAgent(parsed);
+  }
+
+  if (parsed.command === 'sessions associate') {
+    return runSessionsAssociate(parsed);
+  }
+
+  if (parsed.command === 'sessions detach') {
+    return runSessionsDetach(parsed);
+  }
+
+  if (parsed.command === 'sessions overview') {
+    return runSessionsOverview(parsed);
+  }
+
   if (parsed.command === 'workspace state') {
     return runWorkspaceState(parsed);
   }
@@ -154,6 +195,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panes rename') {
     return runPanesRename(parsed);
+  }
+
+  if (parsed.command === 'panes focus') {
+    return runPanesFocus(parsed);
   }
 
   if (parsed.command === 'panels list') {

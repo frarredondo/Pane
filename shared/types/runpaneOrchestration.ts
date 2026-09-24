@@ -4,8 +4,34 @@ import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
 import type { AgentState } from './agentStatus';
 import type { UsageByPane, UsagePaneCostSlice, UsageTotals } from './usage';
+import type {
+  OrchestrationSessionOverview,
+  OrchestrationSessionRecord,
+} from './orchestrationSession';
 
 export type RunpaneAgentId = RunpaneAgent;
+
+export interface RunpaneSessionSelector {
+  sessionId?: string;
+  name?: string;
+}
+
+export interface RunpaneSessionListResult {
+  ok: true;
+  sessions: OrchestrationSessionRecord[];
+  selectedSessionId?: string;
+}
+
+export interface RunpaneSessionResult {
+  ok: true;
+  session: OrchestrationSessionRecord;
+  panelId?: string;
+  internalSessionId?: string;
+}
+
+export interface RunpaneSessionOverviewResult extends OrchestrationSessionOverview {
+  ok: true;
+}
 
 export type RunpaneWorkspaceEntryKind =
   | 'agent.ready'
@@ -68,6 +94,11 @@ export interface RunpaneWorkspaceWaitRequest {
   includeHeldInputPresence?: boolean;
   idleAfterMs?: number;
   idleWindowStartMs?: number;
+  /** Opt-in cadence shaping; each requires a named consumer (`as`). */
+  settleMs?: number;
+  blockedSettleMs?: number;
+  minIntervalMs?: number;
+  idleBackoff?: boolean;
 }
 
 export type RunpaneWorkspaceResetReason =
@@ -396,6 +427,24 @@ export interface RunpanePaneRenameResult {
   dryRun?: true;
   pane: RunpanePaneSummary;
 }
+
+export interface RunpanePaneFocusRequest {
+  paneId: string;
+  panelId?: string;
+  source?: RunpanePanelCreateSource;
+}
+
+export interface RunpanePaneFocusResult {
+  ok: true;
+  paneId: string;
+  panelId?: string;
+  focused: true;
+}
+
+export type RunpanePaneFocusRequestedEvent = Pick<
+  RunpanePaneFocusRequest,
+  'paneId' | 'panelId'
+>;
 
 export interface RunpanePaneArchiveRequest {
   paneId: string;

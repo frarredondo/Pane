@@ -10,7 +10,7 @@ import { getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService } from '../services/database';
-import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type PanelLayoutNode, type ToolPanelState } from '../../../shared/types/panels';
+import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type PanelLayoutNode } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
@@ -102,31 +102,16 @@ function resolveTerminalInitializationCwd(
   return requestedCwd;
 }
 
-type PersistedCustomState = NonNullable<ToolPanelState['customState']>;
-
-function readPersistedScrollback(customState: PersistedCustomState | undefined): string | null {
-  try {
-    const state = decodeBoundary(customState, boundary.object({
-      scrollbackBuffer: boundary.optional(boundary.union(
-        boundary.string,
-        boundary.array(boundary.string),
-      )),
-    }));
-    if (state.scrollbackBuffer === undefined) return null;
-    return Array.isArray(state.scrollbackBuffer)
-      ? state.scrollbackBuffer.join('\n')
-      : state.scrollbackBuffer;
-  } catch {
-    return null;
-  }
+/** Scrollback for a panel whose terminal is not live: read from panel_buffers, never from panel state. */
+function readPersistedScrollback(panelId: string): string | null {
+  return databaseService.getPanelBuffers(panelId)?.scrollback ?? null;
 }
 
 async function readCleanTerminalScrollback(panelId: string, lines: number): Promise<string | null> {
   const liveScrollback = await terminalPanelManager.getCleanTerminalScrollback(panelId, lines);
   if (liveScrollback !== null) return liveScrollback;
 
-  const panel = panelManager.getPanel(panelId);
-  const persistedScrollback = readPersistedScrollback(panel?.state?.customState);
+  const persistedScrollback = readPersistedScrollback(panelId);
   if (persistedScrollback === null || persistedScrollback === '') return null;
 
   return sanitizeTerminalOutput(persistedScrollback).split('\n').slice(-lines).join('\n');

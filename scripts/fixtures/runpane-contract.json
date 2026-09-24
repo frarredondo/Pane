@@ -89,6 +89,13 @@
       "60",
       "--idle-after",
       "600000",
+      "--settle",
+      "180000",
+      "--blocked-settle",
+      "30000",
+      "--min-interval",
+      "600000",
+      "--idle-backoff",
       "--all-managed",
       "--agents-only",
       "--exclude-pane",
@@ -231,6 +238,18 @@
       "--json"
     ],
     [
+      "panes",
+      "focus",
+      "--pane",
+      "session-1",
+      "--panel",
+      "panel-1",
+      "--source",
+      "user",
+      "--yes",
+      "--json"
+    ],
+    [
       "panels",
       "list",
       "--pane",
@@ -354,6 +373,26 @@
       "auto",
       "--yes",
       "--json"
+    ],
+    [
+      "sessions",
+      "list",
+      "--json"
+    ],
+    [
+      "sessions",
+      "get",
+      "--session",
+      "demo",
+      "--json"
+    ],
+    [
+      "sessions",
+      "update",
+      "--session",
+      "demo",
+      "--from-json",
+      "-"
     ]
   ],
   "help": {
