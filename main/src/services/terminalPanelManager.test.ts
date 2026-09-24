@@ -927,6 +927,18 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
   });
 
+  it('drops other Codex options, such as a prompt, when resuming', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo "fix the bug"', {
+      agentType: 'codex',
+      wasInterrupted: true,
+      agentSessionId: 'thread-1',
+    });
+
+    expect(result).toMatchObject({ commandToRun: 'codex resume --yolo thread-1' });
+  });
+
   it('keeps Enter as the default initial input submit strategy', async () => {
     const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
     const terminal = createTerminal();

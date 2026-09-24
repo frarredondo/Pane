@@ -106,7 +106,8 @@ in every implementation prompt:
   question, and it arrives here as BLOCKED.
 - Save pages and records to Grain when connected, otherwise as `page`
   describes.
-- Review and QA return findings and post nothing.
+- Review and QA post nothing. They render their findings as a page (see
+  `page`) under `tmp/pages/<slug>/`, open it, and report its path.
 - No merges, unless the prompt names the exact merge the user authorized.
   Release-asset uploads need a grant; without one, prepare the Markdown and
   report.

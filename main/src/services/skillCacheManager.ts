@@ -262,7 +262,10 @@ export class SkillCacheManager {
       claude: await listEntries(path.join(legacyCache, '.claude', 'skills')),
       codex: await listEntries(path.join(legacyCache, '.codex', 'skills')),
     };
-    const bundledSkills = await listEntries(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills'));
+    // Read the bundle before deleting anything, so a missing bundle fails
+    // without removing what is installed.
+    const bundledSkills = (await fs.readdir(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills'))).sort();
+    const subagents = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
     const skills = [...bundledSkills, 'pane-orchestrator'];
 
     await fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true });
@@ -279,17 +282,12 @@ export class SkillCacheManager {
         await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill));
       }
     }
-    const agents = await this.installSubagents(previous.agents);
+    const agents = await this.installSubagents(subagents, previous.agents);
 
     await this.writeTextFile(manifestPath, `${JSON.stringify({ skills, agents }, null, 2)}\n`);
     // Older versions synced skills into these folders and wrote these files.
     await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
     await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
-    // Conversations started before the upgrade may still read the old guide path.
-    await this.writeTextFile(
-      path.join(this.paneChatRoot, 'runpane-orchestrator.md'),
-      `# Moved\n\nPane Chat's instructions are now in \`${this.paneChatOrchestratorSkillPath}\`. Read that file and follow it.\n`,
-    );
     await fs.rm(path.join(this.paneChatRoot, 'work-questions.md'), { force: true });
   }
 
@@ -299,6 +297,11 @@ export class SkillCacheManager {
     await fs.mkdir(this.paneChatRoot, { recursive: true });
     await fs.writeFile(this.paneChatRuntimeContextPath, runtimeContext, 'utf8');
     await this.writeTextFile(this.paneChatOrchestratorSkillPath, orchestratorSkill);
+    // Conversations started before the upgrade may still read the old guide path.
+    await this.writeTextFile(
+      path.join(this.paneChatRoot, 'runpane-orchestrator.md'),
+      `# Moved\n\nPane Chat's instructions are now in \`${this.paneChatOrchestratorSkillPath}\`. Read that file and follow it.\n`,
+    );
     await this.writeTextFile(this.codexPaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.claudePaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.cursorPaneOrchestratorRulePath, this.toCursorRule(orchestratorSkill));
@@ -321,8 +324,7 @@ export class SkillCacheManager {
    * (.claude/agents) and Codex (.codex/agents plus launch flags) from the
    * bundle's agents/ folder. Each one follows one bundled skill.
    */
-  private async installSubagents(previouslyInstalled: string[]): Promise<string[]> {
-    const definitions = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
+  private async installSubagents(definitions: SubagentDefinition[], previouslyInstalled: string[]): Promise<string[]> {
     const codexArgs: string[] = [];
     for (const name of new Set([...previouslyInstalled, ...definitions.map(agent => agent.name)])) {
       await fs.rm(path.join(this.claudeProjectAgentsRoot, `${name}.md`), { force: true });
@@ -521,7 +523,10 @@ what to put in delegated prompts.
   \`${path.join(this.paneChatRoot, 'pages')}\`.
 - HTML pages follow \`page\`. \`html-explainer\` is how \`eli5\` renders.
 - Reviewers and QA return findings. Only the implementation authority posts
-  to GitHub, under a recorded grant.
+  to GitHub, under a recorded grant. When a skill would post but has no
+  grant, it renders the same content as a page under \`tmp/pages/<slug>/\`
+  (for this Session, the bundle root above), opens it, and reports the path,
+  so the work still shows.
 - Merges need the user's explicit authorization for that exact merge.
 
 ## Other orchestration capabilities

@@ -344,10 +344,9 @@ export class TerminalPanelManager extends EventEmitter {
   ): CliLaunchResolution | undefined {
     if (customState.wasInterrupted) {
       nextState.wasInterrupted = undefined;
-      // Keep launch options such as Pane Chat's `-c agents.*` flags on resume.
-      const launchOptions = initialCommand.startsWith('codex --yolo ')
-        ? initialCommand.slice('codex --yolo'.length)
-        : '';
+      // Keep Pane Chat's helper-subagent flags (`-c 'agents.…'`) on resume;
+      // other options, such as a prompt in a custom command, don't apply.
+      const launchOptions = (initialCommand.match(/ -c 'agents\.(?:[^']|'\\'')*'/g) ?? []).join('');
       const commandToRun = customState.agentSessionId
         ? `codex resume --yolo${launchOptions} ${customState.agentSessionId}`
         : `codex resume --yolo${launchOptions}`;
