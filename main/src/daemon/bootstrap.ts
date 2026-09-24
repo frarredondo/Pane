@@ -199,7 +199,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
   const versionChecker = new VersionChecker(configManager, logger);
-  const skillCacheManager = new SkillCacheManager(logger);
+  const skillCacheManager = new SkillCacheManager();
   await skillCacheManager.start();
   const paneChatManager = new PaneChatManager(configManager, sessionManager, skillCacheManager);
   await paneChatManager.getOrCreate().catch(error => {
@@ -403,7 +403,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       if (paneDaemonServer) {
         await paneDaemonServer.stop();
       }
-      skillCacheManager.stop();
       versionChecker.stopPeriodicCheck();
       logger.close();
     },

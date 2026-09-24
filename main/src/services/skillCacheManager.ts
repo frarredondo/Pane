@@ -1,87 +1,10 @@
-import { execFile } from 'child_process';
 import fs from 'fs/promises';
-import https from 'https';
 import path from 'path';
-import { promisify } from 'util';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
-import type { Logger } from '../utils/logger';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
-const execFileAsync = promisify(execFile);
-
-const UPSTREAM_REPO_URL = 'https://github.com/greenfield-inc/skills.git';
-const RAW_BASE_URL = 'https://raw.githubusercontent.com/greenfield-inc/skills/main';
-const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const INITIAL_SYNC_DELAY_MS = 15 * 1000;
-const MAX_DOWNLOAD_REDIRECTS = 5;
-
-const TOP_LEVEL_FILES = [
-  'README.md',
-  'docs/readme-workflow-map.png',
-  'docs/readme-workflow-map.excalidraw',
-  'docs/readme-skill-legend.png',
-  'docs/readme-skill-legend.excalidraw',
-] as const;
-
-// Skills Pane Chat depends on ship with Pane and overwrite synced copies.
+// Every skill Pane installs for its agents ships with Pane.
 const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
-
-const SOURCE_SKILL_ROOT_PATHS = [
-  'parsa/.codex/skills',
-  'parsa/.claude/skills',
-] as const;
-
-const IMPORTANT_SKILL_PATHS = [
-  'parsa/.codex/skills/explain-visually',
-  'parsa/.codex/skills/discussion',
-  'parsa/.codex/skills/plan',
-  'parsa/.codex/skills/simple-plan',
-  'parsa/.codex/skills/implement',
-  'parsa/.codex/skills/implementation-reviewer',
-  'parsa/.codex/skills/pr-test-automation',
-  'parsa/.codex/skills/prepare-pr',
-  'parsa/.codex/skills/gh-address-comments',
-  'parsa/.codex/skills/teach-back',
-  'parsa/.codex/skills/investigate',
-  'parsa/.codex/skills/codebase-explorer',
-  'parsa/.codex/skills/commit',
-  'parsa/.claude/skills/explain-visually',
-  'parsa/.claude/skills/discussion',
-  'parsa/.claude/skills/create-plan',
-  'parsa/.claude/skills/simple-plan',
-  'parsa/.claude/skills/implement',
-  'parsa/.claude/skills/pr-test-automation',
-  'parsa/.claude/skills/prepare-pr',
-  'parsa/.claude/skills/gh-address-comments',
-  'parsa/.claude/skills/review',
-  'parsa/.claude/skills/teach-back',
-  'parsa/.claude/skills/investigate',
-  'parsa/.claude/skills/commit',
-] as const;
-
-const REQUIRED_FALLBACK_RAW_FILES = [
-  ...TOP_LEVEL_FILES,
-  ...IMPORTANT_SKILL_PATHS.map(skillPath => `${skillPath}/SKILL.md`),
-  'parsa/.codex/skills/gh-address-comments/agents/openai.yaml',
-  'parsa/.codex/skills/pr-test-automation/agents/openai.yaml',
-  'parsa/.claude/skills/gh-address-comments/agents/openai.yaml',
-  'parsa/.claude/skills/pr-test-automation/agents/openai.yaml',
-  'parsa/.claude/skills/review/CRITERIA.md',
-] as const;
-
-const OPTIONAL_FALLBACK_RAW_FILES = [
-  'parsa/.codex/skills/plan/plan_base.md',
-  'parsa/.codex/skills/teach-back/agents/openai.yaml',
-  'parsa/.claude/skills/create-plan/plan_base.md',
-] as const;
-
-const FALLBACK_RAW_FILES = [
-  ...REQUIRED_FALLBACK_RAW_FILES,
-  ...OPTIONAL_FALLBACK_RAW_FILES,
-] as const;
-
-const REQUIRED_FALLBACK_RAW_FILE_SET = new Set<string>(REQUIRED_FALLBACK_RAW_FILES);
 
 const SESSION_STARTUP_GUIDANCE = `## Session startup
 
@@ -265,17 +188,8 @@ Watcher re-arm:
   is filtered out of the monitor, so silence is expected.`;
 
 
-interface SkillSyncState {
-  lastAttemptAt?: string;
-  lastSuccessAt?: string;
-  sourceCommit?: string;
-  lastError?: string;
-}
-
 export class SkillCacheManager {
   readonly skillsRoot: string;
-  readonly cacheRoot: string;
-  readonly sourceRoot: string;
   readonly paneChatRoot: string;
   readonly paneChatGuidePath: string;
   readonly paneChatRuntimeContextPath: string;
@@ -289,16 +203,9 @@ export class SkillCacheManager {
   readonly cursorPaneOrchestratorRulePath: string;
   readonly paneWatchScriptPath: string;
   readonly paneIdleWatchScriptPath: string;
-  readonly syncStatePath: string;
 
-  private initialSyncTimer: NodeJS.Timeout | null = null;
-  private syncTimer: NodeJS.Timeout | null = null;
-  private syncInFlight: Promise<void> | null = null;
-
-  constructor(private readonly logger?: Logger) {
+  constructor() {
     this.skillsRoot = path.join(getAppDirectory(), 'skills');
-    this.cacheRoot = path.join(this.skillsRoot, 'dcouple');
-    this.sourceRoot = path.join(this.skillsRoot, '.sources', 'dcouple-skills');
     this.paneChatRoot = path.join(this.skillsRoot, 'pane-chat');
     this.paneChatGuidePath = path.join(this.paneChatRoot, 'runpane-orchestrator.md');
     this.paneChatRuntimeContextPath = path.join(this.paneChatRoot, 'runtime-context.md');
@@ -312,183 +219,19 @@ export class SkillCacheManager {
     this.cursorPaneOrchestratorRulePath = path.join(getAppDirectory(), '.cursor', 'rules', 'pane-orchestrator.mdc');
     this.paneWatchScriptPath = path.join(getAppDirectory(), 'tools', 'watch.py');
     this.paneIdleWatchScriptPath = path.join(getAppDirectory(), 'tools', 'idle-watch.py');
-    this.syncStatePath = path.join(this.cacheRoot, 'sync-state.json');
   }
 
   async start(): Promise<void> {
+    // Older versions synced skills into these folders; nothing reads them now.
+    await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
+    await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
     await this.ensurePaneChatGuide();
-    if (this.initialSyncTimer || this.syncTimer) {
-      return;
-    }
-
-    this.initialSyncTimer = setTimeout(() => {
-      this.initialSyncTimer = null;
-      void this.syncIfStale().catch(error => this.logWarn('Initial skill sync failed', error));
-    }, INITIAL_SYNC_DELAY_MS);
-    this.initialSyncTimer.unref?.();
-
-    this.syncTimer = setInterval(() => {
-      void this.syncIfStale().catch(error => this.logWarn('Scheduled skill sync failed', error));
-    }, SYNC_INTERVAL_MS);
-    this.syncTimer.unref?.();
-  }
-
-  stop(): void {
-    if (this.initialSyncTimer) {
-      clearTimeout(this.initialSyncTimer);
-      this.initialSyncTimer = null;
-    }
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
   }
 
   async ensurePaneChatGuide(): Promise<string> {
-    await fs.mkdir(this.cacheRoot, { recursive: true });
     await fs.mkdir(this.paneChatRoot, { recursive: true });
     await this.writePaneChatGuide();
     return this.paneChatGuidePath;
-  }
-
-  async syncIfStale(force = false): Promise<void> {
-    if (this.syncInFlight) return this.syncInFlight;
-    this.syncInFlight = this.syncInternal(force).finally(() => {
-      this.syncInFlight = null;
-    });
-    return this.syncInFlight;
-  }
-
-  private async syncInternal(force: boolean): Promise<void> {
-    const state = await this.readSyncState();
-    if (!force && state.lastAttemptAt) {
-      const lastAttemptMs = new Date(state.lastAttemptAt).getTime();
-      if (!Number.isNaN(lastAttemptMs) && Date.now() - lastAttemptMs < SYNC_INTERVAL_MS) {
-        return;
-      }
-    }
-
-    await this.writeSyncState({
-      ...state,
-      lastAttemptAt: new Date().toISOString(),
-      lastError: undefined,
-    });
-
-    try {
-      let sourceCommit: string | undefined;
-      const syncedFromGit = await this.syncSourceCheckout();
-      if (syncedFromGit) {
-        await this.copyFromSourceCheckout();
-        sourceCommit = await this.getSourceCommit();
-      } else {
-        await this.downloadFallbackFiles();
-      }
-      await this.writePaneChatGuide();
-
-      await this.writeSyncState({
-        lastAttemptAt: new Date().toISOString(),
-        lastSuccessAt: new Date().toISOString(),
-        sourceCommit,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.writeSyncState({
-        ...(await this.readSyncState()),
-        lastAttemptAt: new Date().toISOString(),
-        lastError: message,
-      });
-      throw error;
-    }
-  }
-
-  private async syncSourceCheckout(): Promise<boolean> {
-    try {
-      const gitDir = path.join(this.sourceRoot, '.git');
-      const hasCheckout = await exists(gitDir);
-
-      if (hasCheckout) {
-        await execFileAsync('git', ['-C', this.sourceRoot, 'pull', '--ff-only'], { timeout: 120_000 });
-        return true;
-      }
-
-      await fs.mkdir(path.dirname(this.sourceRoot), { recursive: true });
-      await execFileAsync('git', ['clone', '--depth', '1', UPSTREAM_REPO_URL, this.sourceRoot], { timeout: 180_000 });
-      return true;
-    } catch (error) {
-      this.logWarn(
-        'Git skill sync unavailable; falling back to raw file download',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-      return false;
-    }
-  }
-
-  private async copyFromSourceCheckout(): Promise<void> {
-    await fs.mkdir(this.cacheRoot, { recursive: true });
-
-    for (const relativePath of TOP_LEVEL_FILES) {
-      await copyPath(path.join(this.sourceRoot, relativePath), path.join(this.cacheRoot, relativePath));
-    }
-
-    for (const relativePath of SOURCE_SKILL_ROOT_PATHS) {
-      await mirrorPath(path.join(this.sourceRoot, relativePath), path.join(this.cacheRoot, relativePath));
-    }
-  }
-
-  private async downloadFallbackFiles(): Promise<void> {
-    await fs.mkdir(this.cacheRoot, { recursive: true });
-    const failures: string[] = [];
-    const requiredDownloadFailures: string[] = [];
-
-    for (const relativePath of FALLBACK_RAW_FILES) {
-      try {
-        const bytes = await downloadBuffer(`${RAW_BASE_URL}/${encodeURIPath(relativePath)}`);
-        const target = path.join(this.cacheRoot, relativePath);
-        await fs.mkdir(path.dirname(target), { recursive: true });
-        await fs.writeFile(target, bytes);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        failures.push(`${relativePath}: ${message}`);
-        if (REQUIRED_FALLBACK_RAW_FILE_SET.has(relativePath)) {
-          requiredDownloadFailures.push(`${relativePath}: ${message}`);
-        }
-        this.logWarn(
-          `Failed to download skill cache file ${relativePath}`,
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    }
-
-    const missingRequiredFiles: string[] = [];
-    for (const relativePath of REQUIRED_FALLBACK_RAW_FILES) {
-      if (!(await exists(path.join(this.cacheRoot, relativePath)))) {
-        missingRequiredFiles.push(relativePath);
-      }
-    }
-
-    if (requiredDownloadFailures.length > 0 || missingRequiredFiles.length > 0) {
-      const failureSummary = failures.length > 0
-        ? ` Failed downloads: ${failures.slice(0, 5).join('; ')}${failures.length > 5 ? '; ...' : ''}`
-        : '';
-      const failedRequiredSummary = requiredDownloadFailures.length > 0
-        ? ` Required download failures: ${requiredDownloadFailures.slice(0, 5).join('; ')}${requiredDownloadFailures.length > 5 ? '; ...' : ''}`
-        : '';
-      const missingRequiredSummary = missingRequiredFiles.length > 0
-        ? ` Missing required files: ${missingRequiredFiles.join(', ')}.`
-        : '';
-      throw new Error(
-        `Skill cache fallback failed for required files.${missingRequiredSummary}${failedRequiredSummary}${failureSummary}`,
-      );
-    }
-  }
-
-  private async getSourceCommit(): Promise<string | undefined> {
-    try {
-      const { stdout } = await execFileAsync('git', ['-C', this.sourceRoot, 'rev-parse', 'HEAD'], { timeout: 30_000 });
-      return stdout.trim() || undefined;
-    } catch {
-      return undefined;
-    }
   }
 
   private async writePaneChatGuide(): Promise<void> {
@@ -499,7 +242,6 @@ export class SkillCacheManager {
     await fs.writeFile(this.paneChatRuntimeContextPath, runtimeContext, 'utf8');
     await fs.writeFile(this.paneChatGuidePath, guide, 'utf8');
     await this.writeTextFile(this.paneChatOrchestratorSkillPath, orchestratorSkill);
-    await this.mirrorCachedAgentSkillsIntoProject();
     await this.installBundledSkills();
     await this.writeTextFile(this.codexPaneOrchestratorSkillPath, orchestratorSkill);
     await this.writeTextFile(this.claudePaneOrchestratorSkillPath, orchestratorSkill);
@@ -518,27 +260,13 @@ export class SkillCacheManager {
     return `---\ndescription: Pane Chat orchestrator contract\nalwaysApply: true\n---\n\n${body}\n`;
   }
 
-  private async mirrorCachedAgentSkillsIntoProject(): Promise<void> {
-    await mirrorPath(
-      path.join(this.cacheRoot, 'parsa', '.codex', 'skills'),
-      this.codexProjectSkillsRoot,
-    );
-    await mirrorPath(
-      path.join(this.cacheRoot, 'parsa', '.claude', 'skills'),
-      this.claudeProjectSkillsRoot,
-    );
-  }
-
-  /** Bundled skills replace any synced copy, in Pane Chat's root and both project roots. */
+  /** Pane owns these skill folders: each start replaces them with the bundle. */
   private async installBundledSkills(): Promise<void> {
     const bundledSkills = path.join(PANE_CHAT_BUNDLE_ROOT, 'skills');
     await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'work-questions.md'), this.paneChatWorkQuestionsPath);
-    await fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true });
-    for (const skill of await fs.readdir(bundledSkills)) {
-      for (const root of [this.paneChatSkillsRoot, this.codexProjectSkillsRoot, this.claudeProjectSkillsRoot]) {
-        await fs.rm(path.join(root, skill), { recursive: true, force: true });
-        await copyBundledPath(path.join(bundledSkills, skill), path.join(root, skill));
-      }
+    for (const root of [this.paneChatSkillsRoot, this.codexProjectSkillsRoot, this.claudeProjectSkillsRoot]) {
+      await fs.rm(root, { recursive: true, force: true });
+      await copyBundledPath(bundledSkills, root);
     }
   }
 
@@ -1185,33 +913,9 @@ if __name__ == "__main__":
     return '- PowerShell fallback: not needed for this Pane process. Use native RunPane commands; switch only when the user explicitly targets another OS or Pane instance.';
   }
 
-  private async readSyncState(): Promise<SkillSyncState> {
-    try {
-      const raw = await fs.readFile(this.syncStatePath, 'utf8');
-      return decodeBoundary(JSON.parse(raw), boundary.object({
-        lastAttemptAt: boundary.optional(boundary.string),
-        lastSuccessAt: boundary.optional(boundary.string),
-        sourceCommit: boundary.optional(boundary.string),
-        lastError: boundary.optional(boundary.string),
-      }));
-    } catch {
-      return {};
-    }
-  }
-
-  private async writeSyncState(state: SkillSyncState): Promise<void> {
-    await fs.mkdir(path.dirname(this.syncStatePath), { recursive: true });
-    await fs.writeFile(this.syncStatePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  }
-
   private async writeTextFile(filePath: string, contents: string): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, contents, 'utf8');
-  }
-
-  private logWarn(message: string, error?: Error): void {
-    this.logger?.warn(`[SkillCache] ${message}`, error);
-    if (!this.logger) console.warn(`[SkillCache] ${message}`, error);
   }
 }
 
@@ -1237,18 +941,6 @@ async function copyBundledPath(source: string, target: string): Promise<void> {
   }
 }
 
-async function copyPath(source: string, target: string): Promise<void> {
-  if (!(await exists(source))) return;
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.cp(source, target, { recursive: true, force: true });
-}
-
-async function mirrorPath(source: string, target: string): Promise<void> {
-  if (!(await exists(source))) return;
-  await fs.rm(target, { recursive: true, force: true });
-  await copyPath(source, target);
-}
-
 function markdownCode(value: string): string {
   return `\`${value.replace(/`/g, '\\`')}\``;
 }
@@ -1261,36 +953,4 @@ function quoteForDisplayedShellArg(value: string): string {
     return `"${value.replace(/"/g, '\\"')}"`;
   }
   return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-function encodeURIPath(relativePath: string): string {
-  return relativePath.split('/').map(encodeURIComponent).join('/');
-}
-
-function downloadBuffer(url: string, redirectsRemaining = MAX_DOWNLOAD_REDIRECTS): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    https.get(url, response => {
-      response.on('error', reject);
-      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirectsRemaining <= 0) {
-          reject(new Error(`GET ${url} exceeded redirect limit`));
-          return;
-        }
-        const redirectUrl = new URL(response.headers.location, url).toString();
-        downloadBuffer(redirectUrl, redirectsRemaining - 1).then(resolve, reject);
-        return;
-      }
-
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`GET ${url} failed with ${response.statusCode}`));
-        return;
-      }
-
-      const chunks: Buffer[] = [];
-      response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      response.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', reject);
-  });
 }
